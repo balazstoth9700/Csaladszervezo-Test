@@ -14517,6 +14517,326 @@ const FamilyOrganizerApp = () => {
         </div>
       )}
 
+      {/* Recipe Modal */}
+      {showRecipeModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50 overflow-y-auto">
+          <div className="bg-white rounded-lg shadow-xl max-w-4xl w-full p-6 my-8 max-h-[90vh] overflow-y-auto">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-xl font-bold text-gray-800">
+                {editingItem ? "Recept szerkesztése" : "Új recept"}
+              </h3>
+              <button
+                onClick={() => setShowRecipeModal(false)}
+                className="text-gray-500 hover:text-gray-700"
+              >
+                <X size={24} />
+              </button>
+            </div>
+
+            <div className="space-y-6">
+              {/* Alapadatok */}
+              <div className="bg-gray-50 p-4 rounded-lg space-y-4">
+                <h4 className="font-semibold text-gray-800">Alapadatok</h4>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Recept neve *
+                    </label>
+                    <input
+                      type="text"
+                      value={formData.name || ""}
+                      onChange={(e) =>
+                        setFormData({ ...formData, name: e.target.value })
+                      }
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                      placeholder="pl. Rakott krumpli"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Kategória
+                    </label>
+                    <select
+                      value={formData.category || "főétel"}
+                      onChange={(e) =>
+                        setFormData({ ...formData, category: e.target.value })
+                      }
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                    >
+                      <option value="előétel">🥗 Előétel</option>
+                      <option value="főétel">🍝 Főétel</option>
+                      <option value="desszert">🍰 Desszert</option>
+                      <option value="leves">🍲 Leves</option>
+                      <option value="saláta">🥙 Saláta</option>
+                      <option value="egyéb">🍽️ Egyéb</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-3 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Elkészítési idő (perc)
+                    </label>
+                    <input
+                      type="number"
+                      value={formData.prepTime || 30}
+                      onChange={(e) =>
+                        setFormData({
+                          ...formData,
+                          prepTime: parseInt(e.target.value) || 30,
+                        })
+                      }
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Adagok száma
+                    </label>
+                    <input
+                      type="number"
+                      value={formData.servings || 4}
+                      onChange={(e) =>
+                        setFormData({
+                          ...formData,
+                          servings: parseInt(e.target.value) || 4,
+                        })
+                      }
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Nehézség
+                    </label>
+                    <select
+                      value={formData.difficulty || "közepes"}
+                      onChange={(e) =>
+                        setFormData({ ...formData, difficulty: e.target.value })
+                      }
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                    >
+                      <option value="könnyű">Könnyű</option>
+                      <option value="közepes">Közepes</option>
+                      <option value="nehéz">Nehéz</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Becsült költség (Ft)
+                  </label>
+                  <input
+                    type="number"
+                    value={formData.estimatedCost || 0}
+                    onChange={(e) =>
+                      setFormData({
+                        ...formData,
+                        estimatedCost: parseInt(e.target.value) || 0,
+                      })
+                    }
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={formData.favorite || false}
+                      onChange={(e) =>
+                        setFormData({ ...formData, favorite: e.target.checked })
+                      }
+                      className="w-5 h-5 text-yellow-600 rounded"
+                    />
+                    <span className="text-sm font-medium text-gray-700">
+                      ⭐ Kedvenc recept
+                    </span>
+                  </label>
+                </div>
+              </div>
+
+              {/* Hozzávalók */}
+              <div className="border-t pt-4">
+                <h4 className="font-semibold text-gray-800 mb-3">
+                  Hozzávalók *
+                </h4>
+                {formData.ingredients && formData.ingredients.length > 0 && (
+                  <div className="space-y-2 mb-3">
+                    {formData.ingredients.map((ing, idx) => (
+                      <div
+                        key={idx}
+                        className="flex items-center justify-between p-2 bg-green-50 rounded"
+                      >
+                        <div className="text-sm">
+                          <span className="font-medium">{ing.name}</span>
+                          <span className="text-gray-600 ml-2">
+                            {ing.amount} {ing.unit}
+                          </span>
+                        </div>
+                        <button
+                          onClick={() => removeIngredient(idx)}
+                          className="text-red-600 hover:text-red-700"
+                        >
+                          <Trash2 size={16} />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                <div className="grid grid-cols-3 gap-2">
+                  <input
+                    type="text"
+                    placeholder="Hozzávaló neve *"
+                    value={tempIngredient.name}
+                    onChange={(e) =>
+                      setTempIngredient({
+                        ...tempIngredient,
+                        name: e.target.value,
+                      })
+                    }
+                    className="px-3 py-2 border border-gray-300 rounded text-sm"
+                  />
+                  <input
+                    type="text"
+                    placeholder="Mennyiség *"
+                    value={tempIngredient.amount}
+                    onChange={(e) =>
+                      setTempIngredient({
+                        ...tempIngredient,
+                        amount: e.target.value,
+                      })
+                    }
+                    className="px-3 py-2 border border-gray-300 rounded text-sm"
+                  />
+                  <select
+                    value={tempIngredient.unit}
+                    onChange={(e) =>
+                      setTempIngredient({
+                        ...tempIngredient,
+                        unit: e.target.value,
+                      })
+                    }
+                    className="px-3 py-2 border border-gray-300 rounded text-sm"
+                  >
+                    <option value="db">db</option>
+                    <option value="g">g</option>
+                    <option value="dkg">dkg</option>
+                    <option value="kg">kg</option>
+                    <option value="ml">ml</option>
+                    <option value="dl">dl</option>
+                    <option value="l">l</option>
+                    <option value="ek">ek (evőkanál)</option>
+                    <option value="kk">kk (kávéskanál)</option>
+                    <option value="csipet">csipet</option>
+                    <option value="tk">tk (teáskanál)</option>
+                    <option value="csomag">csomag</option>
+                    <option value="gerezd">gerezd</option>
+                  </select>
+                </div>
+                <button
+                  onClick={addIngredient}
+                  className="mt-2 text-sm text-blue-600 hover:text-blue-700 flex items-center gap-1"
+                >
+                  <Plus size={16} /> Hozzávaló hozzáadása
+                </button>
+              </div>
+
+              {/* Elkészítés */}
+              <div className="border-t pt-4">
+                <h4 className="font-semibold text-gray-800 mb-3">
+                  Elkészítés lépései
+                </h4>
+                <textarea
+                  value={
+                    Array.isArray(formData.instructions)
+                      ? formData.instructions.join("\n")
+                      : formData.instructions || ""
+                  }
+                  onChange={(e) =>
+                    setFormData({
+                      ...formData,
+                      instructions: e.target.value.split("\n"),
+                    })
+                  }
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                  rows="6"
+                  placeholder="Írd le a receptet lépésről lépésre... (minden sor egy új lépés)"
+                />
+                <p className="text-xs text-gray-500 mt-1">
+                  Minden sor egy külön lépésként jelenik meg
+                </p>
+              </div>
+
+              {/* Allergének */}
+              <div className="border-t pt-4">
+                <h4 className="font-semibold text-gray-800 mb-3">Allergének</h4>
+                <div className="flex flex-wrap gap-2">
+                  {[
+                    "glutén",
+                    "tojás",
+                    "tej",
+                    "mogyoró",
+                    "szójabab",
+                    "hal",
+                    "rákfélék",
+                    "szezám",
+                  ].map((allergen) => (
+                    <label
+                      key={allergen}
+                      className="flex items-center gap-2 px-3 py-2 bg-gray-100 rounded-lg cursor-pointer hover:bg-gray-200"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={
+                          formData.allergens?.includes(allergen) || false
+                        }
+                        onChange={(e) => {
+                          const allergens = formData.allergens || [];
+                          if (e.target.checked) {
+                            setFormData({
+                              ...formData,
+                              allergens: [...allergens, allergen],
+                            });
+                          } else {
+                            setFormData({
+                              ...formData,
+                              allergens: allergens.filter(
+                                (a) => a !== allergen
+                              ),
+                            });
+                          }
+                        }}
+                        className="w-4 h-4 text-red-600 rounded"
+                      />
+                      <span className="text-sm capitalize">{allergen}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            <div className="mt-6 flex gap-3">
+              <button
+                onClick={() => setShowRecipeModal(false)}
+                className="flex-1 px-4 py-3 border border-gray-300 rounded-lg hover:bg-gray-50"
+              >
+                Mégse
+              </button>
+              <button
+                onClick={saveRecipe}
+                className="flex-1 px-4 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+              >
+                Mentés
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Delete Confirmation Modal */}
       {showDeleteConfirm && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
