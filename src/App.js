@@ -6710,322 +6710,126 @@ const saveTransaction = async () => {
             </div>
           </div>
 
-          {/* Summary Cards */}
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-                  <div className="bg-gradient-to-br from-green-500 to-green-600 text-white p-6 rounded-lg shadow-lg">
-                    <div className="flex items-center justify-between mb-2">
-                      <h3 className="text-lg font-semibold">Bevétel</h3>
-                      <TrendingUp size={24} />
-                    </div>
-                    <p className="text-3xl font-bold">
-                      {data.transactions
-                        .filter((t) => {
-                          // ÚJ SZŰRÉS - csak megosztott tranzakciók
-                          if (t.isShared === false && t.ownerId !== currentUser?.uid) {
-                            return false;
-                          }
-                          if (t.type !== "income") return false;
-                          const transDate = new Date(t.date);
-                          const now = new Date();
-                          if (financeTimeFilter === "week") {
-                            const weekAgo = new Date(
-                              now.getTime() - 7 * 24 * 60 * 60 * 1000
-                            );
-                            return transDate >= weekAgo;
-                          } else if (financeTimeFilter === "month") {
-                            return (
-                              transDate.getMonth() === now.getMonth() &&
-                              transDate.getFullYear() === now.getFullYear()
-                            );
-                          } else if (financeTimeFilter === "year") {
-                            return (
-                              transDate.getFullYear() === now.getFullYear()
-                            );
-                          }
-                          return true;
-                        })
-                        .reduce((sum, t) => sum + t.amount, 0)
-                        .toLocaleString()}{" "}
-                      Ft
-                    </p>
-                  </div>
+          <div className="bg-gradient-to-br from-red-500 to-red-600 rounded-lg shadow-lg p-6 text-white">
+            <div className="flex items-center justify-between mb-2">
+              <DollarSign size={24} />
+              <span className="text-2xl font-bold">
+                {formatCurrency(totalDebt, "HUF")}
+              </span>
+            </div>
+            <div className="text-sm opacity-90">Tartozások</div>
+            <div className="text-xs mt-1 text-red-200">
+              Havi: {formatCurrency(totalMonthlyPayment, "HUF")}
+            </div>
+          </div>
 
-                  <div className="bg-gradient-to-br from-red-500 to-red-600 text-white p-6 rounded-lg shadow-lg">
-                    <div className="flex items-center justify-between mb-2">
-                      <h3 className="text-lg font-semibold">Kiadás</h3>
-                      <TrendingDown size={24} />
-                    </div>
-                    <p className="text-3xl font-bold">
-                      {data.transactions
-                        .filter((t) => {
-                          // ÚJ SZŰRÉS - csak megosztott tranzakciók
-                          if (t.isShared === false && t.ownerId !== currentUser?.uid) {
-                            return false;
-                          }
-                          if (t.type !== "expense") return false;
-                          const transDate = new Date(t.date);
-                          const now = new Date();
-                          if (financeTimeFilter === "week") {
-                            const weekAgo = new Date(
-                              now.getTime() - 7 * 24 * 60 * 60 * 1000
-                            );
-                            return transDate >= weekAgo;
-                          } else if (financeTimeFilter === "month") {
-                            return (
-                              transDate.getMonth() === now.getMonth() &&
-                              transDate.getFullYear() === now.getFullYear()
-                            );
-                          } else if (financeTimeFilter === "year") {
-                            return (
-                              transDate.getFullYear() === now.getFullYear()
-                            );
-                          }
-                          return true;
-                        })
-                        .reduce((sum, t) => sum + t.amount, 0)
-                        .toLocaleString()}{" "}
-                      Ft
-                    </p>
-                  </div>
+          <div className="bg-gradient-to-br from-green-500 to-green-600 rounded-lg shadow-lg p-6 text-white">
+            <div className="flex items-center justify-between mb-2">
+              <Gift size={24} />
+              <span className="text-2xl font-bold">
+                {formatCurrency(totalSaved, "HUF")}
+              </span>
+            </div>
+            <div className="text-sm opacity-90">Megtakarítások</div>
+            <div className="text-xs mt-1 text-green-200">
+              Cél: {formatCurrency(totalGoals, "HUF")}
+            </div>
+          </div>
 
-                  <div className="bg-gradient-to-br from-blue-500 to-blue-600 text-white p-6 rounded-lg shadow-lg">
-                    <div className="flex items-center justify-between mb-2">
-                      <h3 className="text-lg font-semibold">Egyenleg</h3>
-                      <Wallet size={24} />
-                    </div>
-                    <p className="text-3xl font-bold">
-                      {(
-                        data.transactions
-                          .filter((t) => {
-                            // ÚJ SZŰRÉS
-                            if (t.isShared === false && t.ownerId !== currentUser?.uid) {
-                              return false;
-                            }
-                            const transDate = new Date(t.date);
-                            const now = new Date();
-                            if (financeTimeFilter === "week") {
-                              const weekAgo = new Date(
-                                now.getTime() - 7 * 24 * 60 * 60 * 1000
-                              );
-                              return transDate >= weekAgo;
-                            } else if (financeTimeFilter === "month") {
-                              return (
-                                transDate.getMonth() === now.getMonth() &&
-                                transDate.getFullYear() === now.getFullYear()
-                              );
-                            } else if (financeTimeFilter === "year") {
-                              return (
-                                transDate.getFullYear() === now.getFullYear()
-                              );
-                            }
-                            return true;
-                          })
-                          .reduce(
-                            (sum, t) =>
-                              sum +
-                              (t.type === "income" ? t.amount : -t.amount),
-                            0
-                          )
-                      ).toLocaleString()}{" "}
-                      Ft
-                    </p>
-                  </div>
-                </div>
+          <div className="bg-gradient-to-br from-purple-500 to-purple-600 rounded-lg shadow-lg p-6 text-white">
+            <div className="flex items-center justify-between mb-2">
+              <RefreshCw size={24} />
+              <span className="text-2xl font-bold">
+                {formatCurrency(totalSubscriptions, "HUF")}
+              </span>
+            </div>
+            <div className="text-sm opacity-90">Előfizetések</div>
+            <div className="text-xs mt-1 text-purple-200">havonta</div>
+          </div>
         </div>
         {/* Számlák */}
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-                {data.accounts
-                  .filter(
-                    (acc) =>
-                      acc.isShared !== false || acc.ownerId === currentUser?.uid
-                  ) // ÚJ SZŰRÉS
-                  .map((account) => (
-                    <div
-                      key={account.id}
-                      className="bg-white p-4 rounded-lg shadow-md border-l-4 border-blue-500"
-                    >
-                      <div className="flex justify-between items-start mb-2">
-                        <div className="flex items-center gap-2">
-                          <h3 className="font-semibold text-gray-800">
-                            {account.name}
-                          </h3>
-                          {account.isShared === false && (
-                            <span className="text-xs bg-yellow-100 text-yellow-800 px-2 py-1 rounded-full">
-                              Privát
-                            </span>
-                          )}
-                        </div>
-                        <div className="flex gap-1">
-                          <button
-                            onClick={() => openAccountModal(account)}
-                            className="text-blue-600 hover:text-blue-700"
-                          >
-                            <Edit2 size={16} />
-                          </button>
-                          <button
-                            onClick={() =>
-                              setShowDeleteConfirm({
-                                type: "account",
-                                id: account.id,
-                              })
-                            }
-                            className="text-red-600 hover:text-red-700"
-                          >
-                            <Trash2 size={16} />
-                          </button>
-                        </div>
-                      </div>
-                      <p className="text-xs text-gray-500 mb-2">
-                        {account.type}
-                      </p>
-                      <p
-                        className={`text-2xl font-bold ${
-                          account.balance >= 0
-                            ? "text-green-600"
-                            : "text-red-600"
-                        }`}
-                      >
-                        {account.balance.toLocaleString()}{" "}
-                        {account.currency || "HUF"}
-                      </p>
-                    </div>
-                  ))}
-                <button
-                  onClick={() => openAccountModal()}
-                  className="border-2 border-dashed border-gray-300 rounded-lg p-4 hover:border-blue-500 hover:bg-blue-50 transition-colors flex flex-col items-center justify-center"
-                >
-                  <Plus size={24} className="text-gray-400 mb-2" />
-                  <span className="text-sm text-gray-600">Új számla</span>
-                </button>
-              </div>
+        <div className="bg-white rounded-lg shadow-sm border border-gray-200">
+          <div className="p-4 border-b border-gray-200 flex justify-between items-center">
+            <h3 className="font-semibold text-gray-800 flex items-center gap-2">
+              <Wallet size={20} className="text-blue-600" />
+              Számlák
+            </h3>
+            <button
+              onClick={() => openAccountModal()}
+              className="flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700"
+            >
+              <Plus size={18} />
+              <span className="hidden sm:inline">Új számla</span>
+            </button>
+          </div>
 
-          {(data.finances?.accounts || []).length === 0 ? (
+          {data.accounts.filter(
+            (acc) => acc.isShared !== false || acc.ownerId === currentUser?.uid
+          ).length === 0 ? (
             <div className="p-8 text-center text-gray-500">
-              <Package size={48} className="mx-auto mb-3 text-gray-400" />
+              <Wallet size={48} className="mx-auto mb-3 text-gray-400" />
               <p>Még nincs hozzáadott számla</p>
             </div>
           ) : (
-            <div className="divide-y divide-gray-200">
-              {(data.finances?.accounts || []).map((account) => {
-                const types = {
-                  bank: {
-                    name: "Bankszámla",
-                    icon: "🏦",
-                    color: "text-blue-600",
-                  },
-                  cash: {
-                    name: "Készpénz",
-                    icon: "💵",
-                    color: "text-green-600",
-                  },
-                  savings: {
-                    name: "Megtakarítás",
-                    icon: "💰",
-                    color: "text-yellow-600",
-                  },
-                  credit: {
-                    name: "Hitelkártya",
-                    icon: "💳",
-                    color: "text-red-600",
-                  },
-                  other: { name: "Egyéb", icon: "📦", color: "text-gray-600" },
-                };
-                const type = types[account.type] || types.other;
-                const totalBalance =
-                  account.balance +
-                  (account.subaccounts?.reduce(
-                    (sum, sub) => sum + sub.balance,
-                    0
-                  ) || 0);
-
-                return (
-                  <div key={account.id} className="p-4 hover:bg-gray-50">
-                    <div className="flex items-start justify-between mb-3">
-                      <div className="flex items-center gap-3 flex-1">
-                        <span className={`text-3xl ${type.color}`}>
-                          {type.icon}
-                        </span>
-                        <div>
-                          <h4 className="font-semibold text-gray-800">
-                            {account.name}
-                          </h4>
-                          <span
-                            className={`text-xs px-2 py-1 rounded ${type.color} bg-opacity-10`}
-                          >
-                            {type.name}
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 p-4">
+              {data.accounts
+                .filter(
+                  (acc) =>
+                    acc.isShared !== false || acc.ownerId === currentUser?.uid
+                )
+                .map((account) => (
+                  <div
+                    key={account.id}
+                    className="bg-white p-4 rounded-lg shadow-md border-l-4 border-blue-500 hover:shadow-lg transition-shadow"
+                  >
+                    <div className="flex justify-between items-start mb-2">
+                      <div className="flex items-center gap-2">
+                        <h3 className="font-semibold text-gray-800">
+                          {account.name}
+                        </h3>
+                        {account.isShared === false && (
+                          <span className="text-xs bg-yellow-100 text-yellow-800 px-2 py-1 rounded-full">
+                            Privát
                           </span>
-                        </div>
+                        )}
                       </div>
-                      <div className="flex gap-2">
+                      <div className="flex gap-1">
                         <button
                           onClick={() => openAccountModal(account)}
-                          className="p-2 text-blue-600 hover:bg-blue-50 rounded"
+                          className="text-blue-600 hover:text-blue-700"
                         >
-                          <Edit2 size={18} />
+                          <Edit2 size={16} />
                         </button>
                         <button
                           onClick={() =>
                             setShowDeleteConfirm({
                               type: "account",
                               id: account.id,
-                              name: account.name,
                             })
                           }
-                          className="p-2 text-red-600 hover:bg-red-50 rounded"
+                          className="text-red-600 hover:text-red-700"
                         >
-                          <Trash2 size={18} />
+                          <Trash2 size={16} />
                         </button>
                       </div>
                     </div>
-
-                    <div className="grid grid-cols-2 gap-4 text-sm mb-3">
-                      <div>
-                        <p className="text-gray-600">Egyenleg</p>
-                        <p className="font-semibold text-gray-800 text-lg">
-                          {formatCurrency(account.balance, account.currency)}
-                        </p>
-                      </div>
-                      {account.subaccounts &&
-                        account.subaccounts.length > 0 && (
-                          <div>
-                            <p className="text-gray-600">
-                              Teljes egyenleg (alszámlákkal)
-                            </p>
-                            <p className="font-semibold text-indigo-600 text-lg">
-                              {formatCurrency(totalBalance, account.currency)}
-                            </p>
-                          </div>
-                        )}
-                    </div>
-
-                    {account.subaccounts && account.subaccounts.length > 0 && (
-                      <div className="mt-3 pt-3 border-t">
-                        <p className="text-xs font-semibold text-gray-700 mb-2">
-                          Alszámlák:
-                        </p>
-                        <div className="grid grid-cols-2 gap-2">
-                          {account.subaccounts.map((sub) => (
-                            <div
-                              key={sub.id}
-                              className="bg-gray-50 p-2 rounded"
-                            >
-                              <p className="text-xs font-medium text-gray-700">
-                                {sub.name}
-                              </p>
-                              <p className="text-sm font-semibold text-gray-800">
-                                {formatCurrency(sub.balance, account.currency)}
-                              </p>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    )}
+                    <p className="text-xs text-gray-500 mb-2">{account.type}</p>
+                    <p
+                      className={`text-2xl font-bold ${
+                        account.balance >= 0
+                          ? "text-green-600"
+                          : "text-red-600"
+                      }`}
+                    >
+                      {account.balance.toLocaleString()}{" "}
+                      {account.currency || "HUF"}
+                    </p>
                   </div>
-                );
-              })}
+                ))}
             </div>
           )}
         </div>
+
         {/* Időszűrő */}
         <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4">
           <div className="flex items-center gap-2 mb-3">
@@ -7185,19 +6989,101 @@ const saveTransaction = async () => {
             </div>
           )}
         </div>
-        {/* Transaction History */}
-              <div className="bg-white rounded-lg shadow-md p-6">
-                <h2 className="text-xl font-bold text-gray-800 mb-4">
-                  Tranzakciók
-                </h2>
-                <div className="space-y-2">
-                  {data.transactions
+        {/* Transaction History - Bevétel/Kiadás összesítő */}
+        <div className="bg-white rounded-lg shadow-sm border border-gray-200">
+          <div className="p-4 border-b border-gray-200">
+            <h3 className="font-semibold text-gray-800 flex items-center gap-2">
+              <TrendingUp size={20} className="text-blue-600" />
+              Bevételek és Kiadások
+            </h3>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 p-4">
+            <div className="bg-gradient-to-br from-green-500 to-green-600 text-white p-6 rounded-lg shadow-lg">
+              <div className="flex items-center justify-between mb-2">
+                <h3 className="text-lg font-semibold">Bevétel</h3>
+                <TrendingUp size={24} />
+              </div>
+              <p className="text-3xl font-bold">
+                {data.transactions
+                  .filter((t) => {
+                    if (t.isShared === false && t.ownerId !== currentUser?.uid) {
+                      return false;
+                    }
+                    if (t.type !== "income") return false;
+                    const transDate = new Date(t.date);
+                    const now = new Date();
+                    if (financeTimeFilter === "week") {
+                      const weekAgo = new Date(
+                        now.getTime() - 7 * 24 * 60 * 60 * 1000
+                      );
+                      return transDate >= weekAgo;
+                    } else if (financeTimeFilter === "month") {
+                      return (
+                        transDate.getMonth() === now.getMonth() &&
+                        transDate.getFullYear() === now.getFullYear()
+                      );
+                    } else if (financeTimeFilter === "year") {
+                      return transDate.getFullYear() === now.getFullYear();
+                    }
+                    return true;
+                  })
+                  .reduce((sum, t) => sum + t.amount, 0)
+                  .toLocaleString()}{" "}
+                Ft
+              </p>
+            </div>
+
+            <div className="bg-gradient-to-br from-red-500 to-red-600 text-white p-6 rounded-lg shadow-lg">
+              <div className="flex items-center justify-between mb-2">
+                <h3 className="text-lg font-semibold">Kiadás</h3>
+                <TrendingDown size={24} />
+              </div>
+              <p className="text-3xl font-bold">
+                {data.transactions
+                  .filter((t) => {
+                    if (t.isShared === false && t.ownerId !== currentUser?.uid) {
+                      return false;
+                    }
+                    if (t.type !== "expense") return false;
+                    const transDate = new Date(t.date);
+                    const now = new Date();
+                    if (financeTimeFilter === "week") {
+                      const weekAgo = new Date(
+                        now.getTime() - 7 * 24 * 60 * 60 * 1000
+                      );
+                      return transDate >= weekAgo;
+                    } else if (financeTimeFilter === "month") {
+                      return (
+                        transDate.getMonth() === now.getMonth() &&
+                        transDate.getFullYear() === now.getFullYear()
+                      );
+                    } else if (financeTimeFilter === "year") {
+                      return transDate.getFullYear() === now.getFullYear();
+                    }
+                    return true;
+                  })
+                  .reduce((sum, t) => sum + t.amount, 0)
+                  .toLocaleString()}{" "}
+                Ft
+              </p>
+            </div>
+
+            <div className="bg-gradient-to-br from-blue-500 to-blue-600 text-white p-6 rounded-lg shadow-lg">
+              <div className="flex items-center justify-between mb-2">
+                <h3 className="text-lg font-semibold">Egyenleg</h3>
+                <Wallet size={24} />
+              </div>
+              <p className="text-3xl font-bold">
+                {(
+                  data.transactions
                     .filter((t) => {
-                      // ÚJ SZŰRÉS
-                      if (t.isShared === false && t.ownerId !== currentUser?.uid) {
+                      if (
+                        t.isShared === false &&
+                        t.ownerId !== currentUser?.uid
+                      ) {
                         return false;
                       }
-                      
                       const transDate = new Date(t.date);
                       const now = new Date();
                       if (financeTimeFilter === "week") {
@@ -7215,91 +7101,128 @@ const saveTransaction = async () => {
                       }
                       return true;
                     })
-                    .sort((a, b) => new Date(b.date) - new Date(a.date))
-                    .map((transaction) => (
+                    .reduce(
+                      (sum, t) =>
+                        sum + (t.type === "income" ? t.amount : -t.amount),
+                      0
+                    )
+                ).toLocaleString()}{" "}
+                Ft
+              </p>
+            </div>
+          </div>
+
+          {/* Tranzakciók listája */}
+          <div className="p-4 border-t">
+            <h4 className="font-semibold text-gray-800 mb-3">
+              Legutóbbi tranzakciók
+            </h4>
+            <div className="space-y-2">
+              {data.transactions
+                .filter((t) => {
+                  if (t.isShared === false && t.ownerId !== currentUser?.uid) {
+                    return false;
+                  }
+                  const transDate = new Date(t.date);
+                  const now = new Date();
+                  if (financeTimeFilter === "week") {
+                    const weekAgo = new Date(
+                      now.getTime() - 7 * 24 * 60 * 60 * 1000
+                    );
+                    return transDate >= weekAgo;
+                  } else if (financeTimeFilter === "month") {
+                    return (
+                      transDate.getMonth() === now.getMonth() &&
+                      transDate.getFullYear() === now.getFullYear()
+                    );
+                  } else if (financeTimeFilter === "year") {
+                    return transDate.getFullYear() === now.getFullYear();
+                  }
+                  return true;
+                })
+                .sort((a, b) => new Date(b.date) - new Date(a.date))
+                .map((transaction) => (
+                  <div
+                    key={transaction.id}
+                    className="flex items-center justify-between p-3 bg-gray-50 rounded-lg hover:bg-gray-100"
+                  >
+                    <div className="flex items-center gap-3 flex-1">
                       <div
-                        key={transaction.id}
-                        className="flex items-center justify-between p-3 bg-gray-50 rounded-lg hover:bg-gray-100"
+                        className={`w-10 h-10 rounded-full flex items-center justify-center ${
+                          transaction.type === "income"
+                            ? "bg-green-100"
+                            : "bg-red-100"
+                        }`}
                       >
-                        <div className="flex items-center gap-3 flex-1">
-                          <div
-                            className={`w-10 h-10 rounded-full flex items-center justify-center ${
-                              transaction.type === "income"
-                                ? "bg-green-100"
-                                : "bg-red-100"
-                            }`}
-                          >
-                            {transaction.type === "income" ? (
-                              <TrendingUp
-                                size={20}
-                                className="text-green-600"
-                              />
-                            ) : (
-                              <TrendingDown size={20} className="text-red-600" />
-                            )}
-                          </div>
-                          <div className="flex-1">
-                            <div className="flex items-center gap-2">
-                              <p className="font-medium text-gray-800">
-                                {transaction.category}
-                              </p>
-                              {transaction.isShared === false && (
-                                <span className="text-xs bg-yellow-100 text-yellow-800 px-2 py-0.5 rounded-full">
-                                  Privát
-                                </span>
-                              )}
-                            </div>
-                            <p className="text-sm text-gray-600">
-                              {transaction.description || "Nincs leírás"}
-                            </p>
-                            <p className="text-xs text-gray-500">
-                              {new Date(transaction.date).toLocaleDateString(
-                                "hu-HU"
-                              )}{" "}
-                              • {transaction.accountName}
-                            </p>
-                          </div>
-                          <div className="text-right">
-                            <p
-                              className={`font-bold ${
-                                transaction.type === "income"
-                                  ? "text-green-600"
-                                  : "text-red-600"
-                              }`}
-                            >
-                              {transaction.type === "income" ? "+" : "-"}
-                              {transaction.amount.toLocaleString()} Ft
-                            </p>
-                          </div>
-                        </div>
-                        <div className="flex gap-1 ml-3">
-                          <button
-                            onClick={() => {
-                              setEditingItem(transaction);
-                              setTransactionType(transaction.type);
-                              setFormData(transaction);
-                              setShowTransactionModal(true);
-                            }}
-                            className="text-blue-600 hover:text-blue-700"
-                          >
-                            <Edit2 size={16} />
-                          </button>
-                          <button
-                            onClick={() =>
-                              setShowDeleteConfirm({
-                                type: "transaction",
-                                id: transaction.id,
-                              })
-                            }
-                            className="text-red-600 hover:text-red-700"
-                          >
-                            <Trash2 size={16} />
-                          </button>
-                        </div>
+                        {transaction.type === "income" ? (
+                          <TrendingUp size={20} className="text-green-600" />
+                        ) : (
+                          <TrendingDown size={20} className="text-red-600" />
+                        )}
                       </div>
-                    ))}
-                </div>
-              </div>
+                      <div className="flex-1">
+                        <div className="flex items-center gap-2">
+                          <p className="font-medium text-gray-800">
+                            {transaction.category}
+                          </p>
+                          {transaction.isShared === false && (
+                            <span className="text-xs bg-yellow-100 text-yellow-800 px-2 py-0.5 rounded-full">
+                              Privát
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-sm text-gray-600">
+                          {transaction.description || "Nincs leírás"}
+                        </p>
+                        <p className="text-xs text-gray-500">
+                          {new Date(transaction.date).toLocaleDateString(
+                            "hu-HU"
+                          )}{" "}
+                          • {transaction.accountName}
+                        </p>
+                      </div>
+                      <div className="text-right">
+                        <p
+                          className={`font-bold ${
+                            transaction.type === "income"
+                              ? "text-green-600"
+                              : "text-red-600"
+                          }`}
+                        >
+                          {transaction.type === "income" ? "+" : "-"}
+                          {transaction.amount.toLocaleString()} Ft
+                        </p>
+                      </div>
+                    </div>
+                    <div className="flex gap-1 ml-3">
+                      <button
+                        onClick={() => {
+                          setEditingItem(transaction);
+                          setTransactionType(transaction.type);
+                          setFormData(transaction);
+                          setShowTransactionModal(true);
+                        }}
+                        className="text-blue-600 hover:text-blue-700"
+                      >
+                        <Edit2 size={16} />
+                      </button>
+                      <button
+                        onClick={() =>
+                          setShowDeleteConfirm({
+                            type: "transaction",
+                            id: transaction.id,
+                          })
+                        }
+                        className="text-red-600 hover:text-red-700"
+                      >
+                        <Trash2 size={16} />
+                      </button>
+                    </div>
+                  </div>
+                ))}
+            </div>
+          </div>
+        </div>
 
         {/* HITELEK */}
         <div className="bg-white rounded-lg shadow-sm border border-gray-200">
