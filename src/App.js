@@ -50,6 +50,7 @@ import {
   Mail,
   Repeat,
   BookOpen,
+  Fuel,
 } from "lucide-react";
 import {
   PieChart,
@@ -295,6 +296,18 @@ const FamilyOrganizerApp = () => {
     validFrom: "",
     validUntil: "",
     price: "",
+  });
+  const [showFuelingModal, setShowFuelingModal] = useState(false);
+  const [showEditTireModal, setShowEditTireModal] = useState(false);
+  const [selectedTire, setSelectedTire] = useState(null);
+  const [tempFueling, setTempFueling] = useState({
+    date: new Date().toISOString().split("T")[0],
+    km: "",
+    liters: "",
+    pricePerLiter: "",
+    totalPrice: "",
+    station: "",
+    notes: "",
   });
 
   //Otthon temp statek
@@ -1798,16 +1811,17 @@ const FamilyOrganizerApp = () => {
     setShowDeleteConfirm(null);
   };
 
-  const openVehicleModal = (vehicle = null) => {
+const openVehicleModal = (vehicle = null) => {
     if (vehicle) {
       setEditingItem(vehicle);
       setFormData({
         ...vehicle,
         serviceHistory: vehicle.serviceHistory || [],
-        tires: vehicle.tires || [], // MÓDOSÍTVA: már tömb lesz
-        oilChanges: vehicle.oilChanges || [], // ÚJ
-        vignettes: vehicle.vignettes || [], // ÚJ
-        kmReminder: vehicle.kmReminder || { enabled: false, lastRecorded: 0 }, // ÚJ
+        tires: vehicle.tires || [],
+        oilChanges: vehicle.oilChanges || [],
+        vignettes: vehicle.vignettes || [],
+        fuelings: vehicle.fuelings || [], // ÚJ
+        kmReminder: vehicle.kmReminder || { enabled: false, lastRecorded: 0 },
       });
     } else {
       setEditingItem(null);
@@ -1820,10 +1834,11 @@ const FamilyOrganizerApp = () => {
         insurance: "",
         km: 0,
         serviceHistory: [],
-        tires: [], // MÓDOSÍTVA
-        oilChanges: [], // ÚJ
-        vignettes: [], // ÚJ
-        kmReminder: { enabled: false, lastRecorded: 0 }, // ÚJ
+        tires: [],
+        oilChanges: [],
+        vignettes: [],
+        fuelings: [], // ÚJ
+        kmReminder: { enabled: false, lastRecorded: 0 },
       });
     }
     setShowVehicleModal(true);
@@ -1979,6 +1994,190 @@ const FamilyOrganizerApp = () => {
       ...formData,
       vignettes: formData.vignettes.filter((_, i) => i !== index),
     });
+  };
+
+  // TANKOLÁSOK
+  const addFueling = () => {
+    if (!tempFueling.date || !tempFueling.liters || !tempFueling.totalPrice) {
+      alert("Dátum, mennyiség és összeg kötelező!");
+      return;
+    }
+    
+    const liters = parseFloat(tempFueling.liters);
+    const totalPrice = parseFloat(tempFueling.totalPrice);
+    const pricePerLiter = tempFueling.pricePerLiter 
+      ? parseFloat(tempFueling.pricePerLiter)
+      : totalPrice / liters;
+
+    setFormData({
+      ...formData,
+      fuelings: [
+        ...(formData.fuelings || []),
+        {
+          ...tempFueling,
+          id: Date.now(),
+          liters: liters,
+          totalPrice: totalPrice,
+          pricePerLiter: pricePerLiter,
+          km: tempFueling.km ? parseInt(tempFueling.km) : null,
+        },
+      ],
+    });
+    setTempFueling({
+      date: new Date().toISOString().split("T")[0],
+      km: "",
+      liters: "",
+      pricePerLiter: "",
+      totalPrice: "",
+      station: "",
+      notes: "",
+    });
+  };
+
+  const removeFueling = (index) => {
+    setFormData({
+      ...formData,
+      fuelings: formData.fuelings.filter((_, i) => i !== index),
+    });
+  };
+
+  const openFuelingModal = (vehicle) => {
+    setSelectedVehicle(vehicle);
+    setTempFueling({
+      date: new Date().toISOString().split("T")[0],
+      km: vehicle.km || "",
+      liters: "",
+      pricePerLiter: "",
+      totalPrice: "",
+      station: "",
+      notes: "",
+    });
+    setShowFuelingModal(true);
+  };
+
+  const saveFueling = async () => {
+    if (!tempFueling.liters || !tempFueling.totalPrice) {
+      alert("Mennyiség és összeg kötelező!");
+      return;
+    }
+
+    const liters = parseFloat(tempFueling.liters);
+    const totalPrice = parseFloat(tempFueling.totalPrice);
+    const pricePerLiter = tempFueling.pricePerLiter
+      ? parseFloat(tempFueling.pricePerLiter)
+      : totalPrice / liters;
+
+    const updatedVehicle = {
+      ...selectedVehicle,
+      fuelings: [
+        ...(selectedVehicle.fuelings || []),
+        {
+          date: tempFueling.date,
+          km: tempFueling.km ? parseInt(tempFueling.km) : null,
+          liters: liters,
+          pricePerLiter: pricePerLiter,
+          totalPrice: totalPrice,
+          station: tempFueling.station,
+          notes: tempFueling.notes,
+          id: Date.now(),
+        },
+      ],
+      // Frissítjük a km állást is, ha meg van adva
+      km: tempFueling.km ? parseInt(tempFueling.km) : selectedVehicle.km,
+    };
+
+    const newData = {
+      ...data,
+      vehicles: data.vehicles.map((v) =>
+        v.id === selectedVehicle.id ? updatedVehicle : v
+      ),
+    };
+
+    setData(newData);
+    await saveUserData(newData);
+    setShowFuelingModal(false);
+    setSelectedVehicle(null);
+    setTempFueling({
+      date: new Date().toISOString().split("T")[0],
+      km: "",
+      liters: "",
+      pricePerLiter: "",
+      totalPrice: "",
+      station: "",
+      notes: "",
+    });
+  };
+
+  // Automatikus számítások a tankoláshoz
+  const handleFuelingLitersChange = (value) => {
+    const liters = parseFloat(value) || 0;
+    const pricePerLiter = parseFloat(tempFueling.pricePerLiter) || 0;
+    
+    setTempFueling({
+      ...tempFueling,
+      liters: value,
+      totalPrice: pricePerLiter > 0 ? (liters * pricePerLiter).toFixed(0) : tempFueling.totalPrice,
+    });
+  };
+
+  const handleFuelingPricePerLiterChange = (value) => {
+    const pricePerLiter = parseFloat(value) || 0;
+    const liters = parseFloat(tempFueling.liters) || 0;
+    
+    setTempFueling({
+      ...tempFueling,
+      pricePerLiter: value,
+      totalPrice: liters > 0 ? (liters * pricePerLiter).toFixed(0) : tempFueling.totalPrice,
+    });
+  };
+
+  const handleFuelingTotalPriceChange = (value) => {
+    const totalPrice = parseFloat(value) || 0;
+    const liters = parseFloat(tempFueling.liters) || 0;
+    
+    setTempFueling({
+      ...tempFueling,
+      totalPrice: value,
+      pricePerLiter: liters > 0 ? (totalPrice / liters).toFixed(2) : tempFueling.pricePerLiter,
+    });
+  };
+
+  // GUMI PROFILMÉLYSÉG SZERKESZTÉSE
+  const openEditTireModal = (vehicle, tireIndex) => {
+    setSelectedVehicle(vehicle);
+    setSelectedTire({ ...vehicle.tires[tireIndex], index: tireIndex });
+    setShowEditTireModal(true);
+  };
+
+  const saveEditedTire = async () => {
+    if (!selectedTire.treadDepth) {
+      alert("Add meg a profilmélységet!");
+      return;
+    }
+
+    const updatedTires = [...selectedVehicle.tires];
+    updatedTires[selectedTire.index] = {
+      ...updatedTires[selectedTire.index],
+      treadDepth: selectedTire.treadDepth,
+    };
+
+    const updatedVehicle = {
+      ...selectedVehicle,
+      tires: updatedTires,
+    };
+
+    const newData = {
+      ...data,
+      vehicles: data.vehicles.map((v) =>
+        v.id === selectedVehicle.id ? updatedVehicle : v
+      ),
+    };
+
+    setData(newData);
+    await saveUserData(newData);
+    setShowEditTireModal(false);
+    setSelectedVehicle(null);
+    setSelectedTire(null);
   };
 
   const quickAddService = async (vehicleId) => {
@@ -5133,6 +5332,13 @@ const FamilyOrganizerApp = () => {
                     Szervíz
                   </button>
                   <button
+                        onClick={() => openFuelingModal(vehicle)}
+                        className="p-2 bg-yellow-500 text-white rounded-lg hover:bg-yellow-600"
+                        title="Tankolás"
+                      >
+                        <Fuel size={20} />
+                  </button>
+                  <button
                     onClick={() => openVehicleModal(vehicle)}
                     className="p-2 text-blue-600 hover:bg-blue-50 rounded"
                   >
@@ -5194,93 +5400,67 @@ const FamilyOrganizerApp = () => {
 
             {/* Gumiabroncsok */}
             {vehicle.tires && vehicle.tires.length > 0 && (
-              <div className="p-4 border-t border-gray-200 bg-blue-50">
-                <h4 className="font-semibold text-gray-800 mb-3 text-sm flex items-center gap-2">
-                  <span>🚗</span> Gumiabroncsok ({vehicle.tires.length})
-                </h4>
-                <div className="grid gap-2">
-                  {vehicle.tires.map((tire, idx) => {
-                    const warnings = checkTireCondition(tire);
-                    const hasWarning = warnings.length > 0;
-                    const hasCritical = warnings.some(
-                      (w) => w.type === "age" || w.type === "depth"
-                    );
-
-                    return (
-                      <div
-                        key={idx}
-                        className={`p-3 rounded-lg shadow-sm ${
-                          hasCritical
-                            ? "bg-red-50 border-2 border-red-500"
-                            : hasWarning
-                            ? "bg-orange-50 border-2 border-orange-400"
-                            : "bg-white"
-                        }`}
-                      >
-                        <div className="flex justify-between items-center">
-                          <div className="flex-1">
-                            <div className="flex items-center gap-2 mb-1">
-                              {hasCritical && (
-                                <span className="text-red-600 font-bold">
-                                  ⚠️
-                                </span>
-                              )}
-                              <span className="font-semibold text-gray-800">
-                                {tire.position}
-                              </span>
-                              <span className="px-2 py-1 bg-gray-100 text-gray-700 text-xs rounded">
-                                {tire.type}
-                              </span>
-                            </div>
-                            <div className="text-sm text-gray-600">
-                              {tire.brand && (
+                    <div className="mt-3">
+                      <p className="text-sm font-semibold text-gray-700 mb-2">
+                        Gumiabroncsok:
+                      </p>
+                      <div className="space-y-2">
+                        {vehicle.tires.map((tire, idx) => {
+                          const warnings = checkTireCondition(tire);
+                          return (
+                            <div
+                              key={idx}
+                              className="flex items-start justify-between p-2 bg-blue-50 rounded text-sm"
+                            >
+                              <div className="flex-1">
                                 <span className="font-medium">
-                                  {tire.brand}{" "}
+                                  {tire.position} - {tire.type}
                                 </span>
-                              )}
-                              {tire.size}
-                              {tire.manufactureYear && (
-                                <span> • {tire.manufactureYear}</span>
-                              )}
-                              {tire.treadDepth && (
-                                <span
-                                  className={`ml-2 font-semibold ${
-                                    parseFloat(tire.treadDepth) <= 1.6
-                                      ? "text-red-600"
-                                      : parseFloat(tire.treadDepth) <= 3
-                                      ? "text-orange-600"
-                                      : "text-green-600"
-                                  }`}
-                                >
-                                  • Profil: {tire.treadDepth} mm
+                                <br />
+                                <span className="text-gray-600 text-xs">
+                                  {tire.brand} {tire.size}
+                                  {tire.manufactureYear &&
+                                    ` (${tire.manufactureYear})`}
                                 </span>
-                              )}
-                            </div>
-                            {hasWarning && (
-                              <div className="mt-2 space-y-1">
-                                {warnings.map((warning, wIdx) => (
-                                  <div
-                                    key={wIdx}
-                                    className={`text-xs font-semibold ${
-                                      warning.type === "age" ||
-                                      warning.type === "depth"
-                                        ? "text-red-700"
-                                        : "text-orange-700"
-                                    }`}
-                                  >
-                                    • {warning.message}
+                                {tire.treadDepth && (
+                                  <div className="mt-1">
+                                    <span className="text-xs font-semibold text-blue-700">
+                                      Profil: {tire.treadDepth} mm
+                                    </span>
                                   </div>
-                                ))}
+                                )}
+                                {warnings.length > 0 && (
+                                  <div className="mt-1 space-y-1">
+                                    {warnings.map((warn, wIdx) => (
+                                      <div
+                                        key={wIdx}
+                                        className={`text-xs font-semibold ${
+                                          warn.type === "depth"
+                                            ? "text-red-600"
+                                            : warn.type === "age"
+                                            ? "text-orange-600"
+                                            : "text-yellow-600"
+                                        }`}
+                                      >
+                                        ⚠️ {warn.message}
+                                      </div>
+                                    ))}
+                                  </div>
+                                )}
                               </div>
-                            )}
-                          </div>
-                        </div>
+                              <button
+                                onClick={() => openEditTireModal(vehicle, idx)}
+                                className="ml-2 text-blue-600 hover:text-blue-700"
+                                title="Profilmélység frissítése"
+                              >
+                                <Edit2 size={16} />
+                              </button>
+                            </div>
+                          );
+                        })}
                       </div>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
+                    </div>
+                  )}
 
             {/* Olajcserék */}
             {vehicle.oilChanges && vehicle.oilChanges.length > 0 && (
@@ -11232,6 +11412,125 @@ const FamilyOrganizerApp = () => {
                 </button>
               </div>
 
+{/* Tankolások */}
+              <div className="border-t pt-4">
+                <h4 className="font-semibold text-gray-800 mb-3">Tankolások</h4>
+                {formData.fuelings && formData.fuelings.length > 0 && (
+                  <div className="space-y-2 mb-3 max-h-60 overflow-y-auto">
+                    {formData.fuelings
+                      .sort((a, b) => new Date(b.date) - new Date(a.date))
+                      .map((fuel, idx) => (
+                        <div
+                          key={idx}
+                          className="flex items-center justify-between p-3 bg-yellow-50 rounded-lg"
+                        >
+                          <div className="flex-1">
+                            <div className="font-medium text-sm text-gray-800">
+                              {new Date(fuel.date).toLocaleDateString("hu-HU")}
+                              {fuel.km && ` • ${fuel.km.toLocaleString()} km`}
+                            </div>
+                            <div className="text-xs text-gray-600 mt-1">
+                              {fuel.liters} L × {fuel.pricePerLiter.toFixed(2)} Ft/L = {fuel.totalPrice.toLocaleString()} Ft
+                            </div>
+                            {fuel.station && (
+                              <div className="text-xs text-gray-500 mt-1">
+                                {fuel.station}
+                              </div>
+                            )}
+                            {fuel.notes && (
+                              <div className="text-xs text-gray-500 italic mt-1">
+                                {fuel.notes}
+                              </div>
+                            )}
+                          </div>
+                          <button
+                            onClick={() => removeFueling(idx)}
+                            className="text-red-600 hover:text-red-700"
+                          >
+                            <Trash2 size={16} />
+                          </button>
+                        </div>
+                      ))}
+                  </div>
+                )}
+
+                <div className="space-y-2">
+                  <div className="grid grid-cols-2 gap-2">
+                    <input
+                      type="date"
+                      value={tempFueling.date}
+                      onChange={(e) =>
+                        setTempFueling({ ...tempFueling, date: e.target.value })
+                      }
+                      className="px-3 py-2 border border-gray-300 rounded text-sm"
+                    />
+                    <input
+                      type="number"
+                      placeholder="Km állás (opcionális)"
+                      value={tempFueling.km}
+                      onChange={(e) =>
+                        setTempFueling({ ...tempFueling, km: e.target.value })
+                      }
+                      className="px-3 py-2 border border-gray-300 rounded text-sm"
+                    />
+                  </div>
+                  <div className="grid grid-cols-3 gap-2">
+                    <input
+                      type="number"
+                      step="0.01"
+                      placeholder="Mennyiség (L) *"
+                      value={tempFueling.liters}
+                      onChange={(e) => handleFuelingLitersChange(e.target.value)}
+                      className="px-3 py-2 border border-gray-300 rounded text-sm"
+                    />
+                    <input
+                      type="number"
+                      step="0.01"
+                      placeholder="Egységár (Ft/L)"
+                      value={tempFueling.pricePerLiter}
+                      onChange={(e) => handleFuelingPricePerLiterChange(e.target.value)}
+                      className="px-3 py-2 border border-gray-300 rounded text-sm"
+                    />
+                    <input
+                      type="number"
+                      placeholder="Fizetett (Ft) *"
+                      value={tempFueling.totalPrice}
+                      onChange={(e) => handleFuelingTotalPriceChange(e.target.value)}
+                      className="px-3 py-2 border border-gray-300 rounded text-sm"
+                    />
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <input
+                      type="text"
+                      placeholder="Kút (pl. MOL)"
+                      value={tempFueling.station}
+                      onChange={(e) =>
+                        setTempFueling({ ...tempFueling, station: e.target.value })
+                      }
+                      className="px-3 py-2 border border-gray-300 rounded text-sm"
+                    />
+                    <input
+                      type="text"
+                      placeholder="Megjegyzés"
+                      value={tempFueling.notes}
+                      onChange={(e) =>
+                        setTempFueling({ ...tempFueling, notes: e.target.value })
+                      }
+                      className="px-3 py-2 border border-gray-300 rounded text-sm"
+                    />
+                  </div>
+                </div>
+                <p className="text-xs text-gray-500 mt-1">
+                  💡 Adj meg 2 értéket a 3-ból, a harmadikat automatikusan számoljuk
+                </p>
+                <button
+                  onClick={addFueling}
+                  className="mt-2 text-sm text-blue-600 hover:text-blue-700 flex items-center gap-1"
+                >
+                  <Plus size={16} /> Tankolás hozzáadása
+                </button>
+              </div>
+
               {/* Szervíz történet */}
               <div className="border-t pt-4">
                 <h4 className="font-semibold text-gray-800 mb-3">
@@ -14828,6 +15127,227 @@ const FamilyOrganizerApp = () => {
               </button>
               <button
                 onClick={saveRecipe}
+                className="flex-1 px-4 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+              >
+                Mentés
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+{/* Fueling Modal (Gyors tankolás) */}
+      {showFuelingModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-lg shadow-xl max-w-md w-full p-6">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-xl font-bold text-gray-800">
+                Tankolás - {selectedVehicle?.name}
+              </h3>
+              <button
+                onClick={() => setShowFuelingModal(false)}
+                className="text-gray-500 hover:text-gray-700"
+              >
+                <X size={24} />
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Dátum
+                </label>
+                <input
+                  type="date"
+                  value={tempFueling.date}
+                  onChange={(e) =>
+                    setTempFueling({ ...tempFueling, date: e.target.value })
+                  }
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Km állás (opcionális)
+                </label>
+                <input
+                  type="number"
+                  value={tempFueling.km}
+                  onChange={(e) =>
+                    setTempFueling({ ...tempFueling, km: e.target.value })
+                  }
+                  placeholder={`Jelenlegi: ${selectedVehicle?.km || 0} km`}
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg"
+                />
+              </div>
+
+              <div className="bg-blue-50 p-4 rounded-lg space-y-3">
+                <p className="text-sm text-gray-700 font-medium">
+                  Adj meg 2 értéket, a 3. automatikusan számolódik:
+                </p>
+                
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Tankolt mennyiség (liter) *
+                  </label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    value={tempFueling.liters}
+                    onChange={(e) => handleFuelingLitersChange(e.target.value)}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Egységár (Ft/liter)
+                  </label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    value={tempFueling.pricePerLiter}
+                    onChange={(e) => handleFuelingPricePerLiterChange(e.target.value)}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Fizetett összeg (Ft) *
+                  </label>
+                  <input
+                    type="number"
+                    value={tempFueling.totalPrice}
+                    onChange={(e) => handleFuelingTotalPriceChange(e.target.value)}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Benzinkút
+                </label>
+                <input
+                  type="text"
+                  value={tempFueling.station}
+                  onChange={(e) =>
+                    setTempFueling({ ...tempFueling, station: e.target.value })
+                  }
+                  placeholder="pl. MOL, Shell"
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Megjegyzés
+                </label>
+                <textarea
+                  value={tempFueling.notes}
+                  onChange={(e) =>
+                    setTempFueling({ ...tempFueling, notes: e.target.value })
+                  }
+                  rows="2"
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg"
+                />
+              </div>
+            </div>
+
+            <div className="mt-6 flex gap-3">
+              <button
+                onClick={() => setShowFuelingModal(false)}
+                className="flex-1 px-4 py-3 border border-gray-300 rounded-lg hover:bg-gray-50"
+              >
+                Mégse
+              </button>
+              <button
+                onClick={saveFueling}
+                className="flex-1 px-4 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+              >
+                Mentés
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Edit Tire Modal (Profilmélység szerkesztés) */}
+      {showEditTireModal && selectedTire && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-lg shadow-xl max-w-md w-full p-6">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-xl font-bold text-gray-800">
+                Profilmélység frissítése
+              </h3>
+              <button
+                onClick={() => setShowEditTireModal(false)}
+                className="text-gray-500 hover:text-gray-700"
+              >
+                <X size={24} />
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              <div className="bg-gray-50 p-4 rounded-lg">
+                <p className="text-sm text-gray-600 mb-1">Gumi:</p>
+                <p className="font-semibold text-gray-800">
+                  {selectedTire.position} - {selectedTire.type}
+                </p>
+                <p className="text-sm text-gray-600 mt-1">
+                  {selectedTire.brand} {selectedTire.size}
+                </p>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Új profilmélység (mm) *
+                </label>
+                <input
+                  type="number"
+                  step="0.1"
+                  value={selectedTire.treadDepth || ""}
+                  onChange={(e) =>
+                    setSelectedTire({ ...selectedTire, treadDepth: e.target.value })
+                  }
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg"
+                  placeholder="pl. 5.5"
+                />
+                <p className="text-xs text-gray-500 mt-1">
+                  Minimális: 1.6 mm • Ajánlott csere: 3 mm alatt
+                </p>
+              </div>
+
+              {selectedTire.treadDepth && parseFloat(selectedTire.treadDepth) <= 1.6 && (
+                <div className="bg-red-50 border border-red-200 p-3 rounded-lg">
+                  <p className="text-sm text-red-800 font-semibold">
+                    ⚠️ Minimális profilmélység! Azonnali csere szükséges!
+                  </p>
+                </div>
+              )}
+
+              {selectedTire.treadDepth &&
+                parseFloat(selectedTire.treadDepth) > 1.6 &&
+                parseFloat(selectedTire.treadDepth) <= 3 && (
+                  <div className="bg-yellow-50 border border-yellow-200 p-3 rounded-lg">
+                    <p className="text-sm text-yellow-800">
+                      ⚠️ Alacsony profilmélység. Hamarosan csere ajánlott.
+                    </p>
+                  </div>
+                )}
+            </div>
+
+            <div className="mt-6 flex gap-3">
+              <button
+                onClick={() => setShowEditTireModal(false)}
+                className="flex-1 px-4 py-3 border border-gray-300 rounded-lg hover:bg-gray-50"
+              >
+                Mégse
+              </button>
+              <button
+                onClick={saveEditedTire}
                 className="flex-1 px-4 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
               >
                 Mentés
