@@ -52,6 +52,7 @@ import {
   BookOpen,
   Fuel,
   AlertCircle,
+  RefreshCw,
 } from "lucide-react";
 import {
   PieChart,
