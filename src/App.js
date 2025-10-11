@@ -24,6 +24,7 @@ import {
   Users,
   Settings,
   Calendar,
+  Check,
   CheckCircle,
   Circle,
   Plus,
@@ -42,6 +43,7 @@ import {
   Filter,
   BarChart3,
   TrendingUp,
+  TrendingDown,
   Activity,
   Target,
   ShoppingCart,
@@ -53,6 +55,15 @@ import {
   Fuel,
   AlertCircle,
   RefreshCw,
+  Wallet,
+  ArrowLeft,
+  ArrowRight,
+  ChevronLeft,
+  ChevronRight,
+  Upload,
+  Download,
+  ChefHat,
+  Sparkles,
 } from "lucide-react";
 import {
   PieChart,
@@ -270,6 +281,16 @@ const FamilyOrganizerApp = () => {
   const [showTransactionModal, setShowTransactionModal] = useState(false);
   const [transactionType, setTransactionType] = useState("expense");
   const [financeTimeFilter, setFinanceTimeFilter] = useState("month");
+  const [showBudgetModal, setShowBudgetModal] = useState(false);
+  const [selectedMonth, setSelectedMonth] = useState(new Date());
+  const [budgetView, setBudgetView] = useState("month"); // 'month' vagy 'year'
+  const [selectedAccounts, setSelectedAccounts] = useState([]); // üres tömb = minden számla
+  const [showImportModal, setShowImportModal] = useState(false);
+  const [importStep, setImportStep] = useState(1); // 1: fájl feltöltés, 2: előnézet, 3: mapping
+  const [importedData, setImportedData] = useState([]);
+  const [detectedBank, setDetectedBank] = useState(null);
+  const [importMapping, setImportMapping] = useState({});
+  const [importAccount, setImportAccount] = useState(null);
 
   //chat statek
   const [unreadMessagesCount, setUnreadMessagesCount] = useState(0);
@@ -361,8 +382,6 @@ const FamilyOrganizerApp = () => {
   const [showFeedingModal, setShowFeedingModal] = useState(false);
   const [showPetVaccinationModal, setShowPetVaccinationModal] = useState(false);
   const [showPetReminderModal, setShowPetReminderModal] = useState(false);
-  const [showRecipeModal, setShowRecipeModal] = useState(false);
-  const [showWeeklyMenuModal, setShowWeeklyMenuModal] = useState(false);
   const [selectedPet, setSelectedPet] = useState(null);
   const [selectedRecipe, setSelectedRecipe] = useState(null);
   const [tempFeeding, setTempFeeding] = useState({
@@ -380,6 +399,36 @@ const FamilyOrganizerApp = () => {
     amount: "",
     unit: "db",
   });
+
+  const [importUrl, setImportUrl] = useState("");
+  const [importing, setImporting] = useState(false);
+  const [showRecipeModal, setShowRecipeModal] = useState(false);
+  const [showWeeklyMenuModal, setShowWeeklyMenuModal] = useState(false);
+  const [currentWeekOffset, setCurrentWeekOffset] = useState(0); // 0 = aktuális hét
+  const [weeklyMenus, setWeeklyMenus] = useState({}); // { 'weekKey': { day: recipeId } }
+  const [showSmartSearchModal, setShowSmartSearchModal] = useState(false);
+  const [smartSearchCriteria, setSmartSearchCriteria] = useState({
+    availableIngredients: "",
+    maxTime: "",
+    difficulty: "",
+    category: "",
+    dietary: "",
+  });
+  const [smartSearchResults, setSmartSearchResults] = useState([]);
+  const [searching, setSearching] = useState(false);
+  const [showRecipeImportModal, setShowRecipeImportModal] = useState(false);
+  const [recipeImportUrl, setRecipeImportUrl] = useState("");
+  const [importingRecipe, setImportingRecipe] = useState(false);
+  const [recipeFilters, setRecipeFilters] = useState({
+    searchText: "",
+    category: "",
+    difficulty: "",
+    maxTime: "",
+    showFavoritesOnly: false,
+  });
+  const [recipeSortBy, setRecipeSortBy] = useState("name"); // name, time, cost, recent
+  const [showShoppingListModal, setShowShoppingListModal] = useState(false);
+  const [weekShoppingList, setWeekShoppingList] = useState([]);
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (user) => {
@@ -407,6 +456,19 @@ const FamilyOrganizerApp = () => {
         "beforeinstallprompt",
         handleBeforeInstallPrompt
       );
+  }, []);
+
+  useEffect(() => {
+    const savedData = localStorage.getItem("householdData");
+    if (savedData) {
+      setData(JSON.parse(savedData));
+    }
+
+    // Heti menük betöltése
+    const savedMenus = localStorage.getItem("weeklyMenus");
+    if (savedMenus) {
+      setWeeklyMenus(JSON.parse(savedMenus));
+    }
   }, []);
 
   const onTouchStart = (e) => {
@@ -1176,14 +1238,452 @@ const FamilyOrganizerApp = () => {
     setEditingItem(null);
   };
 
-  const deleteRecipe = async (recipeId) => {
-    const newData = {
-      ...data,
-      recipes: (data.recipes || []).filter((r) => r.id !== recipeId),
+  // Hét azonosító generálás
+  const getWeekKey = (offset = 0) => {
+    const now = new Date();
+    const weekStart = new Date(now);
+    weekStart.setDate(now.getDate() - now.getDay() + 1 + offset * 7); // Hétfő
+    return `${weekStart.getFullYear()}-W${Math.ceil(weekStart.getDate() / 7)}`;
+  };
+
+  // Hét dátumtartomány
+  const getWeekDateRange = (offset = 0) => {
+    const now = new Date();
+    const weekStart = new Date(now);
+    weekStart.setDate(now.getDate() - now.getDay() + 1 + offset * 7);
+    const weekEnd = new Date(weekStart);
+    weekEnd.setDate(weekStart.getDate() + 6);
+
+    const formatDate = (date) => {
+      const months = [
+        "jan",
+        "feb",
+        "márc",
+        "ápr",
+        "máj",
+        "jún",
+        "júl",
+        "aug",
+        "szept",
+        "okt",
+        "nov",
+        "dec",
+      ];
+      return `${months[date.getMonth()]} ${date.getDate()}`;
     };
+
+    return `${formatDate(weekStart)} - ${formatDate(weekEnd)}`;
+  };
+
+  // Recept importálás URL-ből
+  const importRecipeFromUrl = async () => {
+    if (!recipeImportUrl.trim()) return;
+
+    setImportingRecipe(true);
+
+    try {
+      // Weboldal tartalmának letöltése
+      const response = await fetch(
+        `https://api.allorigins.win/raw?url=${encodeURIComponent(
+          recipeImportUrl
+        )}`
+      );
+      const html = await response.text();
+
+      // HTML elemzése - keressük meg a recept adatokat
+      const parser = new DOMParser();
+      const doc = parser.parseFromString(html, "text/html");
+
+      // Általános metódus - keressük a receptet a HTML-ben
+      let recipeName = "";
+      let ingredients = [];
+      let instructions = [];
+      let prepTime = 30;
+      let servings = 4;
+
+      // Név keresése (címkék: h1, .recipe-title, [itemprop="name"], stb.)
+      const titleSelectors = [
+        "h1",
+        ".recipe-title",
+        '[itemprop="name"]',
+        ".entry-title",
+        "h1.title",
+      ];
+      for (const selector of titleSelectors) {
+        const element = doc.querySelector(selector);
+        if (element && element.textContent.trim()) {
+          recipeName = element.textContent.trim();
+          break;
+        }
+      }
+
+      // Hozzávalók keresése
+      const ingredientSelectors = [
+        ".recipe-ingredients li",
+        '[itemprop="recipeIngredient"]',
+        ".ingredients li",
+        ".ingredient-list li",
+        "ul.ingredients li",
+      ];
+
+      for (const selector of ingredientSelectors) {
+        const elements = doc.querySelectorAll(selector);
+        if (elements.length > 0) {
+          elements.forEach((el) => {
+            const text = el.textContent.trim();
+            if (text) {
+              // Próbáljuk szétbontani mennyiség és név szerint
+              const match = text.match(/^([\d\.,\s\/]+)\s*(\w+)?\s*(.+)$/);
+              if (match) {
+                ingredients.push({
+                  name: match[3] || text,
+                  amount: match[1]?.trim() || "1",
+                  unit: match[2] || "db",
+                });
+              } else {
+                ingredients.push({
+                  name: text,
+                  amount: "1",
+                  unit: "db",
+                });
+              }
+            }
+          });
+          if (ingredients.length > 0) break;
+        }
+      }
+
+      // Elkészítés lépései
+      const instructionSelectors = [
+        ".recipe-instructions li",
+        '[itemprop="recipeInstructions"] li',
+        ".instructions li",
+        ".method li",
+        ".steps li",
+        '[itemprop="recipeInstructions"] p',
+        ".recipe-method ol li",
+      ];
+
+      for (const selector of instructionSelectors) {
+        const elements = doc.querySelectorAll(selector);
+        if (elements.length > 0) {
+          elements.forEach((el) => {
+            const text = el.textContent.trim();
+            if (text) {
+              instructions.push(text);
+            }
+          });
+          if (instructions.length > 0) break;
+        }
+      }
+
+      // Idő keresése
+      const timeElement =
+        doc.querySelector('[itemprop="totalTime"]') ||
+        doc.querySelector('[itemprop="cookTime"]') ||
+        doc.querySelector(".recipe-time");
+      if (timeElement) {
+        const timeMatch = timeElement.textContent.match(/(\d+)/);
+        if (timeMatch) {
+          prepTime = parseInt(timeMatch[1]);
+        }
+      }
+
+      // Adagok száma
+      const servingsElement =
+        doc.querySelector('[itemprop="recipeYield"]') ||
+        doc.querySelector(".recipe-servings");
+      if (servingsElement) {
+        const servingsMatch = servingsElement.textContent.match(/(\d+)/);
+        if (servingsMatch) {
+          servings = parseInt(servingsMatch[1]);
+        }
+      }
+
+      // Ha nem találtunk semmit, hibát dobunk
+      if (!recipeName && ingredients.length === 0) {
+        throw new Error("Nem sikerült kinyerni a recept adatokat az oldalról");
+      }
+
+      const importedRecipe = {
+        id: Date.now(),
+        name: recipeName || "Importált recept",
+        category: "főétel",
+        prepTime: prepTime,
+        servings: servings,
+        difficulty: "közepes",
+        estimatedCost: 0,
+        ingredients:
+          ingredients.length > 0
+            ? ingredients
+            : [{ name: "hozzávaló", amount: "1", unit: "db" }],
+        instructions:
+          instructions.length > 0 ? instructions : ["Importált recept lépései"],
+        allergens: [],
+        favorite: false,
+        source: recipeImportUrl,
+        importedAt: new Date().toISOString(),
+      };
+
+      const newData = { ...data };
+      if (!newData.recipes) newData.recipes = [];
+      newData.recipes.push(importedRecipe);
+      setData(newData);
+      localStorage.setItem("householdData", JSON.stringify(newData));
+
+      setRecipeImportUrl("");
+      setShowRecipeImportModal(false);
+      alert(
+        "Recept sikeresen importálva! 🎉\n\nEllenőrizd és módosítsd az adatokat, ha szükséges."
+      );
+    } catch (error) {
+      console.error("Import hiba:", error);
+      alert(
+        "Hiba történt az importálás során.\n\nLehetséges okok:\n- Az oldal nem támogatja a külső hozzáférést (CORS)\n- A recept formátuma nem ismerhető fel\n\nPróbáld meg manuálisan hozzáadni a receptet!"
+      );
+    } finally {
+      setImportingRecipe(false);
+    }
+  };
+
+  // Recept törlése
+  const deleteRecipe = (recipeId) => {
+    if (!confirm("Biztosan törölni szeretnéd ezt a receptet?")) return;
+
+    const newData = { ...data };
+    newData.recipes = newData.recipes.filter((r) => r.id !== recipeId);
     setData(newData);
-    await saveUserData(newData);
-    setShowDeleteConfirm(null);
+    localStorage.setItem("householdData", JSON.stringify(newData));
+  };
+
+  // Receptek szűrése és rendezése
+  const getFilteredAndSortedRecipes = () => {
+    let recipes = [...(data.recipes || [])];
+
+    // Szűrés szöveg alapján
+    if (recipeFilters.searchText) {
+      const searchLower = recipeFilters.searchText.toLowerCase();
+      recipes = recipes.filter(
+        (r) =>
+          r.name.toLowerCase().includes(searchLower) ||
+          r.ingredients.some((i) => i.name.toLowerCase().includes(searchLower))
+      );
+    }
+
+    // Szűrés kategória alapján
+    if (recipeFilters.category) {
+      recipes = recipes.filter((r) => r.category === recipeFilters.category);
+    }
+
+    // Szűrés nehézség alapján
+    if (recipeFilters.difficulty) {
+      recipes = recipes.filter(
+        (r) => r.difficulty === recipeFilters.difficulty
+      );
+    }
+
+    // Szűrés max idő alapján
+    if (recipeFilters.maxTime) {
+      recipes = recipes.filter(
+        (r) => r.prepTime <= parseInt(recipeFilters.maxTime)
+      );
+    }
+
+    // Csak kedvencek
+    if (recipeFilters.showFavoritesOnly) {
+      recipes = recipes.filter((r) => r.favorite);
+    }
+
+    // Rendezés
+    switch (recipeSortBy) {
+      case "name":
+        recipes.sort((a, b) => a.name.localeCompare(b.name));
+        break;
+      case "time":
+        recipes.sort((a, b) => a.prepTime - b.prepTime);
+        break;
+      case "cost":
+        recipes.sort((a, b) => (a.estimatedCost || 0) - (b.estimatedCost || 0));
+        break;
+      case "recent":
+        recipes.sort((a, b) => b.id - a.id);
+        break;
+    }
+
+    return recipes;
+  };
+
+  // Szűrők visszaállítása
+  const resetFilters = () => {
+    setRecipeFilters({
+      searchText: "",
+      category: "",
+      difficulty: "",
+      maxTime: "",
+      showFavoritesOnly: false,
+    });
+    setRecipeSortBy("name");
+  };
+
+  // Okosrecept keresés
+  const searchSmartRecipes = () => {
+    setSearching(true);
+
+    setTimeout(() => {
+      const recipes = data.recipes || [];
+      let results = [...recipes];
+
+      // Szűrés alapanyagok alapján
+      if (smartSearchCriteria.availableIngredients.trim()) {
+        const availableIngs = smartSearchCriteria.availableIngredients
+          .toLowerCase()
+          .split(",")
+          .map((i) => i.trim());
+
+        results = results.filter((recipe) => {
+          const recipeIngs = recipe.ingredients.map((i) =>
+            i.name.toLowerCase()
+          );
+          return availableIngs.some((ing) =>
+            recipeIngs.some((rIng) => rIng.includes(ing))
+          );
+        });
+      }
+
+      // Szűrés idő alapján
+      if (smartSearchCriteria.maxTime) {
+        results = results.filter(
+          (r) => r.prepTime <= parseInt(smartSearchCriteria.maxTime)
+        );
+      }
+
+      // Szűrés nehézség alapján
+      if (smartSearchCriteria.difficulty) {
+        results = results.filter(
+          (r) => r.difficulty === smartSearchCriteria.difficulty
+        );
+      }
+
+      // Szűrés kategória alapján
+      if (smartSearchCriteria.category) {
+        results = results.filter(
+          (r) => r.category === smartSearchCriteria.category
+        );
+      }
+
+      setSmartSearchResults(results);
+      setSearching(false);
+    }, 800);
+  };
+
+  // Menü beállítása
+  const setMenuForDay = (dayIndex, recipeId) => {
+    const weekKey = getWeekKey(currentWeekOffset);
+    const newMenus = { ...weeklyMenus };
+
+    if (!newMenus[weekKey]) {
+      newMenus[weekKey] = {};
+    }
+
+    newMenus[weekKey][dayIndex] = recipeId;
+    setWeeklyMenus(newMenus);
+
+    // Mentés localStorage-ba
+    localStorage.setItem("weeklyMenus", JSON.stringify(newMenus));
+  };
+
+  // Menü törlése
+  const clearMenuForDay = (dayIndex) => {
+    const weekKey = getWeekKey(currentWeekOffset);
+    const newMenus = { ...weeklyMenus };
+
+    if (newMenus[weekKey]) {
+      delete newMenus[weekKey][dayIndex];
+      setWeeklyMenus(newMenus);
+      localStorage.setItem("weeklyMenus", JSON.stringify(newMenus));
+    }
+  };
+
+  // Bevásárlólista generálás heti menüből
+  const generateShoppingList = () => {
+    const weekKey = getWeekKey(currentWeekOffset);
+    const menu = weeklyMenus[weekKey] || {};
+    const recipes = data.recipes || [];
+
+    const ingredientsMap = {};
+
+    // Összes recept összetevőinek összegyűjtése
+    Object.values(menu).forEach((recipeId) => {
+      const recipe = recipes.find((r) => r.id === recipeId);
+      if (recipe && recipe.ingredients) {
+        recipe.ingredients.forEach((ing) => {
+          const key = ing.name.toLowerCase();
+          if (!ingredientsMap[key]) {
+            ingredientsMap[key] = {
+              name: ing.name,
+              amount: 0,
+              unit: ing.unit,
+              checked: false,
+              atHome: false,
+            };
+          }
+          // Mennyiségek összegzése (egyszerűsített)
+          const amount = parseFloat(ing.amount) || 0;
+          ingredientsMap[key].amount += amount;
+        });
+      }
+    });
+
+    const list = Object.values(ingredientsMap).map((item, idx) => ({
+      ...item,
+      id: idx,
+      amount: Math.round(item.amount * 100) / 100,
+    }));
+
+    setWeekShoppingList(list);
+    setShowShoppingListModal(true);
+  };
+
+  /* Bevásárlólista elem toggle
+const toggleShoppingItem = (id, field) => {
+  setWeekShoppingList(prev => 
+    prev.map(item => 
+      item.id === id ? { ...item, [field]: !item[field] } : item
+    )
+  );
+};
+*/
+
+  // Bevásárlólistába küldés
+  const addToMainShoppingList = () => {
+    const itemsToAdd = weekShoppingList.filter((item) => !item.atHome);
+
+    if (itemsToAdd.length === 0) {
+      alert("Minden termék megvan otthon! 👍");
+      return;
+    }
+
+    const newData = { ...data };
+    if (!newData.shopping) {
+      newData.shopping = [];
+    }
+
+    itemsToAdd.forEach((item) => {
+      newData.shopping.push({
+        id: Date.now() + Math.random(),
+        name: `${item.name} (${item.amount} ${item.unit})`,
+        category: "heti menü",
+        quantity: 1,
+        purchased: false,
+        addedDate: new Date().toISOString(),
+      });
+    });
+
+    setData(newData);
+    localStorage.setItem("householdData", JSON.stringify(newData));
+
+    alert(`${itemsToAdd.length} termék hozzáadva a bevásárlólistához! 🛒`);
+    setShowShoppingListModal(false);
   };
 
   const addIngredient = () => {
@@ -1544,7 +2044,7 @@ const FamilyOrganizerApp = () => {
   };
 
   // === PÉNZÜGYEK - SZÁMLÁK ===
-const openAccountModal = (account = null) => {
+  const openAccountModal = (account = null) => {
     if (account) {
       setEditingItem(account);
       setFormData({
@@ -1818,7 +2318,7 @@ const openAccountModal = (account = null) => {
     setShowDeleteConfirm(null);
   };
 
-const openVehicleModal = (vehicle = null) => {
+  const openVehicleModal = (vehicle = null) => {
     if (vehicle) {
       setEditingItem(vehicle);
       setFormData({
@@ -2009,10 +2509,10 @@ const openVehicleModal = (vehicle = null) => {
       alert("Dátum, mennyiség és összeg kötelező!");
       return;
     }
-    
+
     const liters = parseFloat(tempFueling.liters);
     const totalPrice = parseFloat(tempFueling.totalPrice);
-    const pricePerLiter = tempFueling.pricePerLiter 
+    const pricePerLiter = tempFueling.pricePerLiter
       ? parseFloat(tempFueling.pricePerLiter)
       : totalPrice / liters;
 
@@ -2119,33 +2619,42 @@ const openVehicleModal = (vehicle = null) => {
   const handleFuelingLitersChange = (value) => {
     const liters = parseFloat(value) || 0;
     const pricePerLiter = parseFloat(tempFueling.pricePerLiter) || 0;
-    
+
     setTempFueling({
       ...tempFueling,
       liters: value,
-      totalPrice: pricePerLiter > 0 ? (liters * pricePerLiter).toFixed(0) : tempFueling.totalPrice,
+      totalPrice:
+        pricePerLiter > 0
+          ? (liters * pricePerLiter).toFixed(0)
+          : tempFueling.totalPrice,
     });
   };
 
   const handleFuelingPricePerLiterChange = (value) => {
     const pricePerLiter = parseFloat(value) || 0;
     const liters = parseFloat(tempFueling.liters) || 0;
-    
+
     setTempFueling({
       ...tempFueling,
       pricePerLiter: value,
-      totalPrice: liters > 0 ? (liters * pricePerLiter).toFixed(0) : tempFueling.totalPrice,
+      totalPrice:
+        liters > 0
+          ? (liters * pricePerLiter).toFixed(0)
+          : tempFueling.totalPrice,
     });
   };
 
   const handleFuelingTotalPriceChange = (value) => {
     const totalPrice = parseFloat(value) || 0;
     const liters = parseFloat(tempFueling.liters) || 0;
-    
+
     setTempFueling({
       ...tempFueling,
       totalPrice: value,
-      pricePerLiter: liters > 0 ? (totalPrice / liters).toFixed(2) : tempFueling.pricePerLiter,
+      pricePerLiter:
+        liters > 0
+          ? (totalPrice / liters).toFixed(2)
+          : tempFueling.pricePerLiter,
     });
   };
 
@@ -3074,91 +3583,852 @@ const openVehicleModal = (vehicle = null) => {
   };
 
   // === TRANZAKCIÓK ===
-  const openTransactionModal = (type = "expense", transaction = null) => {
+  const openTransactionModal = (type) => {
     setTransactionType(type);
-    if (transaction) {
-      setEditingItem(transaction);
-      setFormData(transaction);
-    } else {
-      setEditingItem(null);
-      setFormData({
-        type: type,
-        category: type === "income" ? "salary" : "food",
-        amount: 0,
-        currency: "HUF",
-        date: new Date().toISOString().split("T")[0],
-        description: "",
-      });
-    }
+    setFormData({
+      amount: "",
+      category: "",
+      account: "",
+      date: new Date().toISOString().split("T")[0],
+      description: "",
+      currency: "HUF",
+    });
+    setEditingItem(null);
     setShowTransactionModal(true);
   };
 
-const saveTransaction = async () => {
+  const saveTransaction = async () => {
+    // Debug: nézzük meg, mi van a formData-ban
+    console.log("saveTransaction called with formData:", formData);
+    console.log("transactionType:", transactionType);
+
     if (!formData.amount || !formData.category || !formData.account) {
       alert("Összeg, kategória és számla kötelező!");
       return;
     }
 
-    const selectedAccount = data.accounts.find(
-      (acc) => acc.id === formData.account
+    // Keressük meg a számlákat több helyen is (ugyanaz, mint a modal-ban)
+    const accountsSource = Array.isArray(data?.accounts)
+      ? data.accounts
+      : Array.isArray(data?.finances?.accounts)
+      ? data.finances.accounts
+      : [];
+
+    console.log("accountsSource:", accountsSource);
+
+    if (accountsSource.length === 0) {
+      alert("Nincs elérhető számla! Először hozz létre egy számlát.");
+      return;
+    }
+
+    const selectedAccount = accountsSource.find(
+      (acc) => acc.id === parseInt(formData.account)
     );
+
+    console.log("selectedAccount:", selectedAccount);
+
+    if (!selectedAccount) {
+      alert("Érvénytelen számla!");
+      return;
+    }
 
     const transaction = {
       id: editingItem?.id || Date.now(),
       type: transactionType,
       amount: parseFloat(formData.amount),
       category: formData.category,
-      account: formData.account,
-      accountName: selectedAccount?.name || "",
+      account: parseInt(formData.account),
+      accountName: selectedAccount.name || selectedAccount.displayName,
       date: formData.date || new Date().toISOString().split("T")[0],
       description: formData.description || "",
-      isShared: selectedAccount?.isShared !== false, // ÚJ - örökli a számla státuszát
-      ownerId: selectedAccount?.ownerId || currentUser?.uid, // ÚJ
+      isShared: selectedAccount.isShared !== false,
+      ownerId: selectedAccount.ownerId || currentUser?.uid,
+      currency: formData.currency || "HUF",
     };
 
+    console.log("Saving transaction:", transaction);
+
+    // Eldöntjük, melyik alatt tároljuk a tranzakciókat
+    const useFinancesStructure = Array.isArray(data?.finances?.transactions);
+
     let newData;
-    if (editingItem) {
-      newData = {
-        ...data,
-        transactions: data.transactions.map((t) =>
-          t.id === editingItem.id ? transaction : t
-        ),
-      };
-    } else {
-      newData = {
-        ...data,
-        transactions: [...data.transactions, transaction],
-      };
-    }
-
-    // Számla egyenleg frissítése
-    const updatedAccounts = newData.accounts.map((acc) => {
-      if (acc.id === formData.account) {
-        let balanceChange = parseFloat(formData.amount);
-        if (transactionType === "expense") balanceChange = -balanceChange;
-
-        // Ha szerkesztés, először vonjuk vissza a régi tranzakciót
-        if (editingItem && editingItem.account === acc.id) {
-          let oldChange = parseFloat(editingItem.amount);
-          if (editingItem.type === "expense") oldChange = -oldChange;
-          acc.balance -= oldChange;
-        }
-
-        return {
-          ...acc,
-          balance: acc.balance + balanceChange,
+    if (useFinancesStructure) {
+      // Ha data.finances.transactions létezik, oda mentjük
+      const existingTransactions = data.finances.transactions || [];
+      if (editingItem) {
+        newData = {
+          ...data,
+          finances: {
+            ...data.finances,
+            transactions: existingTransactions.map((t) =>
+              t.id === editingItem.id ? transaction : t
+            ),
+          },
+        };
+      } else {
+        newData = {
+          ...data,
+          finances: {
+            ...data.finances,
+            transactions: [...existingTransactions, transaction],
+          },
         };
       }
-      return acc;
-    });
+    } else {
+      // Ha data.transactions alatt van
+      const existingTransactions = data.transactions || [];
+      if (editingItem) {
+        newData = {
+          ...data,
+          transactions: existingTransactions.map((t) =>
+            t.id === editingItem.id ? transaction : t
+          ),
+        };
+      } else {
+        newData = {
+          ...data,
+          transactions: [...existingTransactions, transaction],
+        };
+      }
+    }
 
-    newData = { ...newData, accounts: updatedAccounts };
+    // Számla egyenleg frissítése - több helyen is keresve
+    if (Array.isArray(newData?.accounts)) {
+      newData.accounts = newData.accounts.map((acc) => {
+        if (acc.id === parseInt(formData.account)) {
+          let balanceChange = parseFloat(formData.amount);
+          if (transactionType === "expense") balanceChange = -balanceChange;
+
+          // Ha szerkesztés, először vonjuk vissza a régi tranzakciót
+          if (editingItem && editingItem.account === acc.id) {
+            let oldChange = parseFloat(editingItem.amount);
+            if (editingItem.type === "expense") oldChange = -oldChange;
+            return {
+              ...acc,
+              balance: acc.balance - oldChange + balanceChange,
+            };
+          }
+
+          return {
+            ...acc,
+            balance: (acc.balance || 0) + balanceChange,
+          };
+        }
+        return acc;
+      });
+    } else if (Array.isArray(newData?.finances?.accounts)) {
+      newData.finances.accounts = newData.finances.accounts.map((acc) => {
+        if (acc.id === parseInt(formData.account)) {
+          let balanceChange = parseFloat(formData.amount);
+          if (transactionType === "expense") balanceChange = -balanceChange;
+
+          // Ha szerkesztés, először vonjuk vissza a régi tranzakciót
+          if (editingItem && editingItem.account === acc.id) {
+            let oldChange = parseFloat(editingItem.amount);
+            if (editingItem.type === "expense") oldChange = -oldChange;
+            return {
+              ...acc,
+              balance: acc.balance - oldChange + balanceChange,
+            };
+          }
+
+          return {
+            ...acc,
+            balance: (acc.balance || 0) + balanceChange,
+          };
+        }
+        return acc;
+      });
+    }
+
+    console.log("newData to save:", newData);
 
     setData(newData);
     await saveUserData(newData);
     setShowTransactionModal(false);
     setFormData({});
     setEditingItem(null);
+    alert("Tranzakció sikeresen mentve!");
+  };
+
+  // HÓNAP NAVIGÁCIÓ
+  const goToPreviousMonth = () => {
+    setSelectedMonth((prev) => {
+      const newDate = new Date(prev);
+      newDate.setMonth(newDate.getMonth() - 1);
+      return newDate;
+    });
+  };
+
+  const goToNextMonth = () => {
+    setSelectedMonth((prev) => {
+      const newDate = new Date(prev);
+      newDate.setMonth(newDate.getMonth() + 1);
+      return newDate;
+    });
+  };
+
+  const goToCurrentMonth = () => {
+    setSelectedMonth(new Date());
+  };
+
+  // BUDGET MODAL
+  const openBudgetModal = (budget = null) => {
+    if (budget) {
+      setEditingItem(budget);
+      setFormData(budget);
+    } else {
+      setEditingItem(null);
+      setFormData({
+        type: "month", // 'month' vagy 'year'
+        totalBudget: "",
+        categories: [],
+        startDate: new Date().toISOString().split("T")[0],
+      });
+    }
+    setShowBudgetModal(true);
+  };
+
+  const saveBudget = async () => {
+    if (!formData.totalBudget) {
+      alert("Teljes költségvetés kötelező!");
+      return;
+    }
+
+    const budget = {
+      id: editingItem?.id || Date.now(),
+      type: formData.type || "month",
+      totalBudget: parseFloat(formData.totalBudget),
+      categories: formData.categories || [],
+      startDate: formData.startDate || new Date().toISOString().split("T")[0],
+      createdBy: currentUser?.uid,
+    };
+
+    let newData;
+    if (editingItem) {
+      newData = {
+        ...data,
+        budgets: (data.budgets || []).map((b) =>
+          b.id === editingItem.id ? budget : b
+        ),
+      };
+    } else {
+      newData = {
+        ...data,
+        budgets: [...(data.budgets || []), budget],
+      };
+    }
+
+    setData(newData);
+    await saveUserData(newData);
+    setShowBudgetModal(false);
+    setFormData({});
+    setEditingItem(null);
+  };
+
+  const deleteBudget = async (budgetId) => {
+    const newData = {
+      ...data,
+      budgets: (data.budgets || []).filter((b) => b.id !== budgetId),
+    };
+    setData(newData);
+    await saveUserData(newData);
+    setShowDeleteConfirm(null);
+  };
+
+  // Kategória hozzáadása/törlése a budgethez
+  const addBudgetCategory = () => {
+    const categoryName = prompt("Kategória neve:");
+    if (!categoryName) return;
+    const limit = prompt("Limit összege (Ft):");
+    if (!limit) return;
+
+    setFormData({
+      ...formData,
+      categories: [
+        ...(formData.categories || []),
+        {
+          id: Date.now(),
+          name: categoryName,
+          limit: parseFloat(limit),
+        },
+      ],
+    });
+  };
+
+  const removeBudgetCategory = (categoryId) => {
+    setFormData({
+      ...formData,
+      categories: (formData.categories || []).filter(
+        (c) => c.id !== categoryId
+      ),
+    });
+  };
+
+  // Budget számítások
+  const calculateBudgetStatus = (budget, transactions) => {
+    if (!budget) return null;
+
+    const budgetStartDate = new Date(budget.startDate);
+    let budgetEndDate = new Date(budgetStartDate);
+
+    if (budget.type === "month") {
+      budgetEndDate.setMonth(budgetEndDate.getMonth() + 1);
+    } else {
+      budgetEndDate.setFullYear(budgetEndDate.getFullYear() + 1);
+    }
+
+    // Szűrjük a tranzakciókat az időszakra ÉS a kiválasztott számlákra
+    const relevantTransactions = (transactions || []).filter((t) => {
+      if (t.isShared === false && t.ownerId !== currentUser?.uid) return false;
+      if (t.type !== "expense") return false;
+
+      const tDate = new Date(t.date);
+      const isInBudgetPeriod =
+        tDate >= budgetStartDate && tDate < budgetEndDate;
+
+      if (!isInBudgetPeriod) return false;
+
+      // Számla szűrés
+      if (
+        selectedAccounts.length > 0 &&
+        !selectedAccounts.includes(t.account)
+      ) {
+        return false;
+      }
+
+      return true;
+    });
+
+    const totalSpent = relevantTransactions.reduce(
+      (sum, t) => sum + (parseFloat(t.amount) || 0),
+      0
+    );
+
+    const percentage = (totalSpent / budget.totalBudget) * 100;
+    const remaining = budget.totalBudget - totalSpent;
+
+    // Kategóriánkénti költések
+    const categorySpending = {};
+    (budget.categories || []).forEach((cat) => {
+      const spent = relevantTransactions
+        .filter((t) => t.category === cat.name)
+        .reduce((sum, t) => sum + (parseFloat(t.amount) || 0), 0);
+
+      categorySpending[cat.name] = {
+        limit: cat.limit,
+        spent: spent,
+        remaining: cat.limit - spent,
+        percentage: (spent / cat.limit) * 100,
+      };
+    });
+
+    return {
+      totalBudget: budget.totalBudget,
+      totalSpent,
+      remaining,
+      percentage,
+      categorySpending,
+      isOverBudget: totalSpent > budget.totalBudget,
+      transactions: relevantTransactions,
+    };
+  };
+
+  // Aktuális budget keresése
+  const getCurrentBudget = () => {
+    const budgets = data.budgets || [];
+    const now = selectedMonth;
+
+    return budgets.find((budget) => {
+      const budgetStart = new Date(budget.startDate);
+      let budgetEnd = new Date(budgetStart);
+
+      if (budget.type === "month") {
+        budgetEnd.setMonth(budgetEnd.getMonth() + 1);
+      } else {
+        budgetEnd.setFullYear(budgetEnd.getFullYear() + 1);
+      }
+
+      return now >= budgetStart && now < budgetEnd;
+    });
+  };
+
+  // BANK FORMÁTUMOK DETEKTÁLÁSA
+  const detectBankFormat = (headers) => {
+    const headersLower = headers.map((h) => h.toLowerCase().trim());
+
+    // Revolut
+    if (
+      headersLower.includes("type") &&
+      headersLower.includes("product") &&
+      headersLower.includes("started date")
+    ) {
+      return {
+        bank: "Revolut",
+        mapping: {
+          date: "Started Date",
+          description: "Description",
+          amount: "Amount",
+          currency: "Currency",
+          category: "Category",
+        },
+      };
+    }
+
+    // OTP Bank
+    if (
+      headersLower.includes("könyvelés dátuma") ||
+      headersLower.includes("érték dátuma")
+    ) {
+      return {
+        bank: "OTP Bank",
+        mapping: {
+          date: "Könyvelés dátuma",
+          description: "Tranzakció leírása",
+          amount: "Összeg",
+          currency: "Deviza",
+        },
+      };
+    }
+
+    // Erste Bank
+    if (
+      headersLower.includes("buchungsdatum") ||
+      headersLower.includes("booking date")
+    ) {
+      return {
+        bank: "Erste Bank",
+        mapping: {
+          date: "Booking date",
+          description: "Details",
+          amount: "Amount",
+          currency: "Currency",
+        },
+      };
+    }
+
+    // K&H Bank
+    if (
+      headersLower.includes("tranzakció dátuma") &&
+      headersLower.includes("jogcím")
+    ) {
+      return {
+        bank: "K&H Bank",
+        mapping: {
+          date: "Tranzakció dátuma",
+          description: "Jogcím",
+          amount: "Összeg",
+          currency: "Pénznem",
+        },
+      };
+    }
+
+    // Általános CSV
+    return {
+      bank: "Általános",
+      mapping: {
+        date: headers[0],
+        description: headers[1],
+        amount: headers[2],
+      },
+    };
+  };
+
+  // FÁJL FELTÖLTÉS ÉS PARSING (külső könyvtár nélkül)
+  const handleFileUpload = async (file) => {
+    const fileName = file.name.toLowerCase();
+
+    try {
+      if (fileName.endsWith(".csv")) {
+        // CSV parsing natív JavaScript-tel
+        const text = await file.text();
+
+        // Sorok szétválasztása
+        const lines = text.split(/\r?\n/).filter((line) => line.trim());
+
+        if (lines.length === 0) {
+          alert("Üres fájl!");
+          return;
+        }
+
+        // Felismerés: vessző, pontosvessző vagy tab elválasztó
+        const firstLine = lines[0];
+        let delimiter = ",";
+        if (firstLine.split(";").length > firstLine.split(",").length) {
+          delimiter = ";";
+        } else if (firstLine.split("\t").length > firstLine.split(",").length) {
+          delimiter = "\t";
+        }
+
+        console.log("Detected delimiter:", delimiter);
+
+        // CSV parsing idézőjelek kezelésével
+        const parseCSVLine = (line, delim) => {
+          const values = [];
+          let current = "";
+          let inQuotes = false;
+
+          for (let i = 0; i < line.length; i++) {
+            const char = line[i];
+            const nextChar = line[i + 1];
+
+            if (char === '"') {
+              if (inQuotes && nextChar === '"') {
+                current += '"';
+                i++; // skip next quote
+              } else {
+                inQuotes = !inQuotes;
+              }
+            } else if (char === delim && !inQuotes) {
+              values.push(current.trim());
+              current = "";
+            } else {
+              current += char;
+            }
+          }
+          values.push(current.trim());
+          return values;
+        };
+
+        // Header parsing
+        const headers = parseCSVLine(lines[0], delimiter);
+        console.log("Headers:", headers);
+
+        // Data parsing
+        const data = [];
+        for (let i = 1; i < lines.length; i++) {
+          const line = lines[i];
+          if (!line.trim()) continue;
+
+          const values = parseCSVLine(line, delimiter);
+
+          if (values.length >= headers.length && values.some((v) => v)) {
+            const row = {};
+            headers.forEach((header, idx) => {
+              row[header] = values[idx] || "";
+            });
+            data.push(row);
+          }
+        }
+
+        console.log("Parsed data:", data);
+
+        if (data.length === 0) {
+          alert(
+            "Nem sikerült adatokat olvasni a fájlból!\n\nEllenőrizd, hogy:\n• A fájl CSV formátumú\n• Van benne fejléc sor\n• Van benne legalább 1 adat sor"
+          );
+          return;
+        }
+
+        const detected = detectBankFormat(headers);
+        console.log("Detected bank:", detected);
+        setDetectedBank(detected);
+        setImportedData(data);
+        setImportStep(2);
+      } else if (fileName.endsWith(".xlsx") || fileName.endsWith(".xls")) {
+        alert(
+          "❌ Excel import jelenleg nem támogatott\n\n" +
+            "✅ Megoldás:\n" +
+            "1. Nyisd meg az Excel fájlt\n" +
+            "2. Fájl → Mentés másként → CSV (vesszővel elválasztott)\n" +
+            "3. Importáld a CSV fájlt\n\n" +
+            "VAGY exportáld közvetlenül CSV formátumban a banki alkalmazásból:\n" +
+            "• Revolut: Account → Statements → Export CSV\n" +
+            "• OTP: Lekérdezések → Export → CSV\n" +
+            "• Erste/K&H: Transactions → Export → CSV"
+        );
+      } else {
+        alert(
+          "❌ Nem támogatott fájlformátum!\n\nCsak CSV fájlokat fogadunk el."
+        );
+      }
+    } catch (error) {
+      console.error("Import error:", error);
+      alert(
+        "❌ Hiba történt a fájl feldolgozása során:\n\n" +
+          error.message +
+          "\n\nEllenőrizd a fájl formátumát és próbáld újra!"
+      );
+    }
+  };
+
+  // TRANZAKCIÓ KONVERTÁLÁSA
+  const parseImportedTransaction = (row, mapping) => {
+    // Dátum
+    let date = row[mapping.date];
+    if (date) {
+      // Különböző dátum formátumok kezelése
+      if (typeof date === "string") {
+        // Excel serial date (ha szám formátumban jön)
+        if (!isNaN(date) && date > 40000) {
+          const excelEpoch = new Date(1900, 0, 1);
+          date = new Date(excelEpoch.getTime() + (date - 2) * 86400000);
+        } else {
+          date = new Date(date);
+        }
+      }
+      date =
+        date instanceof Date && !isNaN(date)
+          ? date.toISOString().split("T")[0]
+          : null;
+    }
+
+    // Összeg
+    let amount = row[mapping.amount];
+    if (typeof amount === "string") {
+      amount = amount.replace(/[^\d.,-]/g, "").replace(",", ".");
+    }
+    amount = parseFloat(amount) || 0;
+
+    // Típus meghatározása (bevétel vagy kiadás)
+    const type = amount >= 0 ? "income" : "expense";
+    amount = Math.abs(amount);
+
+    // Leírás
+    const description = row[mapping.description] || "";
+
+    // Kategória automatikus felismerése
+    const category = autoCategorize(description, type);
+
+    return {
+      date,
+      amount,
+      type,
+      description,
+      category,
+      currency: row[mapping.currency] || "HUF",
+      original: row,
+    };
+  };
+
+  // AUTOMATIKUS KATEGORIZÁLÁS
+  const autoCategorize = (description, type) => {
+    const desc = description.toLowerCase();
+
+    if (type === "expense") {
+      if (
+        desc.includes("lidl") ||
+        desc.includes("tesco") ||
+        desc.includes("aldi") ||
+        desc.includes("spar") ||
+        desc.includes("cba")
+      ) {
+        return "Étel";
+      }
+      if (
+        desc.includes("mol") ||
+        desc.includes("shell") ||
+        desc.includes("omv") ||
+        desc.includes("benzin")
+      ) {
+        return "Közlekedés";
+      }
+      if (
+        desc.includes("gym") ||
+        desc.includes("fitnesz") ||
+        desc.includes("orvos") ||
+        desc.includes("patika")
+      ) {
+        return "Egészség";
+      }
+      if (
+        desc.includes("netflix") ||
+        desc.includes("spotify") ||
+        desc.includes("hbo") ||
+        desc.includes("cinema")
+      ) {
+        return "Szórakozás";
+      }
+      if (
+        desc.includes("lakbér") ||
+        desc.includes("rezsi") ||
+        desc.includes("áram") ||
+        desc.includes("gáz") ||
+        desc.includes("víz")
+      ) {
+        return "Lakhatás";
+      }
+      return "Egyéb kiadás";
+    } else {
+      if (desc.includes("fizetés") || desc.includes("bér")) {
+        return "Fizetés";
+      }
+      return "Egyéb bevétel";
+    }
+  };
+
+  // DUPLIKÁCIÓ ELLENŐRZÉS
+  const checkDuplicates = (newTransactions) => {
+    const existingTransactions =
+      data.transactions || data.finances?.transactions || [];
+
+    return newTransactions.map((newTx) => {
+      const isDuplicate = existingTransactions.some(
+        (existing) =>
+          existing.date === newTx.date &&
+          Math.abs(existing.amount - newTx.amount) < 0.01 &&
+          existing.description === newTx.description
+      );
+      return { ...newTx, isDuplicate };
+    });
+  };
+
+  // IMPORT VÉGREHAJTÁSA
+  const executeImport = async () => {
+    if (!importAccount) {
+      alert("Válassz ki egy számlát!");
+      return;
+    }
+
+    const accountsSource = Array.isArray(data?.accounts)
+      ? data.accounts
+      : Array.isArray(data?.finances?.accounts)
+      ? data.finances.accounts
+      : [];
+
+    const selectedAccount = accountsSource.find(
+      (acc) => acc.id === parseInt(importAccount)
+    );
+
+    if (!selectedAccount) {
+      alert("Érvénytelen számla!");
+      return;
+    }
+
+    // Tranzakciók konvertálása
+    const parsedTransactions = importedData
+      .map((row) => parseImportedTransaction(row, detectedBank.mapping))
+      .filter((tx) => tx.date && tx.amount > 0);
+
+    // Duplikáció ellenőrzés
+    const checkedTransactions = checkDuplicates(parsedTransactions);
+
+    // Csak nem duplikált tranzakciók importálása
+    const newTransactions = checkedTransactions
+      .filter((tx) => !tx.isDuplicate)
+      .map((tx) => ({
+        id: Date.now() + Math.random(),
+        type: tx.type,
+        amount: tx.amount,
+        category: tx.category,
+        account: parseInt(importAccount),
+        accountName: selectedAccount.name,
+        date: tx.date,
+        description: tx.description,
+        isShared: selectedAccount.isShared !== false,
+        ownerId: selectedAccount.ownerId || currentUser?.uid,
+        currency: tx.currency,
+        imported: true,
+      }));
+
+    if (newTransactions.length === 0) {
+      alert("Minden tranzakció már szerepel a rendszerben!");
+      return;
+    }
+
+    // Mentés
+    const existingTransactions =
+      data.transactions || data.finances?.transactions || [];
+    const useFinancesStructure = Array.isArray(data?.finances?.transactions);
+
+    let newData;
+    if (useFinancesStructure) {
+      newData = {
+        ...data,
+        finances: {
+          ...data.finances,
+          transactions: [...existingTransactions, ...newTransactions],
+        },
+      };
+    } else {
+      newData = {
+        ...data,
+        transactions: [...existingTransactions, ...newTransactions],
+      };
+    }
+
+    setData(newData);
+    await saveUserData(newData);
+
+    alert(
+      `${newTransactions.length} tranzakció sikeresen importálva!\n${
+        checkedTransactions.length - newTransactions.length
+      } duplikált tranzakciót kihagytunk.`
+    );
+
+    // Reset
+    setShowImportModal(false);
+    setImportStep(1);
+    setImportedData([]);
+    setDetectedBank(null);
+    setImportAccount(null);
+  };
+
+  // Számla szűrés kezelése
+  const toggleAccountFilter = (accountId) => {
+    setSelectedAccounts((prev) => {
+      if (prev.includes(accountId)) {
+        return prev.filter((id) => id !== accountId);
+      } else {
+        return [...prev, accountId];
+      }
+    });
+  };
+
+  const selectAllAccounts = () => {
+    setSelectedAccounts([]);
+  };
+
+  const deselectAllAccounts = () => {
+    const accountsSource = Array.isArray(data?.accounts)
+      ? data.accounts
+      : Array.isArray(data?.finances?.accounts)
+      ? data.finances.accounts
+      : [];
+
+    setSelectedAccounts(
+      accountsSource
+        .filter(
+          (acc) => acc.isShared !== false || acc.ownerId === currentUser?.uid
+        )
+        .map((acc) => acc.id)
+    );
+    // Ha minden ki van választva, töröljük az összes kiválasztást
+    setSelectedAccounts([]);
+  };
+
+  // Tranzakciók szűrése hónap és számlák szerint
+  const filterTransactionsByMonthAndAccounts = (transactions) => {
+    return (transactions || []).filter((t) => {
+      if (!t) return false;
+
+      // Privát tranzakciók szűrése
+      if (t.isShared === false && t.ownerId !== currentUser?.uid) {
+        return false;
+      }
+
+      // Hónap szűrés
+      const transDate = new Date(t.date);
+      const selectedYear = selectedMonth.getFullYear();
+      const selectedMonthNum = selectedMonth.getMonth();
+
+      if (
+        transDate.getFullYear() !== selectedYear ||
+        transDate.getMonth() !== selectedMonthNum
+      ) {
+        return false;
+      }
+
+      // Számla szűrés (ha van kiválasztva konkrét számla)
+      if (
+        selectedAccounts.length > 0 &&
+        !selectedAccounts.includes(t.account)
+      ) {
+        return false;
+      }
+
+      return true;
+    });
   };
 
   const deleteTransaction = async (transactionId) => {
@@ -5368,11 +6638,11 @@ const saveTransaction = async () => {
                     Szervíz
                   </button>
                   <button
-                        onClick={() => openFuelingModal(vehicle)}
-                        className="p-2 bg-yellow-500 text-white rounded-lg hover:bg-yellow-600"
-                        title="Tankolás"
-                      >
-                        <Fuel size={20} />
+                    onClick={() => openFuelingModal(vehicle)}
+                    className="p-2 bg-yellow-500 text-white rounded-lg hover:bg-yellow-600"
+                    title="Tankolás"
+                  >
+                    <Fuel size={20} />
                   </button>
                   <button
                     onClick={() => openVehicleModal(vehicle)}
@@ -5436,67 +6706,67 @@ const saveTransaction = async () => {
 
             {/* Gumiabroncsok */}
             {vehicle.tires && vehicle.tires.length > 0 && (
-                    <div className="mt-3">
-                      <p className="text-sm font-semibold text-gray-700 mb-2">
-                        Gumiabroncsok:
-                      </p>
-                      <div className="space-y-2">
-                        {vehicle.tires.map((tire, idx) => {
-                          const warnings = checkTireCondition(tire);
-                          return (
-                            <div
-                              key={idx}
-                              className="flex items-start justify-between p-2 bg-blue-50 rounded text-sm"
-                            >
-                              <div className="flex-1">
-                                <span className="font-medium">
-                                  {tire.position} - {tire.type}
-                                </span>
-                                <br />
-                                <span className="text-gray-600 text-xs">
-                                  {tire.brand} {tire.size}
-                                  {tire.manufactureYear &&
-                                    ` (${tire.manufactureYear})`}
-                                </span>
-                                {tire.treadDepth && (
-                                  <div className="mt-1">
-                                    <span className="text-xs font-semibold text-blue-700">
-                                      Profil: {tire.treadDepth} mm
-                                    </span>
-                                  </div>
-                                )}
-                                {warnings.length > 0 && (
-                                  <div className="mt-1 space-y-1">
-                                    {warnings.map((warn, wIdx) => (
-                                      <div
-                                        key={wIdx}
-                                        className={`text-xs font-semibold ${
-                                          warn.type === "depth"
-                                            ? "text-red-600"
-                                            : warn.type === "age"
-                                            ? "text-orange-600"
-                                            : "text-yellow-600"
-                                        }`}
-                                      >
-                                        ⚠️ {warn.message}
-                                      </div>
-                                    ))}
-                                  </div>
-                                )}
-                              </div>
-                              <button
-                                onClick={() => openEditTireModal(vehicle, idx)}
-                                className="ml-2 text-blue-600 hover:text-blue-700"
-                                title="Profilmélység frissítése"
-                              >
-                                <Edit2 size={16} />
-                              </button>
+              <div className="p-4 border-t border-gray-200 bg-blue-50">
+                <h4 className="font-semibold text-gray-800 mb-3 text-sm flex items-center gap-2">
+                  <span>🛞</span> Gumiabroncsok
+                </h4>
+                <div className="space-y-2">
+                  {vehicle.tires.map((tire, idx) => {
+                    const warnings = checkTireCondition(tire);
+                    return (
+                      <div
+                        key={idx}
+                        className="flex items-start justify-between p-2 bg-blue-50 rounded text-sm"
+                      >
+                        <div className="flex-1">
+                          <span className="font-medium">
+                            {tire.position} - {tire.type}
+                          </span>
+                          <br />
+                          <span className="text-gray-600 text-xs">
+                            {tire.brand} {tire.size}
+                            {tire.manufactureYear &&
+                              ` (${tire.manufactureYear})`}
+                          </span>
+                          {tire.treadDepth && (
+                            <div className="mt-1">
+                              <span className="text-xs font-semibold text-blue-700">
+                                Profil: {tire.treadDepth} mm
+                              </span>
                             </div>
-                          );
-                        })}
+                          )}
+                          {warnings.length > 0 && (
+                            <div className="mt-1 space-y-1">
+                              {warnings.map((warn, wIdx) => (
+                                <div
+                                  key={wIdx}
+                                  className={`text-xs font-semibold ${
+                                    warn.type === "depth"
+                                      ? "text-red-600"
+                                      : warn.type === "age"
+                                      ? "text-orange-600"
+                                      : "text-yellow-600"
+                                  }`}
+                                >
+                                  ⚠️ {warn.message}
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                        <button
+                          onClick={() => openEditTireModal(vehicle, idx)}
+                          className="ml-2 text-blue-600 hover:text-blue-700"
+                          title="Profilmélység frissítése"
+                        >
+                          <Edit2 size={16} />
+                        </button>
                       </div>
-                    </div>
-                  )}
+                    );
+                  })}
+                </div>
+              </div>
+            )}
 
             {/* Olajcserék */}
             {vehicle.oilChanges && vehicle.oilChanges.length > 0 && (
@@ -6537,15 +7807,34 @@ const saveTransaction = async () => {
   );
 
   const renderPenzugyek = () => {
-    const loans = data.finances?.loans || [];
-    const savingGoals = data.finances?.savingGoals || [];
-    const investments = data.finances?.investments || [];
-    const transactions = data.finances?.transactions || [];
+    // --- Safe local variables and defaults ---
+    const safeData = data || {};
+    const finances = safeData.finances || {};
+    const loans = Array.isArray(finances.loans) ? finances.loans : [];
+    const savingGoals = Array.isArray(finances.savingGoals)
+      ? finances.savingGoals
+      : [];
+    const investments = Array.isArray(finances.investments)
+      ? finances.investments
+      : [];
+    const transactions = Array.isArray(finances.transactions)
+      ? finances.transactions
+      : [];
 
-    // Időszűrés
+    const accounts = Array.isArray(safeData.accounts) ? safeData.accounts : [];
+    const subscriptions = Array.isArray(safeData.subscriptions)
+      ? safeData.subscriptions
+      : [];
+
+    // If customDateRange exists in outer scope use it, otherwise null
+    const customRange =
+      typeof customDateRange !== "undefined" ? customDateRange : null;
+
+    // --- Helper: transaction time filter using local transactions ---
     const filterTransactions = () => {
       const now = new Date();
-      return transactions.filter((t) => {
+      return (transactions || []).filter((t) => {
+        if (!t || !t.date) return false;
         const tDate = new Date(t.date);
         if (financeTimeFilter === "day") {
           return tDate.toDateString() === now.toDateString();
@@ -6560,9 +7849,9 @@ const saveTransaction = async () => {
         } else if (financeTimeFilter === "year") {
           return tDate.getFullYear() === now.getFullYear();
         } else if (financeTimeFilter === "custom") {
-          if (customDateRange.start && customDateRange.end) {
-            const start = new Date(customDateRange.start);
-            const end = new Date(customDateRange.end);
+          if (customRange?.start && customRange?.end) {
+            const start = new Date(customRange.start);
+            const end = new Date(customRange.end);
             return tDate >= start && tDate <= end;
           }
         }
@@ -6572,61 +7861,60 @@ const saveTransaction = async () => {
 
     const filteredTransactions = filterTransactions();
 
-    // Számítások
-    const totalDebt = loans.reduce(
-      (sum, l) => sum + (parseFloat(l.currentBalance) || 0),
+    // --- Calculations (safe reduces) ---
+    const totalDebt = (loans || []).reduce(
+      (sum, l) => sum + (parseFloat(l?.currentBalance) || 0),
       0
     );
-    const totalMonthlyPayment = loans.reduce(
-      (sum, l) => sum + (parseFloat(l.monthlyPayment) || 0),
+    const totalMonthlyPayment = (loans || []).reduce(
+      (sum, l) => sum + (parseFloat(l?.monthlyPayment) || 0),
       0
     );
-    const totalSaved = savingGoals.reduce(
-      (sum, g) => sum + (parseFloat(g.currentAmount) || 0),
+    const totalSaved = (savingGoals || []).reduce(
+      (sum, g) => sum + (parseFloat(g?.currentAmount) || 0),
       0
     );
-    const totalGoals = savingGoals.reduce(
-      (sum, g) => sum + (parseFloat(g.targetAmount) || 0),
+    const totalGoals = (savingGoals || []).reduce(
+      (sum, g) => sum + (parseFloat(g?.targetAmount) || 0),
       0
     );
 
-    // Befektetések értéke
-    const totalInvestments = investments.reduce(
+    const totalInvestments = (investments || []).reduce(
       (sum, inv) =>
-        sum + convertToHUF(parseFloat(inv.currentValue) || 0, inv.currency),
+        sum + convertToHUF(parseFloat(inv?.currentValue) || 0, inv?.currency),
       0
     );
-    const investmentCost = investments.reduce(
+    const investmentCost = (investments || []).reduce(
       (sum, inv) =>
-        sum + convertToHUF(parseFloat(inv.amount) || 0, inv.currency),
+        sum + convertToHUF(parseFloat(inv?.amount) || 0, inv?.currency),
       0
     );
     const investmentProfit = totalInvestments - investmentCost;
 
-    // Bevételek és kiadások
-    const income = filteredTransactions
-      .filter((t) => t.type === "income")
+    const income = (filteredTransactions || [])
+      .filter((t) => t?.type === "income")
       .reduce(
-        (sum, t) => sum + convertToHUF(parseFloat(t.amount), t.currency),
+        (sum, t) => sum + convertToHUF(parseFloat(t?.amount) || 0, t?.currency),
         0
       );
-    const expenses = filteredTransactions
-      .filter((t) => t.type === "expense")
+    const expenses = (filteredTransactions || [])
+      .filter((t) => t?.type === "expense")
       .reduce(
-        (sum, t) => sum + convertToHUF(parseFloat(t.amount), t.currency),
+        (sum, t) => sum + convertToHUF(parseFloat(t?.amount) || 0, t?.currency),
         0
       );
     const balance = income - expenses;
 
-    // Előfizetések - többvalutás
-    const totalSubscriptions = (data.subscriptions || [])
-      .filter((s) => s.active)
+    const totalSubscriptions = (subscriptions || [])
+      .filter((s) => s?.active)
       .reduce(
         (sum, s) =>
-          sum + convertToHUF(parseFloat(s.monthlyPrice), s.currency || "HUF"),
+          sum +
+          convertToHUF(parseFloat(s?.monthlyPrice) || 0, s?.currency || "HUF"),
         0
       );
 
+    // --- UI helper objects (unchanged) ---
     const savingCategories = {
       vacation: {
         name: "Nyaralás",
@@ -6666,6 +7954,185 @@ const saveTransaction = async () => {
       other: { name: "Egyéb", icon: "💰", color: "text-gray-600" },
     };
 
+    // === DEBUG + robust visibleAccounts computing - paste before your JSX return ===
+
+    // Try several common locations for accounts (defensive)
+    const accountsSource = Array.isArray(data?.accounts)
+      ? data.accounts
+      : Array.isArray(data?.finances?.accounts)
+      ? data.finances.accounts
+      : Array.isArray(accounts)
+      ? accounts // if you already have accounts variable
+      : [];
+
+    // Normalize and filter visible accounts (treat missing isShared as shared)
+    const visibleAccounts = (accountsSource || []).filter((acc) => {
+      if (!acc) return false;
+      // require id + name (or displayName)
+      const hasId = typeof acc.id !== "undefined" && acc.id !== null;
+      const name = acc.name ?? acc.displayName ?? acc.title ?? null;
+      if (!hasId || !name) return false;
+
+      const ownerId = acc.ownerId != null ? String(acc.ownerId) : null;
+      const uid = currentUser?.uid != null ? String(currentUser.uid) : null;
+      const isShared =
+        typeof acc.isShared === "undefined" ? true : !!acc.isShared;
+
+      if (isShared) return true;
+      if (!ownerId || !uid) return false;
+      return ownerId === uid;
+    });
+
+    // Utility
+    const isBlank = (v) =>
+      v === null ||
+      v === undefined ||
+      (typeof v === "string" && v.trim() === "") ||
+      (Array.isArray(v) && v.length === 0);
+
+    // Normalizer: get a value from several possible keys
+    const pick = (obj, ...keys) => {
+      if (!obj) return undefined;
+      for (const k of keys) {
+        if (typeof obj[k] !== "undefined") return obj[k];
+        // support nested like obj[k.sub]
+        const parts = k.split(".");
+        if (parts.length > 1) {
+          let cur = obj;
+          for (const p of parts) {
+            if (!cur) break;
+            cur = cur[p];
+          }
+          if (typeof cur !== "undefined") return cur;
+        }
+      }
+      return undefined;
+    };
+
+    // Validate form — returns { ok, message, normalized }
+    function validateTransactionForm(form, { requirePositive = true } = {}) {
+      // Try common keys
+      const rawAmount = pick(form, "amount", "value", "amountRaw", "sum");
+      const rawCategory = pick(form, "category", "categoryId", "categoryName");
+      const rawAccount = pick(
+        form,
+        "accountId",
+        "account",
+        "accountName",
+        "selectedAccount"
+      );
+
+      // Debug log (remove if noisy)
+      console.log(
+        "validateTransactionForm: rawAmount, rawCategory, rawAccount:",
+        rawAmount,
+        rawCategory,
+        rawAccount,
+        "form:",
+        form
+      );
+
+      // Basic presence
+      if (isBlank(rawAmount) || isBlank(rawCategory) || isBlank(rawAccount)) {
+        return { ok: false, message: "Összeg, kategória és számla kötelező!" };
+      }
+
+      // numeric parse
+      const amountNum = Number(String(rawAmount).trim().replace(",", "."));
+      if (!Number.isFinite(amountNum) || isNaN(amountNum)) {
+        return { ok: false, message: "Az összeg érvénytelen szám." };
+      }
+
+      if (requirePositive && amountNum <= 0) {
+        return {
+          ok: false,
+          message: "Az összegnek nagyobbnak kell lennie, mint 0.",
+        };
+      }
+
+      // Normalize category and account ids (strings)
+      const category = String(rawCategory);
+      const accountId = String(rawAccount);
+
+      // Ensure accountId exists in visibleAccounts (guard: visibleAccounts may be in scope)
+      if (
+        typeof visibleAccounts !== "undefined" &&
+        Array.isArray(visibleAccounts)
+      ) {
+        const found = visibleAccounts.find((a) => String(a.id) === accountId);
+        if (!found) {
+          // useful debug message
+          console.warn(
+            "Selected accountId not found in visibleAccounts:",
+            accountId,
+            visibleAccounts.map((a) => a.id)
+          );
+          return {
+            ok: false,
+            message:
+              "Kiválasztott számla nem érvényes. Válassz létező számlát.",
+          };
+        }
+      }
+
+      return {
+        ok: true,
+        normalized: { amount: amountNum, category, accountId },
+      };
+    }
+
+    // Example save handler — adapt to your saving logic (firestore/api/local state)
+    async function handleSaveTransaction(e) {
+      e?.preventDefault?.();
+
+      // formData must be your current form state variable (common in your code)
+      const form = formData || {}; // change if your state name differs
+
+      // debug: show what will be validated
+      console.log("Submitting transaction:", form);
+
+      const check = validateTransactionForm(form);
+      if (!check.ok) {
+        // show the error to the user - replace alert with your UI state setter if you have one
+        alert(check.message);
+        return;
+      }
+
+      // Build payload (merge normalized values back in)
+      const payload = {
+        ...form,
+        amount: check.normalized.amount,
+        category: check.normalized.category,
+        accountId: check.normalized.accountId,
+        date: form.date || new Date().toISOString(),
+      };
+
+      try {
+        // Replace the following with your save logic
+        // e.g. await saveTransactionToDb(payload)
+        console.log("Saving transaction payload:", payload);
+        // After save: close modal, clear form, refresh
+        setShowTransactionModal(false);
+        setFormData({}); // or your initial state
+        // optionally refresh data or optimistically update UI
+      } catch (err) {
+        console.error("Save transaction failed", err);
+        alert("Hiba történt a mentés során.");
+      }
+    }
+
+    // DEBUG UI data (temporary) - shows why accounts were filtered out
+    const debugAccountsSummary = (accountsSource || [])
+      .slice(0, 10)
+      .map((a) => ({
+        id: a?.id,
+        name: a?.name ?? a?.displayName ?? a?.title,
+        ownerId: a?.ownerId,
+        isShared: a?.isShared,
+        keys: a ? Object.keys(a) : [],
+      }));
+
+    // --- Full JSX (uses local safe arrays) ---
     return (
       <div className="space-y-6">
         <div className="flex justify-between items-center">
@@ -6674,8 +8141,9 @@ const saveTransaction = async () => {
             <p className="text-sm text-gray-600">Teljes pénzügyi áttekintés</p>
           </div>
         </div>
+
         {/* Gyors műveletek */}
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
           <button
             onClick={() => openTransactionModal("income")}
             className="flex items-center justify-center gap-2 bg-green-600 text-white px-6 py-4 rounded-lg hover:bg-green-700 shadow-md active:scale-95 transition-transform"
@@ -6690,8 +8158,16 @@ const saveTransaction = async () => {
             <Plus size={24} />
             <span className="font-semibold">Kiadás</span>
           </button>
+          <button
+            onClick={() => setShowImportModal(true)}
+            className="flex items-center justify-center gap-2 bg-blue-600 text-white px-6 py-4 rounded-lg hover:bg-blue-700 shadow-md active:scale-95 transition-transform"
+          >
+            <Upload size={24} />
+            <span className="font-semibold">Import</span>
+          </button>
         </div>
-        {/* Összesítők */}
+
+        {/* Összesítők 
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
           <div className="bg-gradient-to-br from-blue-500 to-blue-600 rounded-lg shadow-lg p-6 text-white">
             <div className="flex items-center justify-between mb-2">
@@ -6748,7 +8224,9 @@ const saveTransaction = async () => {
             <div className="text-xs mt-1 text-purple-200">havonta</div>
           </div>
         </div>
-        {/* Számlák */}
+        */}
+
+        {/* --- SZÁMLÁK (uses visibleAccounts + debug panel) --- */}
         <div className="bg-white rounded-lg shadow-sm border border-gray-200">
           <div className="p-4 border-b border-gray-200 flex justify-between items-center">
             <h3 className="font-semibold text-gray-800 flex items-center gap-2">
@@ -6764,39 +8242,364 @@ const saveTransaction = async () => {
             </button>
           </div>
 
-          {data.accounts.filter(
-            (acc) => acc.isShared !== false || acc.ownerId === currentUser?.uid
-          ).length === 0 ? (
+          {/* Visible accounts UI */}
+          {visibleAccounts.length === 0 ? (
             <div className="p-8 text-center text-gray-500">
               <Wallet size={48} className="mx-auto mb-3 text-gray-400" />
               <p>Még nincs hozzáadott számla</p>
             </div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 p-4">
-              {data.accounts
-                .filter(
-                  (acc) =>
-                    acc.isShared !== false || acc.ownerId === currentUser?.uid
-                )
-                .map((account) => (
-                  <div
-                    key={account.id}
-                    className="bg-white p-4 rounded-lg shadow-md border-l-4 border-blue-500 hover:shadow-lg transition-shadow"
+              {visibleAccounts.map((account) => (
+                <div
+                  key={account.id}
+                  className="bg-white p-4 rounded-lg shadow-md border-l-4 border-blue-500 hover:shadow-lg transition-shadow"
+                >
+                  <div className="flex justify-between items-start mb-2">
+                    <div className="flex items-center gap-2">
+                      <h3 className="font-semibold text-gray-800">
+                        {account?.name ?? account?.displayName}
+                      </h3>
+                      {account?.isShared === false && (
+                        <span className="text-xs bg-yellow-100 text-yellow-800 px-2 py-1 rounded-full">
+                          Privát
+                        </span>
+                      )}
+                    </div>
+                    <div className="flex gap-1">
+                      <button
+                        onClick={() => openAccountModal(account)}
+                        className="text-blue-600 hover:text-blue-700"
+                      >
+                        <Edit2 size={16} />
+                      </button>
+                      <button
+                        onClick={() =>
+                          setShowDeleteConfirm({
+                            type: "account",
+                            id: account.id,
+                          })
+                        }
+                        className="text-red-600 hover:text-red-700"
+                      >
+                        <Trash2 size={16} />
+                      </button>
+                    </div>
+                  </div>
+                  <p className="text-xs text-gray-500 mb-2">{account?.type}</p>
+                  <p
+                    className={`text-2xl font-bold ${
+                      (account?.balance ?? 0) >= 0
+                        ? "text-green-600"
+                        : "text-red-600"
+                    }`}
                   >
-                    <div className="flex justify-between items-start mb-2">
-                      <div className="flex items-center gap-2">
-                        <h3 className="font-semibold text-gray-800">
-                          {account.name}
-                        </h3>
-                        {account.isShared === false && (
-                          <span className="text-xs bg-yellow-100 text-yellow-800 px-2 py-1 rounded-full">
-                            Privát
-                          </span>
-                        )}
+                    {(account?.balance ?? 0).toLocaleString()}{" "}
+                    {account?.currency || "HUF"}
+                  </p>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Hónap navigáció és számla szűrő*/}
+        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4">
+          <div className="flex items-center justify-between">
+            <button
+              onClick={goToPreviousMonth}
+              className="p-2 hover:bg-gray-100 rounded-lg transition"
+            >
+              <ChevronLeft size={24} />
+            </button>
+
+            <div className="flex items-center gap-4">
+              <h3 className="text-xl font-bold text-gray-800">
+                {selectedMonth.toLocaleDateString("hu-HU", {
+                  year: "numeric",
+                  month: "long",
+                })}
+              </h3>
+              {selectedMonth.getMonth() !== new Date().getMonth() ||
+              selectedMonth.getFullYear() !== new Date().getFullYear() ? (
+                <button
+                  onClick={goToCurrentMonth}
+                  className="text-sm text-blue-600 hover:text-blue-700"
+                >
+                  Mai hónapra
+                </button>
+              ) : null}
+            </div>
+
+            <button
+              onClick={goToNextMonth}
+              className="p-2 hover:bg-gray-100 rounded-lg transition"
+            >
+              <ChevronRight size={24} />
+            </button>
+          </div>
+          {/* Számla szűrő */}
+          {(() => {
+            const accountsSource = Array.isArray(data?.accounts)
+              ? data.accounts
+              : Array.isArray(data?.finances?.accounts)
+              ? data.finances.accounts
+              : [];
+
+            const visibleAccounts = accountsSource.filter(
+              (acc) =>
+                acc &&
+                (acc.isShared !== false || acc.ownerId === currentUser?.uid)
+            );
+
+            if (visibleAccounts.length === 0) return null;
+
+            return (
+              <div className="border-top: 20px">
+                <div className="flex items-center justify-between mb-3">
+                  <h3 className="font-semibold text-gray-800 flex items-center gap-2">
+                    <Filter size={18} className="text-blue-600" />
+                    Számlák szűrése
+                  </h3>
+                  <button
+                    onClick={selectAllAccounts}
+                    className="text-sm text-blue-600 hover:text-blue-700"
+                  >
+                    {selectedAccounts.length === 0
+                      ? "Összes kijelölve"
+                      : "Összes kijelölése"}
+                  </button>
+                </div>
+
+                <div className="flex flex-wrap gap-2">
+                  {visibleAccounts.map((account) => {
+                    const isSelected =
+                      selectedAccounts.length === 0 ||
+                      selectedAccounts.includes(account.id);
+
+                    return (
+                      <button
+                        key={account.id}
+                        onClick={() => toggleAccountFilter(account.id)}
+                        className={`px-3 py-2 rounded-lg border-2 transition text-sm ${
+                          isSelected
+                            ? "border-blue-600 bg-blue-50 text-blue-700"
+                            : "border-gray-300 bg-white text-gray-600 hover:border-gray-400"
+                        }`}
+                      >
+                        <div className="flex items-center gap-2">
+                          <Wallet size={14} />
+                          <span className="font-medium">{account.name}</span>
+                          {account.isShared === false && (
+                            <span className="text-xs">(Privát)</span>
+                          )}
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {selectedAccounts.length > 0 && (
+                  <p className="text-xs text-gray-500 mt-2">
+                    {visibleAccounts.length - selectedAccounts.length} számla
+                    kiválasztva
+                  </p>
+                )}
+              </div>
+            );
+          })()}
+        </div>
+
+        {/* Transaction History - Bevétel/Kiadás összesítő */}
+        <div className="bg-white rounded-lg shadow-sm border border-gray-200">
+          <div className="p-4 border-b border-gray-200">
+            <h3 className="font-semibold text-gray-800 flex items-center gap-2">
+              <TrendingUp size={20} className="text-blue-600" />
+              Bevételek és Kiadások -{" "}
+              {selectedMonth.toLocaleDateString("hu-HU", {
+                year: "numeric",
+                month: "long",
+              })}
+            </h3>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 p-4">
+            {(() => {
+              const transactionsSource = Array.isArray(data?.transactions)
+                ? data.transactions
+                : Array.isArray(data?.finances?.transactions)
+                ? data.finances.transactions
+                : [];
+
+              const filteredTransactions =
+                filterTransactionsByMonthAndAccounts(transactionsSource);
+
+              const income = filteredTransactions
+                .filter((t) => t.type === "income")
+                .reduce((sum, t) => sum + (parseFloat(t.amount) || 0), 0);
+
+              const expenses = filteredTransactions
+                .filter((t) => t.type === "expense")
+                .reduce((sum, t) => sum + (parseFloat(t.amount) || 0), 0);
+
+              const balance = income - expenses;
+
+              return (
+                <>
+                  <div className="bg-gradient-to-br from-green-500 to-green-600 text-white p-6 rounded-lg shadow-lg">
+                    <div className="flex items-center justify-between mb-2">
+                      <h3 className="text-lg font-semibold">Bevétel</h3>
+                      <TrendingUp size={24} />
+                    </div>
+                    <p className="text-3xl font-bold">
+                      {income.toLocaleString()} Ft
+                    </p>
+                    <p className="text-sm opacity-90 mt-1">
+                      {
+                        filteredTransactions.filter((t) => t.type === "income")
+                          .length
+                      }{" "}
+                      tranzakció
+                    </p>
+                  </div>
+
+                  <div className="bg-gradient-to-br from-red-500 to-red-600 text-white p-6 rounded-lg shadow-lg">
+                    <div className="flex items-center justify-between mb-2">
+                      <h3 className="text-lg font-semibold">Kiadás</h3>
+                      <TrendingDown size={24} />
+                    </div>
+                    <p className="text-3xl font-bold">
+                      {expenses.toLocaleString()} Ft
+                    </p>
+                    <p className="text-sm opacity-90 mt-1">
+                      {
+                        filteredTransactions.filter((t) => t.type === "expense")
+                          .length
+                      }{" "}
+                      tranzakció
+                    </p>
+                  </div>
+
+                  <div className="bg-gradient-to-br from-blue-500 to-blue-600 text-white p-6 rounded-lg shadow-lg">
+                    <div className="flex items-center justify-between mb-2">
+                      <h3 className="text-lg font-semibold">Egyenleg</h3>
+                      <Wallet size={24} />
+                    </div>
+                    <p className="text-3xl font-bold">
+                      {balance.toLocaleString()} Ft
+                    </p>
+                    <p
+                      className={`text-sm mt-1 ${
+                        balance >= 0 ? "text-green-200" : "text-red-200"
+                      }`}
+                    >
+                      {balance >= 0 ? "Pozitív" : "Negatív"} mérleg
+                    </p>
+                  </div>
+                </>
+              );
+            })()}
+          </div>
+
+          {/* Tranzakciók listája */}
+          <div className="p-4 border-t">
+            <h4 className="font-semibold text-gray-800 mb-3">
+              Tranzakciók ebben a hónapban
+            </h4>
+            <div className="space-y-2">
+              {(() => {
+                const transactionsSource = Array.isArray(data?.transactions)
+                  ? data.transactions
+                  : Array.isArray(data?.finances?.transactions)
+                  ? data.finances.transactions
+                  : [];
+
+                const filteredTransactions =
+                  filterTransactionsByMonthAndAccounts(transactionsSource);
+
+                if (filteredTransactions.length === 0) {
+                  return (
+                    <div className="text-center py-8 text-gray-500">
+                      <Package
+                        size={48}
+                        className="mx-auto mb-2 text-gray-400"
+                      />
+                      <p>Nincs tranzakció ebben a hónapban</p>
+                      {selectedAccounts.length > 0 && (
+                        <p className="text-sm mt-1">a kiválasztott számlákon</p>
+                      )}
+                    </div>
+                  );
+                }
+
+                return filteredTransactions
+                  .sort((a, b) => new Date(b.date) - new Date(a.date))
+                  .map((transaction) => (
+                    <div
+                      key={transaction.id}
+                      className="flex items-center justify-between p-3 bg-gray-50 rounded-lg hover:bg-gray-100"
+                    >
+                      <div className="flex items-center gap-3 flex-1">
+                        <div
+                          className={`w-10 h-10 rounded-full flex items-center justify-center ${
+                            transaction?.type === "income"
+                              ? "bg-green-100"
+                              : "bg-red-100"
+                          }`}
+                        >
+                          {transaction?.type === "income" ? (
+                            <TrendingUp size={20} className="text-green-600" />
+                          ) : (
+                            <TrendingDown size={20} className="text-red-600" />
+                          )}
+                        </div>
+                        <div className="flex-1">
+                          <div className="flex items-center gap-2">
+                            <p className="font-medium text-gray-800">
+                              {transaction?.category}
+                            </p>
+                            {transaction?.isShared === false && (
+                              <span className="text-xs bg-yellow-100 text-yellow-800 px-2 py-0.5 rounded-full">
+                                Privát
+                              </span>
+                            )}
+                          </div>
+                          <p className="text-sm text-gray-600">
+                            {transaction?.description || "Nincs leírás"}
+                          </p>
+                          <p className="text-xs text-gray-500">
+                            {transaction?.date
+                              ? new Date(transaction.date).toLocaleDateString(
+                                  "hu-HU"
+                                )
+                              : ""}{" "}
+                            • {transaction?.accountName}
+                          </p>
+                        </div>
+                        <div className="text-right">
+                          <p
+                            className={`font-bold ${
+                              transaction?.type === "income"
+                                ? "text-green-600"
+                                : "text-red-600"
+                            }`}
+                          >
+                            {transaction?.type === "income" ? "+" : "-"}
+                            {(
+                              parseFloat(transaction?.amount) || 0
+                            ).toLocaleString()}{" "}
+                            Ft
+                          </p>
+                        </div>
                       </div>
-                      <div className="flex gap-1">
+                      <div className="flex gap-1 ml-3">
                         <button
-                          onClick={() => openAccountModal(account)}
+                          onClick={() => {
+                            setEditingItem(transaction);
+                            setTransactionType(transaction?.type || "expense");
+                            setFormData(transaction);
+                            setShowTransactionModal(true);
+                          }}
                           className="text-blue-600 hover:text-blue-700"
                         >
                           <Edit2 size={16} />
@@ -6804,8 +8607,8 @@ const saveTransaction = async () => {
                         <button
                           onClick={() =>
                             setShowDeleteConfirm({
-                              type: "account",
-                              id: account.id,
+                              type: "transaction",
+                              id: transaction.id,
                             })
                           }
                           className="text-red-600 hover:text-red-700"
@@ -6814,55 +8617,206 @@ const saveTransaction = async () => {
                         </button>
                       </div>
                     </div>
-                    <p className="text-xs text-gray-500 mb-2">{account.type}</p>
-                    <p
-                      className={`text-2xl font-bold ${
-                        account.balance >= 0
-                          ? "text-green-600"
-                          : "text-red-600"
-                      }`}
-                    >
-                      {account.balance.toLocaleString()}{" "}
-                      {account.currency || "HUF"}
-                    </p>
-                  </div>
-                ))}
+                  ));
+              })()}
             </div>
-          )}
+          </div>
         </div>
 
-        {/* Időszűrő */}
-        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4">
-          <div className="flex items-center gap-2 mb-3">
-            <Calendar size={20} className="text-blue-600" />
-            <h3 className="font-semibold text-gray-800">Időszak</h3>
-          </div>
-          <div className="flex flex-wrap gap-2">
-            {["day", "week", "month", "year", "all"].map((filter) => (
-              <button
-                key={filter}
-                onClick={() => setFinanceTimeFilter(filter)}
-                className={`px-4 py-2 rounded-lg font-medium transition ${
-                  financeTimeFilter === filter
-                    ? "bg-blue-600 text-white"
-                    : "bg-gray-100 text-gray-700 hover:bg-gray-200"
-                }`}
-              >
-                {filter === "day" && "Ma"}
-                {filter === "week" && "Hét"}
-                {filter === "month" && "Hónap"}
-                {filter === "year" && "Év"}
-                {filter === "all" && "Összes"}
-              </button>
-            ))}
-            <button
-              onClick={() => setShowDateRangeModal(true)}
-              className="px-4 py-2 rounded-lg font-medium transition bg-gray-100 text-gray-700 hover:bg-gray-200"
-            >
-              📅 Egyedi
-            </button>
-          </div>
-        </div>
+        {/* Költségvetés (Budget) */}
+        {(() => {
+          const currentBudget = getCurrentBudget();
+          const budgetStatus = currentBudget
+            ? calculateBudgetStatus(
+                currentBudget,
+                data.transactions || data.finances?.transactions || []
+              )
+            : null;
+
+          return (
+            <div className="bg-white rounded-lg shadow-sm border border-gray-200">
+              <div className="p-4 border-b border-gray-200 flex justify-between items-center">
+                <h3 className="font-semibold text-gray-800 flex items-center gap-2">
+                  <Target size={20} className="text-green-600" />
+                  Költségvetés
+                </h3>
+                <button
+                  onClick={() => openBudgetModal(currentBudget)}
+                  className="flex items-center gap-2 bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700"
+                >
+                  {currentBudget ? <Edit2 size={18} /> : <Plus size={18} />}
+                  <span className="hidden sm:inline">
+                    {currentBudget ? "Szerkesztés" : "Új budget"}
+                  </span>
+                </button>
+              </div>
+
+              {!currentBudget ? (
+                <div className="p-8 text-center text-gray-500">
+                  <Target size={48} className="mx-auto mb-3 text-gray-400" />
+                  <p className="mb-2">
+                    Még nincs költségvetés erre az időszakra
+                  </p>
+                  <p className="text-sm">
+                    Hozz létre egyet, hogy nyomon kövesd a kiadásaidat!
+                  </p>
+                </div>
+              ) : (
+                <div className="p-4">
+                  {/* Teljes költségvetés áttekintés */}
+                  <div className="mb-6">
+                    <div className="flex justify-between items-center mb-2">
+                      <span className="text-sm text-gray-600">
+                        Teljes költségvetés
+                      </span>
+                      <span className="text-sm font-semibold text-gray-800">
+                        {budgetStatus.totalSpent.toLocaleString()} /{" "}
+                        {budgetStatus.totalBudget.toLocaleString()} Ft
+                      </span>
+                    </div>
+                    <div className="w-full bg-gray-200 rounded-full h-4 mb-1">
+                      <div
+                        className={`h-4 rounded-full transition-all ${
+                          budgetStatus.percentage >= 100
+                            ? "bg-red-500"
+                            : budgetStatus.percentage >= 80
+                            ? "bg-yellow-500"
+                            : "bg-green-500"
+                        }`}
+                        style={{
+                          width: `${Math.min(budgetStatus.percentage, 100)}%`,
+                        }}
+                      />
+                    </div>
+                    <div className="flex justify-between text-sm">
+                      <span
+                        className={
+                          budgetStatus.percentage >= 100
+                            ? "text-red-600 font-semibold"
+                            : budgetStatus.percentage >= 80
+                            ? "text-yellow-600"
+                            : "text-gray-600"
+                        }
+                      >
+                        {budgetStatus.percentage.toFixed(1)}% felhasználva
+                      </span>
+                      <span
+                        className={
+                          budgetStatus.remaining < 0
+                            ? "text-red-600 font-semibold"
+                            : "text-green-600"
+                        }
+                      >
+                        {budgetStatus.remaining >= 0
+                          ? "Maradt: "
+                          : "Túllépés: "}
+                        {Math.abs(budgetStatus.remaining).toLocaleString()} Ft
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Figyelmeztetések */}
+                  {budgetStatus.isOverBudget && (
+                    <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg">
+                      <div className="flex items-start gap-2">
+                        <AlertCircle
+                          size={20}
+                          className="text-red-600 mt-0.5"
+                        />
+                        <div className="flex-1">
+                          <p className="font-semibold text-red-800">
+                            Túlköltés!
+                          </p>
+                          <p className="text-sm text-red-700">
+                            {Math.abs(budgetStatus.remaining).toLocaleString()}{" "}
+                            Ft-tal túllépted a költségvetést.
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Kategóriánkénti bontás */}
+                  {currentBudget.categories &&
+                    currentBudget.categories.length > 0 && (
+                      <div>
+                        <h4 className="font-semibold text-gray-800 mb-3">
+                          Kategóriánkénti limitek
+                        </h4>
+                        <div className="space-y-3">
+                          {currentBudget.categories.map((cat) => {
+                            const catStatus =
+                              budgetStatus.categorySpending[cat.name] || {};
+                            const catPercentage = catStatus.percentage || 0;
+
+                            return (
+                              <div
+                                key={cat.id}
+                                className="p-3 bg-gray-50 rounded-lg"
+                              >
+                                <div className="flex justify-between items-center mb-2">
+                                  <span className="font-medium text-gray-800">
+                                    {cat.name}
+                                  </span>
+                                  <span className="text-sm text-gray-600">
+                                    {(catStatus.spent || 0).toLocaleString()} /{" "}
+                                    {cat.limit.toLocaleString()} Ft
+                                  </span>
+                                </div>
+                                <div className="w-full bg-gray-200 rounded-full h-2">
+                                  <div
+                                    className={`h-2 rounded-full transition-all ${
+                                      catPercentage >= 100
+                                        ? "bg-red-500"
+                                        : catPercentage >= 80
+                                        ? "bg-yellow-500"
+                                        : "bg-blue-500"
+                                    }`}
+                                    style={{
+                                      width: `${Math.min(catPercentage, 100)}%`,
+                                    }}
+                                  />
+                                </div>
+                                <div className="flex justify-between text-xs mt-1">
+                                  <span
+                                    className={
+                                      catPercentage >= 100
+                                        ? "text-red-600 font-semibold"
+                                        : "text-gray-600"
+                                    }
+                                  >
+                                    {catPercentage.toFixed(1)}%
+                                  </span>
+                                  {catStatus.remaining !== undefined && (
+                                    <span
+                                      className={
+                                        catStatus.remaining < 0
+                                          ? "text-red-600"
+                                          : "text-gray-600"
+                                      }
+                                    >
+                                      {catStatus.remaining >= 0
+                                        ? "Maradt: "
+                                        : "Túllépés: "}
+                                      {Math.abs(
+                                        catStatus.remaining
+                                      ).toLocaleString()}{" "}
+                                      Ft
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
+                </div>
+              )}
+            </div>
+          );
+        })()}
+
         {/* BEFEKTETÉSEK */}
         <div className="bg-white rounded-lg shadow-sm border border-gray-200">
           <div className="p-4 border-b border-gray-200 flex justify-between items-center">
@@ -6887,14 +8841,15 @@ const saveTransaction = async () => {
           ) : (
             <div className="divide-y divide-gray-200">
               {investments.map((inv) => {
-                const type = investmentTypes[inv.type] || investmentTypes.other;
+                const type =
+                  investmentTypes[inv?.type] || investmentTypes.other;
                 const currentValueHUF = convertToHUF(
-                  parseFloat(inv.currentValue) || 0,
-                  inv.currency
+                  parseFloat(inv?.currentValue) || 0,
+                  inv?.currency
                 );
                 const costHUF = convertToHUF(
-                  parseFloat(inv.amount) || 0,
-                  inv.currency
+                  parseFloat(inv?.amount) || 0,
+                  inv?.currency
                 );
                 const profitHUF = currentValueHUF - costHUF;
                 const profitPercent =
@@ -6909,7 +8864,7 @@ const saveTransaction = async () => {
                         </span>
                         <div>
                           <h4 className="font-semibold text-gray-800">
-                            {inv.name}
+                            {inv?.name}
                           </h4>
                           <span
                             className={`text-xs px-2 py-1 rounded ${type.color} bg-opacity-10`}
@@ -6944,13 +8899,13 @@ const saveTransaction = async () => {
                       <div>
                         <p className="text-gray-600">Aktuális érték</p>
                         <p className="font-semibold text-gray-800">
-                          {formatCurrency(inv.currentValue, inv.currency)}
+                          {formatCurrency(inv?.currentValue, inv?.currency)}
                         </p>
                       </div>
                       <div>
                         <p className="text-gray-600">Beszerzési ár</p>
                         <p className="font-semibold text-gray-800">
-                          {formatCurrency(inv.amount, inv.currency)}
+                          {formatCurrency(inv?.amount, inv?.currency)}
                         </p>
                       </div>
                       <div>
@@ -6979,7 +8934,7 @@ const saveTransaction = async () => {
                       </div>
                     </div>
 
-                    {inv.notes && (
+                    {inv?.notes && (
                       <p className="text-sm text-gray-600 mt-2 italic">
                         {inv.notes}
                       </p>
@@ -6989,240 +8944,6 @@ const saveTransaction = async () => {
               })}
             </div>
           )}
-        </div>
-        {/* Transaction History - Bevétel/Kiadás összesítő */}
-        <div className="bg-white rounded-lg shadow-sm border border-gray-200">
-          <div className="p-4 border-b border-gray-200">
-            <h3 className="font-semibold text-gray-800 flex items-center gap-2">
-              <TrendingUp size={20} className="text-blue-600" />
-              Bevételek és Kiadások
-            </h3>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 p-4">
-            <div className="bg-gradient-to-br from-green-500 to-green-600 text-white p-6 rounded-lg shadow-lg">
-              <div className="flex items-center justify-between mb-2">
-                <h3 className="text-lg font-semibold">Bevétel</h3>
-                <TrendingUp size={24} />
-              </div>
-              <p className="text-3xl font-bold">
-                {data.transactions
-                  .filter((t) => {
-                    if (t.isShared === false && t.ownerId !== currentUser?.uid) {
-                      return false;
-                    }
-                    if (t.type !== "income") return false;
-                    const transDate = new Date(t.date);
-                    const now = new Date();
-                    if (financeTimeFilter === "week") {
-                      const weekAgo = new Date(
-                        now.getTime() - 7 * 24 * 60 * 60 * 1000
-                      );
-                      return transDate >= weekAgo;
-                    } else if (financeTimeFilter === "month") {
-                      return (
-                        transDate.getMonth() === now.getMonth() &&
-                        transDate.getFullYear() === now.getFullYear()
-                      );
-                    } else if (financeTimeFilter === "year") {
-                      return transDate.getFullYear() === now.getFullYear();
-                    }
-                    return true;
-                  })
-                  .reduce((sum, t) => sum + t.amount, 0)
-                  .toLocaleString()}{" "}
-                Ft
-              </p>
-            </div>
-
-            <div className="bg-gradient-to-br from-red-500 to-red-600 text-white p-6 rounded-lg shadow-lg">
-              <div className="flex items-center justify-between mb-2">
-                <h3 className="text-lg font-semibold">Kiadás</h3>
-                <TrendingDown size={24} />
-              </div>
-              <p className="text-3xl font-bold">
-                {data.transactions
-                  .filter((t) => {
-                    if (t.isShared === false && t.ownerId !== currentUser?.uid) {
-                      return false;
-                    }
-                    if (t.type !== "expense") return false;
-                    const transDate = new Date(t.date);
-                    const now = new Date();
-                    if (financeTimeFilter === "week") {
-                      const weekAgo = new Date(
-                        now.getTime() - 7 * 24 * 60 * 60 * 1000
-                      );
-                      return transDate >= weekAgo;
-                    } else if (financeTimeFilter === "month") {
-                      return (
-                        transDate.getMonth() === now.getMonth() &&
-                        transDate.getFullYear() === now.getFullYear()
-                      );
-                    } else if (financeTimeFilter === "year") {
-                      return transDate.getFullYear() === now.getFullYear();
-                    }
-                    return true;
-                  })
-                  .reduce((sum, t) => sum + t.amount, 0)
-                  .toLocaleString()}{" "}
-                Ft
-              </p>
-            </div>
-
-            <div className="bg-gradient-to-br from-blue-500 to-blue-600 text-white p-6 rounded-lg shadow-lg">
-              <div className="flex items-center justify-between mb-2">
-                <h3 className="text-lg font-semibold">Egyenleg</h3>
-                <Wallet size={24} />
-              </div>
-              <p className="text-3xl font-bold">
-                {(
-                  data.transactions
-                    .filter((t) => {
-                      if (
-                        t.isShared === false &&
-                        t.ownerId !== currentUser?.uid
-                      ) {
-                        return false;
-                      }
-                      const transDate = new Date(t.date);
-                      const now = new Date();
-                      if (financeTimeFilter === "week") {
-                        const weekAgo = new Date(
-                          now.getTime() - 7 * 24 * 60 * 60 * 1000
-                        );
-                        return transDate >= weekAgo;
-                      } else if (financeTimeFilter === "month") {
-                        return (
-                          transDate.getMonth() === now.getMonth() &&
-                          transDate.getFullYear() === now.getFullYear()
-                        );
-                      } else if (financeTimeFilter === "year") {
-                        return transDate.getFullYear() === now.getFullYear();
-                      }
-                      return true;
-                    })
-                    .reduce(
-                      (sum, t) =>
-                        sum + (t.type === "income" ? t.amount : -t.amount),
-                      0
-                    )
-                ).toLocaleString()}{" "}
-                Ft
-              </p>
-            </div>
-          </div>
-
-          {/* Tranzakciók listája */}
-          <div className="p-4 border-t">
-            <h4 className="font-semibold text-gray-800 mb-3">
-              Legutóbbi tranzakciók
-            </h4>
-            <div className="space-y-2">
-              {data.transactions
-                .filter((t) => {
-                  if (t.isShared === false && t.ownerId !== currentUser?.uid) {
-                    return false;
-                  }
-                  const transDate = new Date(t.date);
-                  const now = new Date();
-                  if (financeTimeFilter === "week") {
-                    const weekAgo = new Date(
-                      now.getTime() - 7 * 24 * 60 * 60 * 1000
-                    );
-                    return transDate >= weekAgo;
-                  } else if (financeTimeFilter === "month") {
-                    return (
-                      transDate.getMonth() === now.getMonth() &&
-                      transDate.getFullYear() === now.getFullYear()
-                    );
-                  } else if (financeTimeFilter === "year") {
-                    return transDate.getFullYear() === now.getFullYear();
-                  }
-                  return true;
-                })
-                .sort((a, b) => new Date(b.date) - new Date(a.date))
-                .map((transaction) => (
-                  <div
-                    key={transaction.id}
-                    className="flex items-center justify-between p-3 bg-gray-50 rounded-lg hover:bg-gray-100"
-                  >
-                    <div className="flex items-center gap-3 flex-1">
-                      <div
-                        className={`w-10 h-10 rounded-full flex items-center justify-center ${
-                          transaction.type === "income"
-                            ? "bg-green-100"
-                            : "bg-red-100"
-                        }`}
-                      >
-                        {transaction.type === "income" ? (
-                          <TrendingUp size={20} className="text-green-600" />
-                        ) : (
-                          <TrendingDown size={20} className="text-red-600" />
-                        )}
-                      </div>
-                      <div className="flex-1">
-                        <div className="flex items-center gap-2">
-                          <p className="font-medium text-gray-800">
-                            {transaction.category}
-                          </p>
-                          {transaction.isShared === false && (
-                            <span className="text-xs bg-yellow-100 text-yellow-800 px-2 py-0.5 rounded-full">
-                              Privát
-                            </span>
-                          )}
-                        </div>
-                        <p className="text-sm text-gray-600">
-                          {transaction.description || "Nincs leírás"}
-                        </p>
-                        <p className="text-xs text-gray-500">
-                          {new Date(transaction.date).toLocaleDateString(
-                            "hu-HU"
-                          )}{" "}
-                          • {transaction.accountName}
-                        </p>
-                      </div>
-                      <div className="text-right">
-                        <p
-                          className={`font-bold ${
-                            transaction.type === "income"
-                              ? "text-green-600"
-                              : "text-red-600"
-                          }`}
-                        >
-                          {transaction.type === "income" ? "+" : "-"}
-                          {transaction.amount.toLocaleString()} Ft
-                        </p>
-                      </div>
-                    </div>
-                    <div className="flex gap-1 ml-3">
-                      <button
-                        onClick={() => {
-                          setEditingItem(transaction);
-                          setTransactionType(transaction.type);
-                          setFormData(transaction);
-                          setShowTransactionModal(true);
-                        }}
-                        className="text-blue-600 hover:text-blue-700"
-                      >
-                        <Edit2 size={16} />
-                      </button>
-                      <button
-                        onClick={() =>
-                          setShowDeleteConfirm({
-                            type: "transaction",
-                            id: transaction.id,
-                          })
-                        }
-                        className="text-red-600 hover:text-red-700"
-                      >
-                        <Trash2 size={16} />
-                      </button>
-                    </div>
-                  </div>
-                ))}
-            </div>
-          </div>
         </div>
 
         {/* HITELEK */}
@@ -7249,15 +8970,15 @@ const saveTransaction = async () => {
           ) : (
             <div className="divide-y divide-gray-200">
               {loans.map((loan) => {
-                const principal = parseFloat(loan.principal) || 0;
-                const current = parseFloat(loan.currentBalance) || 0;
+                const principal = parseFloat(loan?.principal) || 0;
+                const current = parseFloat(loan?.currentBalance) || 0;
                 const paidAmount = principal - current;
                 const progressPercent =
                   principal > 0
                     ? Math.round((paidAmount / principal) * 100)
                     : 0;
 
-                const endDate = loan.endDate ? new Date(loan.endDate) : null;
+                const endDate = loan?.endDate ? new Date(loan.endDate) : null;
                 const today = new Date();
                 const monthsLeft = endDate
                   ? Math.max(
@@ -7271,9 +8992,9 @@ const saveTransaction = async () => {
                     <div className="flex items-start justify-between mb-3">
                       <div className="flex-1">
                         <h4 className="font-semibold text-gray-800">
-                          {loan.name}
+                          {loan?.name}
                         </h4>
-                        {loan.lender && (
+                        {loan?.lender && (
                           <p className="text-sm text-gray-600">{loan.lender}</p>
                         )}
                       </div>
@@ -7321,7 +9042,7 @@ const saveTransaction = async () => {
                         <p className="text-gray-600">Havi törlesztő</p>
                         <p className="font-semibold text-gray-800">
                           {formatCurrency(
-                            parseFloat(loan.monthlyPayment),
+                            parseFloat(loan?.monthlyPayment) || 0,
                             "HUF"
                           )}
                         </p>
@@ -7329,7 +9050,7 @@ const saveTransaction = async () => {
                       <div>
                         <p className="text-gray-600">Kamat / THM</p>
                         <p className="font-semibold text-gray-800">
-                          {loan.interestRate}% / {loan.thm}%
+                          {loan?.interestRate}% / {loan?.thm}%
                         </p>
                       </div>
                       {monthsLeft !== null && (
@@ -7340,7 +9061,7 @@ const saveTransaction = async () => {
                           </p>
                         </div>
                       )}
-                      {loan.paymentDay && (
+                      {loan?.paymentDay && (
                         <div>
                           <p className="text-gray-600">Fizetés</p>
                           <p className="font-semibold text-gray-800">
@@ -7350,7 +9071,7 @@ const saveTransaction = async () => {
                       )}
                     </div>
 
-                    {loan.notes && (
+                    {loan?.notes && (
                       <p className="text-sm text-gray-600 mt-2 italic">
                         {loan.notes}
                       </p>
@@ -7361,6 +9082,7 @@ const saveTransaction = async () => {
             </div>
           )}
         </div>
+
         {/* MEGTAKARÍTÁSI CÉLOK */}
         <div className="bg-white rounded-lg shadow-sm border border-gray-200">
           <div className="p-4 border-b border-gray-200 flex justify-between items-center">
@@ -7385,15 +9107,17 @@ const saveTransaction = async () => {
           ) : (
             <div className="divide-y divide-gray-200">
               {savingGoals.map((goal) => {
-                const current = parseFloat(goal.currentAmount) || 0;
-                const target = parseFloat(goal.targetAmount) || 0;
+                const current = parseFloat(goal?.currentAmount) || 0;
+                const target = parseFloat(goal?.targetAmount) || 0;
                 const progressPercent =
                   target > 0 ? Math.round((current / target) * 100) : 0;
                 const remaining = target - current;
                 const category =
-                  savingCategories[goal.category] || savingCategories.other;
+                  savingCategories[goal?.category] || savingCategories.other;
 
-                const deadline = goal.deadline ? new Date(goal.deadline) : null;
+                const deadline = goal?.deadline
+                  ? new Date(goal.deadline)
+                  : null;
                 const today = new Date();
                 const daysLeft = deadline
                   ? Math.max(
@@ -7409,7 +9133,7 @@ const saveTransaction = async () => {
                         <span className="text-3xl">{category.icon}</span>
                         <div>
                           <h4 className="font-semibold text-gray-800">
-                            {goal.name}
+                            {goal?.name}
                           </h4>
                           <span
                             className={`text-xs px-2 py-1 rounded ${category.color}`}
@@ -7493,13 +9217,13 @@ const saveTransaction = async () => {
                           <p className="text-gray-600">Határidő</p>
                           <p className="font-semibold text-gray-800">
                             {daysLeft} nap (
-                            {deadline.toLocaleDateString("hu-HU")})
+                            {deadline?.toLocaleDateString("hu-HU")})
                           </p>
                         </div>
                       )}
                     </div>
 
-                    {goal.deposits && goal.deposits.length > 0 && (
+                    {goal?.deposits && goal.deposits.length > 0 && (
                       <details className="mt-3">
                         <summary className="text-sm text-blue-600 cursor-pointer hover:text-blue-700 font-medium">
                           {goal.deposits.length} befizetés megtekintése
@@ -7514,13 +9238,15 @@ const saveTransaction = async () => {
                                 className="flex justify-between text-xs p-2 bg-green-50 rounded"
                               >
                                 <span>
-                                  +{formatCurrency(deposit.amount, "HUF")}
+                                  +{formatCurrency(deposit?.amount || 0, "HUF")}
                                 </span>
                                 <span className="text-gray-600">
-                                  {new Date(deposit.date).toLocaleDateString(
-                                    "hu-HU"
-                                  )}{" "}
-                                  • {deposit.addedBy}
+                                  {deposit?.date
+                                    ? new Date(deposit.date).toLocaleDateString(
+                                        "hu-HU"
+                                      )
+                                    : ""}{" "}
+                                  • {deposit?.addedBy}
                                 </span>
                               </div>
                             ))}
@@ -7528,7 +9254,7 @@ const saveTransaction = async () => {
                       </details>
                     )}
 
-                    {goal.notes && (
+                    {goal?.notes && (
                       <p className="text-sm text-gray-600 mt-2 italic">
                         {goal.notes}
                       </p>
@@ -9361,7 +11087,6 @@ const saveTransaction = async () => {
   };
 
   const renderReceptek = () => {
-    const recipes = data.recipes || [];
     const categories = {
       előétel: "🥗",
       főétel: "🍝",
@@ -9373,6 +11098,7 @@ const saveTransaction = async () => {
 
     return (
       <div className="space-y-6">
+        {/* FEJLÉC */}
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
           <h2 className="text-2xl font-bold text-gray-800">
             Receptek & Menütervezés
@@ -9392,74 +11118,264 @@ const saveTransaction = async () => {
               <Calendar size={18} />
               Heti menü
             </button>
+            <button
+              onClick={() => setShowRecipeImportModal(true)}
+              className="flex items-center gap-2 bg-purple-600 text-white px-4 py-2 rounded-lg hover:bg-purple-700"
+            >
+              <Download size={18} />
+              Import
+            </button>
+            <button
+              onClick={() => setShowSmartSearchModal(true)}
+              className="flex items-center gap-2 bg-orange-600 text-white px-4 py-2 rounded-lg hover:bg-orange-700"
+            >
+              <Sparkles size={18} />
+              Okosrecept
+            </button>
           </div>
         </div>
 
-        {recipes.length === 0 ? (
-          <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-8 text-center text-gray-500">
-            <BookOpen size={48} className="mx-auto mb-3 text-gray-400" />
-            <p>Még nincs hozzáadott recept</p>
-          </div>
-        ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {recipes.map((recipe) => (
-              <div
-                key={recipe.id}
-                className="bg-white rounded-lg shadow-sm border border-gray-200 hover:shadow-md transition cursor-pointer"
-                onClick={() => openRecipeModal(recipe)}
+        {/* SZŰRŐ ÉS RENDEZÉS PANEL */}
+        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-3">
+            {/* Keresés */}
+            <div className="lg:col-span-2">
+              <input
+                type="text"
+                placeholder="🔍 Keresés név vagy alapanyag szerint..."
+                value={recipeFilters.searchText}
+                onChange={(e) =>
+                  setRecipeFilters({
+                    ...recipeFilters,
+                    searchText: e.target.value,
+                  })
+                }
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 text-sm"
+              />
+            </div>
+
+            {/* Kategória */}
+            <div>
+              <select
+                value={recipeFilters.category}
+                onChange={(e) =>
+                  setRecipeFilters({
+                    ...recipeFilters,
+                    category: e.target.value,
+                  })
+                }
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 text-sm"
               >
-                <div className="p-4">
-                  <div className="flex items-start justify-between mb-2">
-                    <div className="flex items-center gap-2">
-                      <span className="text-2xl">
-                        {categories[recipe.category] || "🍽️"}
-                      </span>
-                      <h3 className="font-semibold text-gray-800">
-                        {recipe.name}
-                      </h3>
-                    </div>
-                    {recipe.favorite && (
-                      <span className="text-yellow-500">⭐</span>
-                    )}
-                  </div>
+                <option value="">Minden kategória</option>
+                <option value="előétel">🥗 Előétel</option>
+                <option value="főétel">🍝 Főétel</option>
+                <option value="desszert">🍰 Desszert</option>
+                <option value="leves">🍲 Leves</option>
+                <option value="saláta">🥙 Saláta</option>
+                <option value="egyéb">🍽️ Egyéb</option>
+              </select>
+            </div>
 
-                  <div className="flex flex-wrap gap-2 mb-2">
-                    <span className="text-xs px-2 py-1 bg-blue-100 text-blue-700 rounded">
-                      {recipe.prepTime} perc
-                    </span>
-                    <span className="text-xs px-2 py-1 bg-green-100 text-green-700 rounded">
-                      {recipe.servings} adag
-                    </span>
-                    {recipe.difficulty && (
-                      <span className="text-xs px-2 py-1 bg-purple-100 text-purple-700 rounded capitalize">
-                        {recipe.difficulty}
-                      </span>
-                    )}
-                  </div>
+            {/* Nehézség */}
+            <div>
+              <select
+                value={recipeFilters.difficulty}
+                onChange={(e) =>
+                  setRecipeFilters({
+                    ...recipeFilters,
+                    difficulty: e.target.value,
+                  })
+                }
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 text-sm"
+              >
+                <option value="">Minden nehézség</option>
+                <option value="könnyű">Könnyű</option>
+                <option value="közepes">Közepes</option>
+                <option value="nehéz">Nehéz</option>
+              </select>
+            </div>
 
-                  {recipe.estimatedCost && (
-                    <div className="text-sm text-gray-600 mb-2">
-                      Költség: ~{recipe.estimatedCost.toLocaleString()} Ft
-                    </div>
-                  )}
-
-                  {recipe.allergens && recipe.allergens.length > 0 && (
-                    <div className="flex flex-wrap gap-1">
-                      {recipe.allergens.map((allergen, idx) => (
-                        <span
-                          key={idx}
-                          className="text-xs px-2 py-1 bg-red-100 text-red-700 rounded"
-                        >
-                          {allergen}
-                        </span>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              </div>
-            ))}
+            {/* Max idő */}
+            <div>
+              <input
+                type="number"
+                placeholder="Max. idő (perc)"
+                value={recipeFilters.maxTime}
+                onChange={(e) =>
+                  setRecipeFilters({
+                    ...recipeFilters,
+                    maxTime: e.target.value,
+                  })
+                }
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 text-sm"
+              />
+            </div>
           </div>
-        )}
+
+          <div className="flex flex-wrap items-center gap-3 mt-3 pt-3 border-t border-gray-200">
+            {/* Kedvencek szűrő */}
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={recipeFilters.showFavoritesOnly}
+                onChange={(e) =>
+                  setRecipeFilters({
+                    ...recipeFilters,
+                    showFavoritesOnly: e.target.checked,
+                  })
+                }
+                className="w-4 h-4 text-yellow-600 rounded"
+              />
+              <span className="text-sm text-gray-700">⭐ Csak kedvencek</span>
+            </label>
+
+            {/* Rendezés */}
+            <div className="flex items-center gap-2 ml-auto">
+              <span className="text-sm text-gray-600">Rendezés:</span>
+              <select
+                value={recipeSortBy}
+                onChange={(e) => setRecipeSortBy(e.target.value)}
+                className="px-3 py-1 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 text-sm"
+              >
+                <option value="name">Név szerint</option>
+                <option value="time">Idő szerint</option>
+                <option value="cost">Költség szerint</option>
+                <option value="recent">Legújabb először</option>
+              </select>
+            </div>
+
+            {/* Szűrők törlése */}
+            {(recipeFilters.searchText ||
+              recipeFilters.category ||
+              recipeFilters.difficulty ||
+              recipeFilters.maxTime ||
+              recipeFilters.showFavoritesOnly ||
+              recipeSortBy !== "name") && (
+              <button
+                onClick={resetFilters}
+                className="text-sm text-blue-600 hover:text-blue-700 flex items-center gap-1"
+              >
+                <X size={14} />
+                Szűrők törlése
+              </button>
+            )}
+          </div>
+        </div>
+
+        {/* RECEPTEK LISTÁJA */}
+        {(() => {
+          const recipes = data.recipes || [];
+
+          if (recipes.length === 0) {
+            return (
+              <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-8 text-center text-gray-500">
+                <BookOpen size={48} className="mx-auto mb-3 text-gray-400" />
+                <p>Még nincs hozzáadott recept</p>
+              </div>
+            );
+          }
+
+          const filteredRecipes = getFilteredAndSortedRecipes();
+
+          if (filteredRecipes.length === 0) {
+            return (
+              <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-8 text-center text-gray-500">
+                <Search size={48} className="mx-auto mb-3 text-gray-400" />
+                <p className="mb-2">Nincs a szűrésnek megfelelő recept</p>
+                <button
+                  onClick={resetFilters}
+                  className="text-blue-600 hover:text-blue-700 text-sm"
+                >
+                  Szűrők törlése
+                </button>
+              </div>
+            );
+          }
+
+          return (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {filteredRecipes.map((recipe) => (
+                <div
+                  key={recipe.id}
+                  className="bg-white rounded-lg shadow-sm border border-gray-200 hover:shadow-md transition"
+                >
+                  <div className="p-4">
+                    <div className="flex items-start justify-between mb-2">
+                      <div
+                        className="flex items-center gap-2 flex-1 cursor-pointer"
+                        onClick={() => openRecipeModal(recipe)}
+                      >
+                        <span className="text-2xl">
+                          {categories[recipe.category] || "🍽️"}
+                        </span>
+                        <h3 className="font-semibold text-gray-800">
+                          {recipe.name}
+                        </h3>
+                      </div>
+                      <div className="flex items-center gap-1">
+                        {recipe.favorite && (
+                          <span className="text-yellow-500">⭐</span>
+                        )}
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            deleteRecipe(recipe.id);
+                          }}
+                          className="text-red-600 hover:text-red-700 p-1"
+                          title="Törlés"
+                        >
+                          <Trash2 size={16} />
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="flex flex-wrap gap-2 mb-2">
+                      <span className="text-xs px-2 py-1 bg-blue-100 text-blue-700 rounded">
+                        {recipe.prepTime} perc
+                      </span>
+                      <span className="text-xs px-2 py-1 bg-green-100 text-green-700 rounded">
+                        {recipe.servings} adag
+                      </span>
+                      {recipe.difficulty && (
+                        <span className="text-xs px-2 py-1 bg-purple-100 text-purple-700 rounded capitalize">
+                          {recipe.difficulty}
+                        </span>
+                      )}
+                    </div>
+
+                    {recipe.estimatedCost > 0 && (
+                      <div className="text-sm text-gray-600 mb-2">
+                        Költség: ~{recipe.estimatedCost.toLocaleString()} Ft
+                      </div>
+                    )}
+
+                    {recipe.source && (
+                      <div
+                        className="text-xs text-gray-500 mb-2 truncate"
+                        title={recipe.source}
+                      >
+                        🔗 {recipe.source}
+                      </div>
+                    )}
+
+                    {recipe.allergens && recipe.allergens.length > 0 && (
+                      <div className="flex flex-wrap gap-1">
+                        {recipe.allergens.map((allergen, idx) => (
+                          <span
+                            key={idx}
+                            className="text-xs px-2 py-1 bg-red-100 text-red-700 rounded"
+                          >
+                            {allergen}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          );
+        })()}
       </div>
     );
   };
@@ -9882,7 +11798,6 @@ const saveTransaction = async () => {
           </div>
         )}
       </header>
-
       <div className="flex">
         <aside
           className={`${
@@ -9931,7 +11846,6 @@ const saveTransaction = async () => {
           <div className="max-w-6xl mx-auto">{renderContent()}</div>
         </main>
       </div>
-
       <nav className="md:hidden fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 z-30 overflow-x-auto">
         <div className="flex p-2 gap-1 min-w-max">
           {orderedModules
@@ -9974,9 +11888,7 @@ const saveTransaction = async () => {
             })}
         </div>
       </nav>
-
       {/* ALL MODALS */}
-
       {/* Task Modal */}
       {showTaskModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
@@ -10151,7 +12063,6 @@ const saveTransaction = async () => {
           </div>
         </div>
       )}
-
       {/* Member Modal */}
       {showMemberModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50 overflow-y-auto">
@@ -10582,7 +12493,6 @@ const saveTransaction = async () => {
           </div>
         </div>
       )}
-
       {/* Home Modal */}
       {showHomeModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50 overflow-y-auto">
@@ -11026,7 +12936,6 @@ const saveTransaction = async () => {
           </div>
         </div>
       )}
-
       {/* Vehicle Modal */}
       {showVehicleModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50 overflow-y-auto">
@@ -11494,7 +13403,7 @@ const saveTransaction = async () => {
                 </button>
               </div>
 
-{/* Tankolások */}
+              {/* Tankolások */}
               <div className="border-t pt-4">
                 <h4 className="font-semibold text-gray-800 mb-3">Tankolások</h4>
                 {formData.fuelings && formData.fuelings.length > 0 && (
@@ -11512,7 +13421,8 @@ const saveTransaction = async () => {
                               {fuel.km && ` • ${fuel.km.toLocaleString()} km`}
                             </div>
                             <div className="text-xs text-gray-600 mt-1">
-                              {fuel.liters} L × {fuel.pricePerLiter.toFixed(2)} Ft/L = {fuel.totalPrice.toLocaleString()} Ft
+                              {fuel.liters} L × {fuel.pricePerLiter.toFixed(2)}{" "}
+                              Ft/L = {fuel.totalPrice.toLocaleString()} Ft
                             </div>
                             {fuel.station && (
                               <div className="text-xs text-gray-500 mt-1">
@@ -11562,7 +13472,9 @@ const saveTransaction = async () => {
                       step="0.01"
                       placeholder="Mennyiség (L) *"
                       value={tempFueling.liters}
-                      onChange={(e) => handleFuelingLitersChange(e.target.value)}
+                      onChange={(e) =>
+                        handleFuelingLitersChange(e.target.value)
+                      }
                       className="px-3 py-2 border border-gray-300 rounded text-sm"
                     />
                     <input
@@ -11570,14 +13482,18 @@ const saveTransaction = async () => {
                       step="0.01"
                       placeholder="Egységár (Ft/L)"
                       value={tempFueling.pricePerLiter}
-                      onChange={(e) => handleFuelingPricePerLiterChange(e.target.value)}
+                      onChange={(e) =>
+                        handleFuelingPricePerLiterChange(e.target.value)
+                      }
                       className="px-3 py-2 border border-gray-300 rounded text-sm"
                     />
                     <input
                       type="number"
                       placeholder="Fizetett (Ft) *"
                       value={tempFueling.totalPrice}
-                      onChange={(e) => handleFuelingTotalPriceChange(e.target.value)}
+                      onChange={(e) =>
+                        handleFuelingTotalPriceChange(e.target.value)
+                      }
                       className="px-3 py-2 border border-gray-300 rounded text-sm"
                     />
                   </div>
@@ -11587,7 +13503,10 @@ const saveTransaction = async () => {
                       placeholder="Kút (pl. MOL)"
                       value={tempFueling.station}
                       onChange={(e) =>
-                        setTempFueling({ ...tempFueling, station: e.target.value })
+                        setTempFueling({
+                          ...tempFueling,
+                          station: e.target.value,
+                        })
                       }
                       className="px-3 py-2 border border-gray-300 rounded text-sm"
                     />
@@ -11596,14 +13515,18 @@ const saveTransaction = async () => {
                       placeholder="Megjegyzés"
                       value={tempFueling.notes}
                       onChange={(e) =>
-                        setTempFueling({ ...tempFueling, notes: e.target.value })
+                        setTempFueling({
+                          ...tempFueling,
+                          notes: e.target.value,
+                        })
                       }
                       className="px-3 py-2 border border-gray-300 rounded text-sm"
                     />
                   </div>
                 </div>
                 <p className="text-xs text-gray-500 mt-1">
-                  💡 Adj meg 2 értéket a 3-ból, a harmadikat automatikusan számoljuk
+                  💡 Adj meg 2 értéket a 3-ból, a harmadikat automatikusan
+                  számoljuk
                 </p>
                 <button
                   onClick={addFueling}
@@ -11715,7 +13638,6 @@ const saveTransaction = async () => {
           </div>
         </div>
       )}
-
       {/* Health Modal */}
       {showHealthModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
@@ -11824,7 +13746,6 @@ const saveTransaction = async () => {
           </div>
         </div>
       )}
-
       {/* Child Modal */}
       {showChildModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50 overflow-y-auto">
@@ -12070,7 +13991,6 @@ const saveTransaction = async () => {
           </div>
         </div>
       )}
-
       {/* Device Modal */}
       {showDeviceModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
@@ -12237,7 +14157,6 @@ const saveTransaction = async () => {
           </div>
         </div>
       )}
-
       {/* Pet Modal */}
       {showPetModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50 overflow-y-auto">
@@ -12585,7 +14504,6 @@ const saveTransaction = async () => {
           </div>
         </div>
       )}
-
       {/* Shopping Item Modal */}
       {showShoppingItemModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
@@ -12687,7 +14605,6 @@ const saveTransaction = async () => {
           </div>
         </div>
       )}
-
       {/* Subscription Modal */}
       {showSubscriptionModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
@@ -12884,7 +14801,6 @@ const saveTransaction = async () => {
           </div>
         </div>
       )}
-
       {/* Investment Modal */}
       {showInvestmentModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
@@ -13028,7 +14944,6 @@ const saveTransaction = async () => {
           </div>
         </div>
       )}
-
       {/* Transaction Modal */}
       {showTransactionModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
@@ -13049,34 +14964,36 @@ const saveTransaction = async () => {
             <div className="space-y-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Kategória
+                  Kategória *
                 </label>
                 <select
                   value={formData.category || ""}
-                  onChange={(e) =>
-                    setFormData({ ...formData, category: e.target.value })
-                  }
+                  onChange={(e) => {
+                    console.log("Category changed to:", e.target.value);
+                    setFormData({ ...formData, category: e.target.value });
+                  }}
                   className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
                 >
+                  <option value="">Válassz kategóriát...</option>
                   {transactionType === "income" ? (
                     <>
-                      {(settings.customCategories?.finance?.income || []).map(
-                        (cat) => (
-                          <option key={cat.id} value={cat.id}>
-                            {cat.icon} {cat.name}
-                          </option>
-                        )
-                      )}
+                      <option value="Fizetés">💰 Fizetés</option>
+                      <option value="Prémium">🎁 Prémium</option>
+                      <option value="Befektetés">📈 Befektetés</option>
+                      <option value="Ajándék">🎉 Ajándék</option>
+                      <option value="Egyéb bevétel">💵 Egyéb bevétel</option>
                     </>
                   ) : (
                     <>
-                      {(settings.customCategories?.finance?.expense || []).map(
-                        (cat) => (
-                          <option key={cat.id} value={cat.id}>
-                            {cat.icon} {cat.name}
-                          </option>
-                        )
-                      )}
+                      <option value="Étel">🍔 Étel</option>
+                      <option value="Közlekedés">🚗 Közlekedés</option>
+                      <option value="Lakhatás">🏠 Lakhatás</option>
+                      <option value="Szórakozás">🎮 Szórakozás</option>
+                      <option value="Egészség">💊 Egészség</option>
+                      <option value="Ruházat">👕 Ruházat</option>
+                      <option value="Oktatás">📚 Oktatás</option>
+                      <option value="Ajándék">🎁 Ajándék</option>
+                      <option value="Egyéb kiadás">💸 Egyéb kiadás</option>
                     </>
                   )}
                 </select>
@@ -13091,7 +15008,10 @@ const saveTransaction = async () => {
                     type="number"
                     value={formData.amount || ""}
                     onChange={(e) =>
-                      setFormData({ ...formData, amount: e.target.value })
+                      setFormData({
+                        ...formData,
+                        amount: e.target.value,
+                      })
                     }
                     className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
                     placeholder="10000"
@@ -13117,11 +15037,65 @@ const saveTransaction = async () => {
 
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Számla *
+                </label>
+                <select
+                  value={formData.account || ""}
+                  onChange={(e) => {
+                    console.log("Account selected:", e.target.value);
+                    setFormData({ ...formData, account: e.target.value });
+                  }}
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                >
+                  <option value="">Válassz számlát...</option>
+                  {(() => {
+                    // Keressük meg a számlákat több helyen is
+                    const accountsSource = Array.isArray(data?.accounts)
+                      ? data.accounts
+                      : Array.isArray(data?.finances?.accounts)
+                      ? data.finances.accounts
+                      : [];
+
+                    console.log("Available accounts:", accountsSource);
+
+                    // Szűrés: csak megosztott vagy saját számlák
+                    const visibleAccounts = accountsSource.filter(
+                      (acc) =>
+                        acc &&
+                        (acc.isShared !== false ||
+                          acc.ownerId === currentUser?.uid)
+                    );
+
+                    console.log("Visible accounts:", visibleAccounts);
+
+                    if (visibleAccounts.length === 0) {
+                      return (
+                        <option value="" disabled>
+                          Nincs elérhető számla
+                        </option>
+                      );
+                    }
+
+                    return visibleAccounts.map((account) => (
+                      <option key={account.id} value={account.id}>
+                        {account.name || account.displayName} (
+                        {(account.balance || 0).toLocaleString()}{" "}
+                        {account.currency || "HUF"})
+                      </option>
+                    ));
+                  })()}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
                   Dátum
                 </label>
                 <input
                   type="date"
-                  value={formData.date || ""}
+                  value={
+                    formData.date || new Date().toISOString().split("T")[0]
+                  }
                   onChange={(e) =>
                     setFormData({ ...formData, date: e.target.value })
                   }
@@ -13144,35 +15118,7 @@ const saveTransaction = async () => {
                 />
               </div>
             </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Számla / Alszámla
-              </label>
-              <select
-                value={formData.accountId || ""}
-                onChange={(e) => {
-                  const [accountId, subaccountId] = e.target.value.split("-");
-                  setFormData({
-                    ...formData,
-                    accountId: accountId ? parseInt(accountId) : null,
-                    subaccountId: subaccountId ? parseInt(subaccountId) : null,
-                  });
-                }}
-                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
-              >
-                <option value="">Válassz számlát...</option>
-                {(data.finances?.accounts || []).map((account) => (
-                  <optgroup key={account.id} label={account.name}>
-                    <option value={account.id}>📊 Főszámla</option>
-                    {account.subaccounts?.map((sub) => (
-                      <option key={sub.id} value={`${account.id}-${sub.id}`}>
-                        └─ {sub.name}
-                      </option>
-                    ))}
-                  </optgroup>
-                ))}
-              </select>
-            </div>
+
             <div className="mt-6 flex gap-3">
               <button
                 onClick={() => setShowTransactionModal(false)}
@@ -13194,7 +15140,6 @@ const saveTransaction = async () => {
           </div>
         </div>
       )}
-
       {/* Loan Modal */}
       {showLoanModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50 overflow-y-auto">
@@ -13425,7 +15370,6 @@ const saveTransaction = async () => {
           </div>
         </div>
       )}
-
       {/* Saving Goal Modal */}
       {showSavingGoalModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
@@ -13558,7 +15502,6 @@ const saveTransaction = async () => {
           </div>
         </div>
       )}
-
       {/* Deposit Modal */}
       {showDepositModal && selectedGoal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
@@ -13633,7 +15576,6 @@ const saveTransaction = async () => {
           </div>
         </div>
       )}
-
       {/* Invite Modal */}
       {showInviteModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
@@ -13699,7 +15641,6 @@ const saveTransaction = async () => {
           </div>
         </div>
       )}
-
       {/* Event Modal */}
       {showEventModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
@@ -13794,7 +15735,6 @@ const saveTransaction = async () => {
           </div>
         </div>
       )}
-
       {/* Weekly Note Modal */}
       {showWeeklyNoteModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
@@ -13851,7 +15791,6 @@ const saveTransaction = async () => {
           </div>
         </div>
       )}
-
       {/* Quick KM Modal */}
       {showKmModal && selectedVehicle && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
@@ -13906,7 +15845,6 @@ const saveTransaction = async () => {
           </div>
         </div>
       )}
-
       {/* Quick Service Modal */}
       {showQuickServiceModal && selectedVehicle && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
@@ -13987,7 +15925,6 @@ const saveTransaction = async () => {
           </div>
         </div>
       )}
-
       {/* Quick Meter Reading Modal */}
       {showQuickMeterModal && selectedHome && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
@@ -14059,7 +15996,6 @@ const saveTransaction = async () => {
           </div>
         </div>
       )}
-
       {/* Quick Maintenance Modal */}
       {showQuickMaintenanceModal && selectedHome && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
@@ -14165,7 +16101,6 @@ const saveTransaction = async () => {
           </div>
         </div>
       )}
-
       {/* Blood Pressure Modal */}
       {showBloodPressureModal && selectedMember && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
@@ -14275,7 +16210,6 @@ const saveTransaction = async () => {
           </div>
         </div>
       )}
-
       {/* Gift Idea Modal */}
       {showGiftIdeaModal && selectedMember && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
@@ -14385,7 +16319,6 @@ const saveTransaction = async () => {
           </div>
         </div>
       )}
-
       {/* Milestone Modal */}
       {showMilestoneModal && selectedChild && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
@@ -14483,7 +16416,6 @@ const saveTransaction = async () => {
           </div>
         </div>
       )}
-
       {/* Measurement Modal */}
       {showMeasurementModal && selectedChild && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
@@ -14594,7 +16526,6 @@ const saveTransaction = async () => {
           </div>
         </div>
       )}
-
       {/* Account Modal */}
       {showAccountModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
@@ -14723,7 +16654,10 @@ const saveTransaction = async () => {
                   {formData.isShared === false && (
                     <div className="mt-3 p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
                       <div className="flex items-start gap-2">
-                        <AlertCircle size={18} className="text-yellow-600 mt-0.5" />
+                        <AlertCircle
+                          size={18}
+                          className="text-yellow-600 mt-0.5"
+                        />
                         <div className="text-sm text-yellow-800">
                           <p className="font-semibold">Privát számla</p>
                           <p className="mt-1">
@@ -14820,7 +16754,6 @@ const saveTransaction = async () => {
           </div>
         </div>
       )}
-
       {/* Category Modal */}
       {showCategoryModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
@@ -14886,7 +16819,6 @@ const saveTransaction = async () => {
           </div>
         </div>
       )}
-
       {/* Date Range Modal */}
       {showDateRangeModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
@@ -14956,7 +16888,6 @@ const saveTransaction = async () => {
           </div>
         </div>
       )}
-
       {/* Recipe Modal */}
       {showRecipeModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50 overflow-y-auto">
@@ -15276,8 +17207,496 @@ const saveTransaction = async () => {
           </div>
         </div>
       )}
+      {showRecipeImportModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-lg shadow-xl max-w-md w-full p-6">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-xl font-bold text-gray-800">
+                Recept importálása
+              </h3>
+              <button
+                onClick={() => setShowRecipeImportModal(false)}
+                className="text-gray-500 hover:text-gray-700"
+              >
+                <X size={24} />
+              </button>
+            </div>
 
-{/* Fueling Modal (Gyors tankolás) */}
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Recept URL címe
+                </label>
+                <input
+                  type="url"
+                  value={recipeImportUrl}
+                  onChange={(e) => setRecipeImportUrl(e.target.value)}
+                  placeholder="https://nosalty.hu/recept/..."
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500"
+                />
+                <p className="text-xs text-gray-500 mt-1">
+                  Támogatott oldalak: Nosalty, Street Kitchen, Mindmegette és
+                  más receptoldalak
+                </p>
+              </div>
+
+              <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
+                <p className="text-sm text-blue-800">
+                  💡 <strong>Használat:</strong>
+                </p>
+                <ol className="text-xs text-blue-700 mt-2 ml-4 list-decimal space-y-1">
+                  <li>Nyisd meg a kívánt receptet a böngészőben</li>
+                  <li>Másold ki az URL-t a címsorból</li>
+                  <li>Illeszd be ide és kattints az Importálás gombra</li>
+                  <li>Az alkalmazás automatikusan kinyeri az adatokat</li>
+                </ol>
+              </div>
+
+              <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3">
+                <p className="text-xs text-yellow-800">
+                  ⚠️ <strong>Megjegyzés:</strong> Egyes oldalak biztonsági okok
+                  miatt blokkolhatják az importálást. Ilyenkor add hozzá
+                  manuálisan a receptet.
+                </p>
+              </div>
+            </div>
+
+            <div className="mt-6 flex gap-3">
+              <button
+                onClick={() => setShowRecipeImportModal(false)}
+                className="flex-1 px-4 py-3 border border-gray-300 rounded-lg hover:bg-gray-50"
+              >
+                Mégse
+              </button>
+              <button
+                onClick={importRecipeFromUrl}
+                disabled={!recipeImportUrl.trim() || importingRecipe}
+                className="flex-1 px-4 py-3 bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+              >
+                {importingRecipe ? (
+                  <>
+                    <div className="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent"></div>
+                    Importálás...
+                  </>
+                ) : (
+                  <>
+                    <Download size={18} />
+                    Importálás
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/*//HETI MENÜ MODAL //*/}
+      {showWeeklyMenuModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50 overflow-y-auto">
+          <div className="bg-white rounded-lg shadow-xl max-w-6xl w-full p-6 my-8 max-h-[90vh] overflow-y-auto">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-xl font-bold text-gray-800">
+                Heti menü tervező
+              </h3>
+              <button
+                onClick={() => setShowWeeklyMenuModal(false)}
+                className="text-gray-500 hover:text-gray-700"
+              >
+                <X size={24} />
+              </button>
+            </div>
+
+            {/* Hét navigáció */}
+            <div className="flex items-center justify-between mb-6 bg-gray-50 p-4 rounded-lg">
+              <button
+                onClick={() => setCurrentWeekOffset(currentWeekOffset - 1)}
+                className="p-2 hover:bg-gray-200 rounded-lg"
+              >
+                <ArrowLeft size={20} />
+              </button>
+
+              <div className="text-center">
+                <div className="font-semibold text-gray-800">
+                  {getWeekDateRange(currentWeekOffset)}
+                </div>
+                <div className="text-sm text-gray-500">
+                  {currentWeekOffset === 0
+                    ? "Ez a hét"
+                    : currentWeekOffset > 0
+                    ? `${currentWeekOffset} hét múlva`
+                    : `${Math.abs(currentWeekOffset)} héttel ezelőtt`}
+                </div>
+              </div>
+
+              <button
+                onClick={() => setCurrentWeekOffset(currentWeekOffset + 1)}
+                className="p-2 hover:bg-gray-200 rounded-lg"
+              >
+                <ArrowRight size={20} />
+              </button>
+            </div>
+
+            {/* Napok */}
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-6">
+              {[
+                "Hétfő",
+                "Kedd",
+                "Szerda",
+                "Csütörtök",
+                "Péntek",
+                "Szombat",
+                "Vasárnap",
+              ].map((day, idx) => {
+                const weekKey = getWeekKey(currentWeekOffset);
+                const menu = weeklyMenus[weekKey] || {};
+                const selectedRecipeId = menu[idx];
+                const selectedRecipe = data.recipes?.find(
+                  (r) => r.id === selectedRecipeId
+                );
+
+                return (
+                  <div
+                    key={idx}
+                    className="border border-gray-200 rounded-lg p-4"
+                  >
+                    <h4 className="font-semibold text-gray-800 mb-3">{day}</h4>
+
+                    {selectedRecipe ? (
+                      <div className="bg-green-50 border border-green-200 rounded-lg p-3">
+                        <div className="flex justify-between items-start mb-2">
+                          <span className="font-medium text-green-800">
+                            {selectedRecipe.name}
+                          </span>
+                          <button
+                            onClick={() => clearMenuForDay(idx)}
+                            className="text-red-600 hover:text-red-700"
+                          >
+                            <Trash2 size={16} />
+                          </button>
+                        </div>
+                        <div className="text-sm text-green-700">
+                          {selectedRecipe.prepTime} perc •{" "}
+                          {selectedRecipe.servings} adag
+                        </div>
+                      </div>
+                    ) : (
+                      <select
+                        onChange={(e) =>
+                          setMenuForDay(idx, parseInt(e.target.value))
+                        }
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500"
+                        defaultValue=""
+                      >
+                        <option value="">Válassz receptet...</option>
+                        {data.recipes?.map((recipe) => (
+                          <option key={recipe.id} value={recipe.id}>
+                            {recipe.name}
+                          </option>
+                        ))}
+                      </select>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Akciógombok */}
+            <div className="flex gap-3 pt-4 border-t">
+              <button
+                onClick={() => setShowWeeklyMenuModal(false)}
+                className="flex-1 px-4 py-3 border border-gray-300 rounded-lg hover:bg-gray-50"
+              >
+                Bezárás
+              </button>
+              <button
+                onClick={generateShoppingList}
+                className="flex-1 px-4 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 flex items-center justify-center gap-2"
+              >
+                <ShoppingCart size={18} />
+                Bevásárlólista készítése
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {/*//OKOSRECEPT KERESŐ MODAL */}
+      {showSmartSearchModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50 overflow-y-auto">
+          <div className="bg-white rounded-lg shadow-xl max-w-4xl w-full p-6 my-8 max-h-[90vh] overflow-y-auto">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-xl font-bold text-gray-800 flex items-center gap-2">
+                <Sparkles size={24} className="text-orange-600" />
+                Okosrecept kereső
+              </h3>
+              <button
+                onClick={() => setShowSmartSearchModal(false)}
+                className="text-gray-500 hover:text-gray-700"
+              >
+                <X size={24} />
+              </button>
+            </div>
+
+            {/* Keresési kritériumok */}
+            <div className="space-y-4 mb-6">
+              <div className="bg-orange-50 border border-orange-200 rounded-lg p-4">
+                <p className="text-sm text-orange-800 mb-3">
+                  🤖 Add meg, milyen alapanyagaid vannak, és az AI megtalálja a
+                  legjobb recepteket számodra!
+                </p>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Elérhető alapanyagok
+                    </label>
+                    <input
+                      type="text"
+                      value={smartSearchCriteria.availableIngredients}
+                      onChange={(e) =>
+                        setSmartSearchCriteria({
+                          ...smartSearchCriteria,
+                          availableIngredients: e.target.value,
+                        })
+                      }
+                      placeholder="pl. csirke, paradicsom, tészta"
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500"
+                    />
+                    <p className="text-xs text-gray-500 mt-1">
+                      Vesszővel elválasztva
+                    </p>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Maximum idő (perc)
+                    </label>
+                    <input
+                      type="number"
+                      value={smartSearchCriteria.maxTime}
+                      onChange={(e) =>
+                        setSmartSearchCriteria({
+                          ...smartSearchCriteria,
+                          maxTime: e.target.value,
+                        })
+                      }
+                      placeholder="pl. 45"
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Nehézség
+                    </label>
+                    <select
+                      value={smartSearchCriteria.difficulty}
+                      onChange={(e) =>
+                        setSmartSearchCriteria({
+                          ...smartSearchCriteria,
+                          difficulty: e.target.value,
+                        })
+                      }
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500"
+                    >
+                      <option value="">Mindegy</option>
+                      <option value="könnyű">Könnyű</option>
+                      <option value="közepes">Közepes</option>
+                      <option value="nehéz">Nehéz</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Kategória
+                    </label>
+                    <select
+                      value={smartSearchCriteria.category}
+                      onChange={(e) =>
+                        setSmartSearchCriteria({
+                          ...smartSearchCriteria,
+                          category: e.target.value,
+                        })
+                      }
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500"
+                    >
+                      <option value="">Mindegy</option>
+                      <option value="előétel">🥗 Előétel</option>
+                      <option value="főétel">🍝 Főétel</option>
+                      <option value="desszert">🍰 Desszert</option>
+                      <option value="leves">🍲 Leves</option>
+                      <option value="saláta">🥙 Saláta</option>
+                    </select>
+                  </div>
+                </div>
+
+                <button
+                  onClick={searchSmartRecipes}
+                  disabled={searching}
+                  className="mt-4 w-full px-4 py-3 bg-orange-600 text-white rounded-lg hover:bg-orange-700 disabled:bg-gray-400 flex items-center justify-center gap-2"
+                >
+                  {searching ? (
+                    <>
+                      <div className="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent"></div>
+                      Keresés...
+                    </>
+                  ) : (
+                    <>
+                      <Search size={18} />
+                      Receptek keresése
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+
+            {/* Találatok */}
+            {smartSearchResults.length > 0 && (
+              <div>
+                <h4 className="font-semibold text-gray-800 mb-3">
+                  Találatok ({smartSearchResults.length})
+                </h4>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {smartSearchResults.map((recipe) => (
+                    <div
+                      key={recipe.id}
+                      className="border border-gray-200 rounded-lg p-4 hover:shadow-md transition cursor-pointer"
+                      onClick={() => {
+                        openRecipeModal(recipe);
+                        setShowSmartSearchModal(false);
+                      }}
+                    >
+                      <h5 className="font-semibold text-gray-800 mb-2">
+                        {recipe.name}
+                      </h5>
+                      <div className="flex flex-wrap gap-2 text-sm">
+                        <span className="px-2 py-1 bg-blue-100 text-blue-700 rounded">
+                          {recipe.prepTime} perc
+                        </span>
+                        <span className="px-2 py-1 bg-green-100 text-green-700 rounded">
+                          {recipe.servings} adag
+                        </span>
+                        <span className="px-2 py-1 bg-purple-100 text-purple-700 rounded capitalize">
+                          {recipe.difficulty}
+                        </span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {smartSearchResults.length === 0 && !searching && (
+              <div className="text-center text-gray-500 py-8">
+                <ChefHat size={48} className="mx-auto mb-3 text-gray-400" />
+                <p>Adj meg keresési feltételeket a receptek megtalálásához</p>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+      {/*//Bevásárló lista MODAL */}
+      {showShoppingListModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50 overflow-y-auto">
+          <div className="bg-white rounded-lg shadow-xl max-w-2xl w-full p-6 my-8 max-h-[90vh] overflow-y-auto">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-xl font-bold text-gray-800">
+                Heti bevásárlólista
+              </h3>
+              <button
+                onClick={() => setShowShoppingListModal(false)}
+                className="text-gray-500 hover:text-gray-700"
+              >
+                <X size={24} />
+              </button>
+            </div>
+
+            <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 mb-4">
+              <p className="text-sm text-blue-800">
+                ✅ Pipáld ki, ami van otthon. Csak a hiányzó termékek kerülnek a
+                bevásárlólistába.
+              </p>
+            </div>
+
+            <div className="space-y-2 mb-6">
+              {weekShoppingList.map((item) => (
+                <div
+                  key={item.id}
+                  className={`flex items-center justify-between p-3 rounded-lg border ${
+                    item.atHome
+                      ? "bg-green-50 border-green-200"
+                      : "bg-white border-gray-200"
+                  }`}
+                >
+                  <div className="flex items-center gap-3 flex-1">
+                    <label className="flex items-center gap-2 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={item.atHome}
+                        onChange={() => toggleShoppingItem(item.id, "atHome")}
+                        className="w-5 h-5 text-green-600 rounded"
+                      />
+                      <span className="text-sm font-medium text-gray-700">
+                        Van otthon
+                      </span>
+                    </label>
+                  </div>
+
+                  <div className="flex-1 text-center">
+                    <span
+                      className={`font-medium ${
+                        item.atHome
+                          ? "line-through text-gray-500"
+                          : "text-gray-800"
+                      }`}
+                    >
+                      {item.name}
+                    </span>
+                  </div>
+
+                  <div className="flex-1 text-right">
+                    <span
+                      className={`text-sm ${
+                        item.atHome ? "text-gray-500" : "text-gray-600"
+                      }`}
+                    >
+                      {item.amount} {item.unit}
+                    </span>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <div className="border-t pt-4">
+              <div className="flex justify-between mb-4 text-sm">
+                <span className="text-gray-600">
+                  Összesen: {weekShoppingList.length} tétel
+                </span>
+                <span className="text-gray-600">
+                  Hiányzik: {weekShoppingList.filter((i) => !i.atHome).length}{" "}
+                  tétel
+                </span>
+              </div>
+
+              <div className="flex gap-3">
+                <button
+                  onClick={() => setShowShoppingListModal(false)}
+                  className="flex-1 px-4 py-3 border border-gray-300 rounded-lg hover:bg-gray-50"
+                >
+                  Bezárás
+                </button>
+                <button
+                  onClick={addToMainShoppingList}
+                  className="flex-1 px-4 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center justify-center gap-2"
+                >
+                  <ShoppingCart size={18} />
+                  Hozzáadás bevásárlólistához
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+      {/* Fueling Modal (Gyors tankolás) */}
       {showFuelingModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-lg shadow-xl max-w-md w-full p-6">
@@ -15327,7 +17746,7 @@ const saveTransaction = async () => {
                 <p className="text-sm text-gray-700 font-medium">
                   Adj meg 2 értéket, a 3. automatikusan számolódik:
                 </p>
-                
+
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
                     Tankolt mennyiség (liter) *
@@ -15349,7 +17768,9 @@ const saveTransaction = async () => {
                     type="number"
                     step="0.01"
                     value={tempFueling.pricePerLiter}
-                    onChange={(e) => handleFuelingPricePerLiterChange(e.target.value)}
+                    onChange={(e) =>
+                      handleFuelingPricePerLiterChange(e.target.value)
+                    }
                     className="w-full px-4 py-2 border border-gray-300 rounded-lg"
                   />
                 </div>
@@ -15361,7 +17782,9 @@ const saveTransaction = async () => {
                   <input
                     type="number"
                     value={tempFueling.totalPrice}
-                    onChange={(e) => handleFuelingTotalPriceChange(e.target.value)}
+                    onChange={(e) =>
+                      handleFuelingTotalPriceChange(e.target.value)
+                    }
                     className="w-full px-4 py-2 border border-gray-300 rounded-lg"
                   />
                 </div>
@@ -15414,7 +17837,6 @@ const saveTransaction = async () => {
           </div>
         </div>
       )}
-
       {/* Edit Tire Modal (Profilmélység szerkesztés) */}
       {showEditTireModal && selectedTire && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
@@ -15451,7 +17873,10 @@ const saveTransaction = async () => {
                   step="0.1"
                   value={selectedTire.treadDepth || ""}
                   onChange={(e) =>
-                    setSelectedTire({ ...selectedTire, treadDepth: e.target.value })
+                    setSelectedTire({
+                      ...selectedTire,
+                      treadDepth: e.target.value,
+                    })
                   }
                   className="w-full px-4 py-2 border border-gray-300 rounded-lg"
                   placeholder="pl. 5.5"
@@ -15461,13 +17886,14 @@ const saveTransaction = async () => {
                 </p>
               </div>
 
-              {selectedTire.treadDepth && parseFloat(selectedTire.treadDepth) <= 1.6 && (
-                <div className="bg-red-50 border border-red-200 p-3 rounded-lg">
-                  <p className="text-sm text-red-800 font-semibold">
-                    ⚠️ Minimális profilmélység! Azonnali csere szükséges!
-                  </p>
-                </div>
-              )}
+              {selectedTire.treadDepth &&
+                parseFloat(selectedTire.treadDepth) <= 1.6 && (
+                  <div className="bg-red-50 border border-red-200 p-3 rounded-lg">
+                    <p className="text-sm text-red-800 font-semibold">
+                      ⚠️ Minimális profilmélység! Azonnali csere szükséges!
+                    </p>
+                  </div>
+                )}
 
               {selectedTire.treadDepth &&
                 parseFloat(selectedTire.treadDepth) > 1.6 &&
@@ -15497,7 +17923,519 @@ const saveTransaction = async () => {
           </div>
         </div>
       )}
+      {/* Budget Modal */}
+      {showBudgetModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50 overflow-y-auto">
+          <div className="bg-white rounded-lg shadow-xl max-w-2xl w-full p-6 my-8 max-h-[90vh] overflow-y-auto">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-xl font-bold text-gray-800">
+                {editingItem ? "Költségvetés szerkesztése" : "Új költségvetés"}
+              </h3>
+              <button
+                onClick={() => setShowBudgetModal(false)}
+                className="text-gray-500 hover:text-gray-700"
+              >
+                <X size={24} />
+              </button>
+            </div>
 
+            <div className="space-y-6">
+              {/* Típus */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Időszak típusa
+                </label>
+                <div className="grid grid-cols-2 gap-3">
+                  <button
+                    onClick={() => setFormData({ ...formData, type: "month" })}
+                    className={`p-3 rounded-lg border-2 transition ${
+                      formData.type === "month"
+                        ? "border-blue-600 bg-blue-50"
+                        : "border-gray-300 hover:border-gray-400"
+                    }`}
+                  >
+                    <div className="text-center">
+                      <Calendar size={24} className="mx-auto mb-1" />
+                      <span className="font-semibold">Havi</span>
+                    </div>
+                  </button>
+                  <button
+                    onClick={() => setFormData({ ...formData, type: "year" })}
+                    className={`p-3 rounded-lg border-2 transition ${
+                      formData.type === "year"
+                        ? "border-blue-600 bg-blue-50"
+                        : "border-gray-300 hover:border-gray-400"
+                    }`}
+                  >
+                    <div className="text-center">
+                      <Calendar size={24} className="mx-auto mb-1" />
+                      <span className="font-semibold">Éves</span>
+                    </div>
+                  </button>
+                </div>
+              </div>
+
+              {/* Kezdő dátum */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Kezdő dátum
+                </label>
+                <input
+                  type="date"
+                  value={formData.startDate || ""}
+                  onChange={(e) =>
+                    setFormData({ ...formData, startDate: e.target.value })
+                  }
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+
+              {/* Teljes költségvetés */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Teljes költségvetés (Ft) *
+                </label>
+                <input
+                  type="number"
+                  value={formData.totalBudget || ""}
+                  onChange={(e) =>
+                    setFormData({ ...formData, totalBudget: e.target.value })
+                  }
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                  placeholder="500000"
+                />
+              </div>
+
+              {/* Kategóriánkénti limitek */}
+              <div>
+                <div className="flex justify-between items-center mb-3">
+                  <h4 className="font-semibold text-gray-800">
+                    Kategóriánkénti limitek
+                  </h4>
+                  <button
+                    onClick={addBudgetCategory}
+                    className="text-sm text-blue-600 hover:text-blue-700 flex items-center gap-1"
+                  >
+                    <Plus size={16} /> Kategória hozzáadása
+                  </button>
+                </div>
+
+                {formData.categories && formData.categories.length > 0 ? (
+                  <div className="space-y-2">
+                    {formData.categories.map((cat) => (
+                      <div
+                        key={cat.id}
+                        className="flex items-center justify-between p-3 bg-gray-50 rounded-lg"
+                      >
+                        <div>
+                          <span className="font-medium text-gray-800">
+                            {cat.name}
+                          </span>
+                          <span className="text-sm text-gray-600 ml-3">
+                            {parseFloat(cat.limit).toLocaleString()} Ft
+                          </span>
+                        </div>
+                        <button
+                          onClick={() => removeBudgetCategory(cat.id)}
+                          className="text-red-600 hover:text-red-700"
+                        >
+                          <Trash2 size={16} />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-sm text-gray-500 italic">
+                    Még nem adtál hozzá kategóriát. A kategóriánkénti limitek
+                    segítenek részletesen nyomon követni a költéseket.
+                  </p>
+                )}
+              </div>
+            </div>
+
+            <div className="mt-6 flex gap-3">
+              <button
+                onClick={() => setShowBudgetModal(false)}
+                className="flex-1 px-4 py-3 border border-gray-300 rounded-lg hover:bg-gray-50"
+              >
+                Mégse
+              </button>
+              <button
+                onClick={saveBudget}
+                className="flex-1 px-4 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+              >
+                Mentés
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {/* Import Modal */}
+      {showImportModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50 overflow-y-auto">
+          <div className="bg-white rounded-lg shadow-xl max-w-4xl w-full p-6 my-8 max-h-[90vh] overflow-y-auto">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-xl font-bold text-gray-800">
+                Tranzakciók importálása
+              </h3>
+              <button
+                onClick={() => {
+                  setShowImportModal(false);
+                  setImportStep(1);
+                  setImportedData([]);
+                  setDetectedBank(null);
+                }}
+                className="text-gray-500 hover:text-gray-700"
+              >
+                <X size={24} />
+              </button>
+            </div>
+
+            {/* Léptetők */}
+            <div className="mb-6">
+              <div className="flex items-center justify-between">
+                {[
+                  { step: 1, label: "Fájl feltöltés" },
+                  { step: 2, label: "Előnézet" },
+                  { step: 3, label: "Importálás" },
+                ].map((item, idx) => (
+                  <div key={item.step} className="flex items-center flex-1">
+                    <div
+                      className={`flex items-center justify-center w-8 h-8 rounded-full ${
+                        importStep >= item.step
+                          ? "bg-blue-600 text-white"
+                          : "bg-gray-300 text-gray-600"
+                      }`}
+                    >
+                      {item.step}
+                    </div>
+                    <span
+                      className={`ml-2 text-sm ${
+                        importStep >= item.step
+                          ? "text-gray-800 font-semibold"
+                          : "text-gray-500"
+                      }`}
+                    >
+                      {item.label}
+                    </span>
+                    {idx < 2 && (
+                      <div
+                        className={`flex-1 h-1 mx-4 ${
+                          importStep > item.step ? "bg-blue-600" : "bg-gray-300"
+                        }`}
+                      />
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* 1. LÉPÉS: Fájl feltöltés */}
+            {importStep === 1 && (
+              <div className="space-y-6">
+                <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                  <h4 className="font-semibold text-blue-900 mb-2">
+                    📊 Támogatott bankok és formátumok
+                  </h4>
+                  <ul className="text-sm text-blue-800 space-y-1">
+                    <li>
+                      • <strong>Revolut</strong> - Account → Statements → Export
+                      → CSV
+                    </li>
+                    <li>
+                      • <strong>OTP Bank</strong> - Lekérdezések →
+                      Tranzakciólista → Export CSV
+                    </li>
+                    <li>
+                      • <strong>Erste Bank</strong> - Transactions → Export →
+                      CSV
+                    </li>
+                    <li>
+                      • <strong>K&H Bank</strong> - Számlatörténet → Export →
+                      CSV
+                    </li>
+                    <li>
+                      • <strong>Bármilyen bank</strong> - CSV formátum (Dátum,
+                      Leírás, Összeg oszlopokkal)
+                    </li>
+                  </ul>
+                </div>
+
+                <div className="border-2 border-dashed border-gray-300 rounded-lg p-8">
+                  <input
+                    type="file"
+                    accept=".csv"
+                    onChange={(e) => {
+                      const file = e.target.files[0];
+                      if (file) {
+                        handleFileUpload(file);
+                      }
+                    }}
+                    className="hidden"
+                    id="import-file"
+                  />
+                  <label
+                    htmlFor="import-file"
+                    className="flex flex-col items-center cursor-pointer"
+                  >
+                    <Upload size={48} className="text-gray-400 mb-3" />
+                    <span className="text-lg font-semibold text-gray-700 mb-1">
+                      Kattints a fájl kiválasztásához
+                    </span>
+                    <span className="text-sm text-gray-500">
+                      CSV fájl (max 10MB)
+                    </span>
+                    <span className="text-xs text-gray-400 mt-2">
+                      Excel fájlokat előbb mentsd el CSV formátumban
+                    </span>
+                  </label>
+                </div>
+
+                <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
+                  <h4 className="font-semibold text-yellow-900 mb-2">
+                    💡 Tippek az importáláshoz
+                  </h4>
+                  <ul className="text-sm text-yellow-800 space-y-1">
+                    <li>
+                      • Exportáld a tranzakciókat a banki alkalmazásból
+                      (általában Beállítások → Export)
+                    </li>
+                    <li>
+                      • A legtöbb bank CSV vagy Excel formátumban exportál
+                    </li>
+                    <li>
+                      • Az importálás automatikusan felismeri a bank formátumát
+                    </li>
+                    <li>• A duplikált tranzakciókat automatikusan kiszűrjük</li>
+                  </ul>
+                </div>
+              </div>
+            )}
+
+            {/* 2. LÉPÉS: Előnézet */}
+            {importStep === 2 && (
+              <div className="space-y-4">
+                <div className="bg-green-50 border border-green-200 rounded-lg p-4">
+                  <div className="flex items-center gap-2 mb-2">
+                    <CheckCircle size={20} className="text-green-600" />
+                    <h4 className="font-semibold text-green-900">
+                      Bank felismerve: {detectedBank?.bank}
+                    </h4>
+                  </div>
+                  <p className="text-sm text-green-800">
+                    {importedData.length} tranzakció található a fájlban
+                  </p>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Melyik számlára importálod? *
+                  </label>
+                  <select
+                    value={importAccount || ""}
+                    onChange={(e) => setImportAccount(e.target.value)}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                  >
+                    <option value="">Válassz számlát...</option>
+                    {(() => {
+                      const accountsSource = Array.isArray(data?.accounts)
+                        ? data.accounts
+                        : Array.isArray(data?.finances?.accounts)
+                        ? data.finances.accounts
+                        : [];
+
+                      return accountsSource
+                        .filter(
+                          (acc) =>
+                            acc.isShared !== false ||
+                            acc.ownerId === currentUser?.uid
+                        )
+                        .map((account) => (
+                          <option key={account.id} value={account.id}>
+                            {account.name} ({account.balance?.toLocaleString()}{" "}
+                            {account.currency || "HUF"})
+                          </option>
+                        ));
+                    })()}
+                  </select>
+                </div>
+
+                <div>
+                  <h4 className="font-semibold text-gray-800 mb-3">
+                    Tranzakciók előnézete (első 10)
+                  </h4>
+                  <div className="border rounded-lg overflow-hidden">
+                    <div className="overflow-x-auto max-h-96">
+                      <table className="min-w-full divide-y divide-gray-200">
+                        <thead className="bg-gray-50">
+                          <tr>
+                            <th className="px-4 py-2 text-left text-xs font-medium text-gray-500">
+                              Dátum
+                            </th>
+                            <th className="px-4 py-2 text-left text-xs font-medium text-gray-500">
+                              Leírás
+                            </th>
+                            <th className="px-4 py-2 text-left text-xs font-medium text-gray-500">
+                              Kategória
+                            </th>
+                            <th className="px-4 py-2 text-right text-xs font-medium text-gray-500">
+                              Összeg
+                            </th>
+                            <th className="px-4 py-2 text-center text-xs font-medium text-gray-500">
+                              Típus
+                            </th>
+                          </tr>
+                        </thead>
+                        <tbody className="bg-white divide-y divide-gray-200">
+                          {importedData.slice(0, 10).map((row, idx) => {
+                            const parsed = parseImportedTransaction(
+                              row,
+                              detectedBank.mapping
+                            );
+                            return (
+                              <tr key={idx}>
+                                <td className="px-4 py-2 text-sm text-gray-900">
+                                  {parsed.date}
+                                </td>
+                                <td className="px-4 py-2 text-sm text-gray-900 max-w-xs truncate">
+                                  {parsed.description}
+                                </td>
+                                <td className="px-4 py-2 text-sm">
+                                  <span className="px-2 py-1 bg-blue-100 text-blue-800 rounded text-xs">
+                                    {parsed.category}
+                                  </span>
+                                </td>
+                                <td className="px-4 py-2 text-sm text-right font-semibold">
+                                  {parsed.amount.toLocaleString()}{" "}
+                                  {parsed.currency}
+                                </td>
+                                <td className="px-4 py-2 text-center">
+                                  {parsed.type === "income" ? (
+                                    <span className="px-2 py-1 bg-green-100 text-green-800 rounded text-xs">
+                                      Bevétel
+                                    </span>
+                                  ) : (
+                                    <span className="px-2 py-1 bg-red-100 text-red-800 rounded text-xs">
+                                      Kiadás
+                                    </span>
+                                  )}
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                  {importedData.length > 10 && (
+                    <p className="text-sm text-gray-500 mt-2 text-center">
+                      ... és még {importedData.length - 10} tranzakció
+                    </p>
+                  )}
+                </div>
+
+                <div className="flex gap-3">
+                  <button
+                    onClick={() => setImportStep(1)}
+                    className="flex-1 px-4 py-3 border border-gray-300 rounded-lg hover:bg-gray-50"
+                  >
+                    Vissza
+                  </button>
+                  <button
+                    onClick={() => setImportStep(3)}
+                    disabled={!importAccount}
+                    className="flex-1 px-4 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed"
+                  >
+                    Tovább az importáláshoz
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* 3. LÉPÉS: Importálás */}
+            {importStep === 3 && (
+              <div className="space-y-4">
+                {(() => {
+                  const parsedTransactions = importedData
+                    .map((row) =>
+                      parseImportedTransaction(row, detectedBank.mapping)
+                    )
+                    .filter((tx) => tx.date && tx.amount > 0);
+
+                  const checkedTransactions =
+                    checkDuplicates(parsedTransactions);
+                  const newCount = checkedTransactions.filter(
+                    (tx) => !tx.isDuplicate
+                  ).length;
+                  const dupCount = checkedTransactions.filter(
+                    (tx) => tx.isDuplicate
+                  ).length;
+
+                  return (
+                    <>
+                      <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                        <h4 className="font-semibold text-blue-900 mb-2">
+                          📊 Import összefoglaló
+                        </h4>
+                        <div className="space-y-1 text-sm text-blue-800">
+                          <p>
+                            • Összes tranzakció: {parsedTransactions.length}
+                          </p>
+                          <p className="text-green-700 font-semibold">
+                            • Új tranzakciók: {newCount}
+                          </p>
+                          {dupCount > 0 && (
+                            <p className="text-yellow-700">
+                              • Duplikált (kihagyva): {dupCount}
+                            </p>
+                          )}
+                        </div>
+                      </div>
+
+                      {dupCount > 0 && (
+                        <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
+                          <div className="flex items-start gap-2">
+                            <AlertCircle
+                              size={20}
+                              className="text-yellow-600 mt-0.5"
+                            />
+                            <div>
+                              <p className="font-semibold text-yellow-900">
+                                Duplikált tranzakciók észlelve
+                              </p>
+                              <p className="text-sm text-yellow-800 mt-1">
+                                {dupCount} tranzakció már szerepel a
+                                rendszerben. Ezeket automatikusan kihagyjuk az
+                                importálásból.
+                              </p>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+
+                      <div className="flex gap-3">
+                        <button
+                          onClick={() => setImportStep(2)}
+                          className="flex-1 px-4 py-3 border border-gray-300 rounded-lg hover:bg-gray-50"
+                        >
+                          Vissza
+                        </button>
+                        <button
+                          onClick={executeImport}
+                          disabled={newCount === 0}
+                          className="flex-1 px-4 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:bg-gray-400 disabled:cursor-not-allowed font-semibold"
+                        >
+                          {newCount} tranzakció importálása
+                        </button>
+                      </div>
+                    </>
+                  );
+                })()}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
       {/* Delete Confirmation Modal */}
       {showDeleteConfirm && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
