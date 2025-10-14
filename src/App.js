@@ -43,7 +43,6 @@ import {
   Filter,
   BarChart3,
   TrendingUp,
-  TrendingDown,
   Activity,
   Target,
   ShoppingCart,
@@ -52,18 +51,24 @@ import {
   Mail,
   Repeat,
   BookOpen,
-  Fuel,
-  AlertCircle,
   RefreshCw,
+  Loader,
+  AlertCircle,
+  Upload,
   Wallet,
-  ArrowLeft,
-  ArrowRight,
   ChevronLeft,
   ChevronRight,
-  Upload,
+  TrendingDown,
+  ArrowLeft,
+  ArrowRight,
+  Sparkles,
   Download,
   ChefHat,
-  Sparkles,
+  CheckSquare,
+  MessageSquare,
+  Wifi,
+  ShoppingBag,
+  Dog,
 } from "lucide-react";
 import {
   PieChart,
@@ -97,6 +102,7 @@ const db = getFirestore(app);
 const getDefaultData = () => ({
   homes: [],
   vehicles: [],
+  orders: [],
   familyMembers: [],
   healthAppointments: [],
   children: [],
@@ -133,9 +139,29 @@ const getDefaultData = () => ({
       "csalad",
       "eszkozok",
       "bevasarlas",
+      "rendelesek",
       "elofizetesek",
       "penzugyek",
       "chat",
+      "kisallatok",
+      "receptek",
+    ],
+    moduleOrder: [
+      "attekintes",
+      "naptar",
+      "otthon",
+      "jarmuvek",
+      "egeszseg",
+      "gyerekek",
+      "csalad",
+      "eszkozok",
+      "bevasarlas",
+      "rendelesek",
+      "elofizetesek",
+      "penzugyek",
+      "chat",
+      "kisallatok",
+      "receptek",
     ],
     mobileBottomNav: [
       "attekintes",
@@ -192,6 +218,7 @@ const FamilyOrganizerApp = () => {
   const [loading, setLoading] = useState(true);
   const [activeModule, setActiveModule] = useState("attekintes");
   const [showMobileMenu, setShowMobileMenu] = useState(false);
+  const [currentView, setCurrentView] = useState("attekintes");
   const [data, setData] = useState(getDefaultData());
   const [settings, setSettings] = useState(getDefaultData().settings);
 
@@ -244,6 +271,14 @@ const FamilyOrganizerApp = () => {
   const [selectedWeekNote, setSelectedWeekNote] = useState(null);
   const [showEventModal, setShowEventModal] = useState(false);
   const [selectedDate, setSelectedDate] = useState(null);
+  const [googleCalendarEnabled, setGoogleCalendarEnabled] = useState(false);
+  const [googleCalendarAccounts, setGoogleCalendarAccounts] = useState([]);
+  const [showGoogleAccountModal, setShowGoogleAccountModal] = useState(false);
+  const [googleAccountForm, setGoogleAccountForm] = useState({
+    email: "",
+    name: "",
+  });
+  const [syncInProgress, setSyncInProgress] = useState(false);
 
   const [tempUtility, setTempUtility] = useState({
     name: "",
@@ -272,25 +307,32 @@ const FamilyOrganizerApp = () => {
   });
 
   //Pénzügyek statek
-  const [showLoanModal, setShowLoanModal] = useState(false);
-  const [showSavingGoalModal, setShowSavingGoalModal] = useState(false);
-  const [showDepositModal, setShowDepositModal] = useState(false);
-  const [selectedGoal, setSelectedGoal] = useState(null);
-  const [depositAmount, setDepositAmount] = useState("");
-  const [showInvestmentModal, setShowInvestmentModal] = useState(false);
   const [showTransactionModal, setShowTransactionModal] = useState(false);
+  const [showAccountModal, setShowAccountModal] = useState(false);
+  const [showBudgetModal, setShowBudgetModal] = useState(false);
+  const [showImportModal, setShowImportModal] = useState(false);
   const [transactionType, setTransactionType] = useState("expense");
   const [financeTimeFilter, setFinanceTimeFilter] = useState("month");
-  const [showBudgetModal, setShowBudgetModal] = useState(false);
   const [selectedMonth, setSelectedMonth] = useState(new Date());
-  const [budgetView, setBudgetView] = useState("month"); // 'month' vagy 'year'
-  const [selectedAccounts, setSelectedAccounts] = useState([]); // üres tömb = minden számla
-  const [showImportModal, setShowImportModal] = useState(false);
-  const [importStep, setImportStep] = useState(1); // 1: fájl feltöltés, 2: előnézet, 3: mapping
+  const [selectedAccounts, setSelectedAccounts] = useState([]);
+  const [budgetView, setBudgetView] = useState("month");
+  const [importStep, setImportStep] = useState(1);
   const [importedData, setImportedData] = useState([]);
   const [detectedBank, setDetectedBank] = useState(null);
   const [importMapping, setImportMapping] = useState({});
   const [importAccount, setImportAccount] = useState(null);
+  const [showLoanModal, setShowLoanModal] = useState(false);
+  const [showSavingGoalModal, setShowSavingGoalModal] = useState(false);
+  const [showInvestmentModal, setShowInvestmentModal] = useState(false);
+  const [showDepositModal, setShowDepositModal] = useState(false);
+  const [selectedGoal, setSelectedGoal] = useState(null);
+  const [depositAmount, setDepositAmount] = useState("");
+
+  //Rendelések statek
+  const [showOrderModal, setShowOrderModal] = useState(false);
+  const [orders, setOrders] = useState([]);
+  const [orderSortBy, setOrderSortBy] = useState("expectedDelivery"); // 'orderDate', 'expectedDelivery', 'price', 'status'
+  const [showArchive, setShowArchive] = useState(false);
 
   //chat statek
   const [unreadMessagesCount, setUnreadMessagesCount] = useState(0);
@@ -298,6 +340,8 @@ const FamilyOrganizerApp = () => {
   const [chatMessages, setChatMessages] = useState([]);
 
   // Jármű temp statek
+  const [showRefuelModal, setShowRefuelModal] = useState(false);
+  const [showStatsModal, setShowStatsModal] = useState(false);
 
   const [tempTire, setTempTire] = useState({
     type: "négyévszakos",
@@ -320,18 +364,6 @@ const FamilyOrganizerApp = () => {
     validUntil: "",
     price: "",
   });
-  const [showFuelingModal, setShowFuelingModal] = useState(false);
-  const [showEditTireModal, setShowEditTireModal] = useState(false);
-  const [selectedTire, setSelectedTire] = useState(null);
-  const [tempFueling, setTempFueling] = useState({
-    date: new Date().toISOString().split("T")[0],
-    km: "",
-    liters: "",
-    pricePerLiter: "",
-    totalPrice: "",
-    station: "",
-    notes: "",
-  });
 
   //Otthon temp statek
   const [tempMeter, setTempMeter] = useState({
@@ -343,6 +375,7 @@ const FamilyOrganizerApp = () => {
   });
   const [tempReading, setTempReading] = useState({ date: "", value: "" });
   const [showAllUtilities, setShowAllUtilities] = useState({});
+  const [showQuickUtilityModal, setShowQuickUtilityModal] = useState(false);
 
   // Family temp statek
 
@@ -372,12 +405,47 @@ const FamilyOrganizerApp = () => {
   const [showGiftIdeaModal, setShowGiftIdeaModal] = useState(false);
   const [showMilestoneModal, setShowMilestoneModal] = useState(false);
   const [showMeasurementModal, setShowMeasurementModal] = useState(false);
-  const [showAccountModal, setShowAccountModal] = useState(false);
   const [showCategoryModal, setShowCategoryModal] = useState(false);
   const [selectedMember, setSelectedMember] = useState(null);
   const [selectedChild, setSelectedChild] = useState(null);
   const [categoryType, setCategoryType] = useState("shopping");
 
+  //receptek state változók
+  const [showRecipeModal, setShowRecipeModal] = useState(false);
+  const [showRecipeImportModal, setShowRecipeImportModal] = useState(false);
+  const [recipeImportUrl, setRecipeImportUrl] = useState("");
+  const [importingRecipe, setImportingRecipe] = useState(false);
+  // Szűrés és rendezés
+  const [recipeFilters, setRecipeFilters] = useState({
+    searchText: "",
+    category: "",
+    difficulty: "",
+    maxTime: "",
+    showFavoritesOnly: false,
+  });
+  const [recipeSortBy, setRecipeSortBy] = useState("name");
+
+  // Heti menü
+  const [showWeeklyMenuModal, setShowWeeklyMenuModal] = useState(false);
+  const [currentWeekOffset, setCurrentWeekOffset] = useState(0);
+  const [weeklyMenus, setWeeklyMenus] = useState({});
+
+  // Okosrecept kereső
+  const [showSmartSearchModal, setShowSmartSearchModal] = useState(false);
+  const [smartSearchCriteria, setSmartSearchCriteria] = useState({
+    availableIngredients: "",
+    maxTime: "",
+    difficulty: "",
+    category: "",
+  });
+  const [smartSearchResults, setSmartSearchResults] = useState([]);
+  const [searching, setSearching] = useState(false);
+
+  // Bevásárlólista
+  const [showShoppingListModal, setShowShoppingListModal] = useState(false);
+  const [weekShoppingList, setWeekShoppingList] = useState([]);
+
+  //Kisállatok state változók
   const [showPetModal, setShowPetModal] = useState(false);
   const [showFeedingModal, setShowFeedingModal] = useState(false);
   const [showPetVaccinationModal, setShowPetVaccinationModal] = useState(false);
@@ -400,35 +468,339 @@ const FamilyOrganizerApp = () => {
     unit: "db",
   });
 
-  const [importUrl, setImportUrl] = useState("");
-  const [importing, setImporting] = useState(false);
-  const [showRecipeModal, setShowRecipeModal] = useState(false);
-  const [showWeeklyMenuModal, setShowWeeklyMenuModal] = useState(false);
-  const [currentWeekOffset, setCurrentWeekOffset] = useState(0); // 0 = aktuális hét
-  const [weeklyMenus, setWeeklyMenus] = useState({}); // { 'weekKey': { day: recipeId } }
-  const [showSmartSearchModal, setShowSmartSearchModal] = useState(false);
-  const [smartSearchCriteria, setSmartSearchCriteria] = useState({
-    availableIngredients: "",
-    maxTime: "",
-    difficulty: "",
-    category: "",
-    dietary: "",
-  });
-  const [smartSearchResults, setSmartSearchResults] = useState([]);
-  const [searching, setSearching] = useState(false);
-  const [showRecipeImportModal, setShowRecipeImportModal] = useState(false);
-  const [recipeImportUrl, setRecipeImportUrl] = useState("");
-  const [importingRecipe, setImportingRecipe] = useState(false);
-  const [recipeFilters, setRecipeFilters] = useState({
-    searchText: "",
-    category: "",
-    difficulty: "",
-    maxTime: "",
-    showFavoritesOnly: false,
-  });
-  const [recipeSortBy, setRecipeSortBy] = useState("name"); // name, time, cost, recent
-  const [showShoppingListModal, setShowShoppingListModal] = useState(false);
-  const [weekShoppingList, setWeekShoppingList] = useState([]);
+  // Gmail API állapot
+  const [gmailAuthenticated, setGmailAuthenticated] = useState(false);
+  const [gmailAuthInProgress, setGmailAuthInProgress] = useState(false);
+  const [lastEmailSync, setLastEmailSync] = useState(null);
+
+  // Gmail API inicializálás
+  useEffect(() => {
+    // Google API script betöltése
+    const script = document.createElement("script");
+    script.src = "https://apis.google.com/js/api.js";
+    script.onload = () => {
+      window.gapi.load("client:auth2", initGmailClient);
+    };
+    document.body.appendChild(script);
+  }, []);
+
+  const initGmailClient = () => {
+    try {
+      window.gapi.client
+        .init({
+          apiKey: GMAIL_API_CONFIG.apiKey,
+          clientId: GMAIL_API_CONFIG.clientId,
+          discoveryDocs: GMAIL_API_CONFIG.discoveryDocs,
+          scope: GMAIL_API_CONFIG.scope,
+        })
+        .then(() => {
+          // Ellenőrizzük, hogy be van-e jelentkezve
+          const authInstance = window.gapi.auth2.getAuthInstance();
+          setGmailAuthenticated(authInstance.isSignedIn.get());
+
+          // Figyelés a bejelentkezési állapotra
+          authInstance.isSignedIn.listen((isSignedIn) => {
+            setGmailAuthenticated(isSignedIn);
+          });
+        })
+        .catch((error) => {
+          console.error("Gmail API inicializálási hiba:", error);
+        });
+    } catch (error) {
+      console.error("Gmail API hiba:", error);
+    }
+  };
+
+  const handleGmailAuth = () => {
+    setGmailAuthInProgress(true);
+    const authInstance = window.gapi.auth2.getAuthInstance();
+
+    if (gmailAuthenticated) {
+      // Kijelentkezés
+      authInstance.signOut().then(() => {
+        setGmailAuthenticated(false);
+        setGmailAuthInProgress(false);
+      });
+    } else {
+      // Bejelentkezés
+      authInstance
+        .signIn()
+        .then(() => {
+          setGmailAuthenticated(true);
+          setGmailAuthInProgress(false);
+        })
+        .catch((error) => {
+          console.error("Gmail bejelentkezési hiba:", error);
+          setGmailAuthInProgress(false);
+          alert(
+            "Nem sikerült csatlakozni a Gmail fiókhoz. Ellenőrizd az API beállításokat."
+          );
+        });
+    }
+  };
+
+  // === EMAIL FELDOLGOZÁS ===
+
+  // Email rendelés felismerő minták
+  const ORDER_PATTERNS = {
+    // Webshopok - BŐVÍTETT
+    webshops: [
+      { pattern: /emag\.hu|eMAG/i, name: "eMAG" },
+      { pattern: /alza\.hu|Alza/i, name: "Alza" },
+      { pattern: /extreme-digital|Extreme Digital/i, name: "Extreme Digital" },
+      { pattern: /mall\.hu|Mall/i, name: "Mall.hu" },
+      { pattern: /amazon\.|Amazon/i, name: "Amazon" },
+      { pattern: /aliexpress|AliExpress/i, name: "AliExpress" },
+      { pattern: /ebay|eBay/i, name: "eBay" },
+      { pattern: /temu|Temu/i, name: "Temu" },
+      { pattern: /mediamarkt|Media Markt/i, name: "Media Markt" },
+      { pattern: /jysk|JYSK/i, name: "JYSK" },
+      { pattern: /ikea|IKEA/i, name: "IKEA" },
+      { pattern: /decathlon|Decathlon/i, name: "Decathlon" },
+      { pattern: /reserved|Reserved/i, name: "Reserved" },
+      { pattern: /zara|ZARA/i, name: "Zara" },
+      { pattern: /h&m|H&M/i, name: "H&M" },
+    ],
+
+    // Termék név felismerés
+    productName: [
+      /(?:item|product|termék)[:\s]+([^\n]{10,100})/i,
+      /(?:description|leírás)[:\s]+([^\n]{10,100})/i,
+    ],
+
+    // Rendelésszám minták - BŐVÍTETT
+    orderNumber: [
+      /order[#\s]*:?\s*([A-Z0-9-]{6,})/i,
+      /rendelés[#\s]*:?\s*([A-Z0-9-]{6,})/i,
+      /order\s+number[#\s]*:?\s*([A-Z0-9-]{6,})/i,
+      /rendelési?\s+sz[áa]m[#\s]*:?\s*([A-Z0-9-]{6,})/i,
+      /order\s+id[#\s]*:?\s*([A-Z0-9-]{6,})/i,
+    ],
+
+    // Ár minták - BŐVÍTETT
+    price: [
+      /total[:\s]+([\d\s,\.]+)\s*(ft|huf|forint|eur|€|usd|\$)/i,
+      /[öÖ]sszesen[:\s]+([\d\s,\.]+)\s*(ft|huf|forint)/i,
+      /fizetend[őö][:\s]+([\d\s,\.]+)\s*(ft|huf|forint)/i,
+      /amount[:\s]+([\d\s,\.]+)\s*(ft|huf|forint|eur|€)/i,
+      /grand\s+total[:\s]+([\d\s,\.]+)/i,
+    ],
+
+    // Dátum minták - BŐVÍTETT
+    deliveryDate: [
+      /delivery\s+(?:date|by)[:\s]*(\d{4}[-./]\d{2}[-./]\d{2})/i,
+      /estimated\s+delivery[:\s]*(\d{4}[-./]\d{2}[-./]\d{2})/i,
+      /sz[áa]ll[íi]t[áa]s[:\s]*(\d{4}[-./]\d{2}[-./]\d{2})/i,
+      /k[ée]zbes[íi]t[ée]s[:\s]*(\d{4}[-./]\d{2}[-./]\d{2})/i,
+      /várható\s+érkezés[:\s]*(\d{4}[-./]\d{2}[-./]\d{2})/i,
+      /expected\s+arrival[:\s]*(\d{4}[-./]\d{2}[-./]\d{2})/i,
+    ],
+
+    // Kézbesítés minták - BŐVÍTETT
+    delivered: [
+      /delivered|package\s+delivered/i,
+      /kézbesítve|csomag\s+kézbesítve/i,
+      /successfully\s+delivered/i,
+      /sikeres\s+kézbesítés/i,
+      /átvetted|átvéve/i,
+      /picked\s+up|collected/i,
+    ],
+
+    // Csomagautomata minták - BŐVÍTETT
+    locker: [
+      /csomagautomata|parcel\s+locker|pickup\s+point/i,
+      /foxpost|packeta|gls\s+parcelshop|dpd\s+pickup/i,
+      /posta\s+pont|pick\s+pack\s+pont/i,
+      /automata/i,
+    ],
+
+    // Tracking szám minták - BŐVÍTETT
+    tracking: [
+      /tracking[#\s]*:?\s*([A-Z0-9]{10,})/i,
+      /tracking\s+number[#\s]*:?\s*([A-Z0-9]{10,})/i,
+      /csomag\s+k[öo]vet[ée]s[#\s]*:?\s*([A-Z0-9]{10,})/i,
+      /k[öo]vet[ée]si\s+sz[áa]m[#\s]*:?\s*([A-Z0-9]{10,})/i,
+      /shipment\s+id[#\s]*:?\s*([A-Z0-9]{10,})/i,
+    ],
+
+    // Utánvét felismerés
+    cashOnDelivery: [/cash\s+on\s+delivery|cod|utánvét|ut[áa]nv[ée]t/i],
+  };
+
+  // Email szöveg feldolgozása
+  const parseOrderEmail = (emailBody, subject) => {
+    const text = emailBody + " " + subject;
+
+    const orderData = {
+      itemName: "",
+      webshop: "",
+      price: 0,
+      orderDate: new Date().toISOString().split("T")[0],
+      expectedDelivery: "",
+      trackingNumber: "",
+      status: "feldolgozás alatt",
+      deliveryType: "cím",
+      deliveryAddress: "",
+      isDelivered: false,
+    };
+
+    // Webshop felismerés
+    for (const shop of ORDER_PATTERNS.webshops) {
+      if (shop.pattern.test(text)) {
+        orderData.webshop = shop.name;
+        break;
+      }
+    }
+
+    // Rendelésszám
+    for (const pattern of ORDER_PATTERNS.orderNumber) {
+      const match = text.match(pattern);
+      if (match) {
+        orderData.itemName = `Rendelés ${match[1]}`;
+        break;
+      }
+    }
+
+    // Ár
+    for (const pattern of ORDER_PATTERNS.price) {
+      const match = text.match(pattern);
+      if (match) {
+        const priceStr = match[1].replace(/[\s,]/g, "");
+        orderData.price = parseFloat(priceStr);
+        break;
+      }
+    }
+
+    // Várható szállítás
+    for (const pattern of ORDER_PATTERNS.deliveryDate) {
+      const match = text.match(pattern);
+      if (match) {
+        orderData.expectedDelivery = match[1].replace(/[./]/g, "-");
+        break;
+      }
+    }
+
+    // Tracking szám
+    for (const pattern of ORDER_PATTERNS.tracking) {
+      const match = text.match(pattern);
+      if (match) {
+        orderData.trackingNumber = match[1];
+        break;
+      }
+    }
+
+    // Kézbesítés ellenőrzése
+    for (const pattern of ORDER_PATTERNS.delivered) {
+      if (pattern.test(text)) {
+        orderData.isDelivered = true;
+        orderData.status = "kézbesítve";
+        break;
+      }
+    }
+
+    // Csomagautomata
+    for (const pattern of ORDER_PATTERNS.locker) {
+      if (pattern.test(text)) {
+        orderData.deliveryType = "csomagautomata";
+        orderData.status = "csomagautomatában";
+        break;
+      }
+    }
+    // Státusz meghatározása intelligensebben
+    if (orderData.isDelivered) {
+      orderData.status = "kézbesítve";
+    } else if (orderData.deliveryType === "csomagautomata") {
+      orderData.status = "csomagautomatában";
+    } else if (orderData.trackingNumber) {
+      orderData.status = "szállítás alatt";
+    } else {
+      orderData.status = "feldolgozás alatt";
+    }
+
+    // Utánvét ellenőrzés
+    for (const pattern of ORDER_PATTERNS.cashOnDelivery) {
+      if (pattern.test(text)) {
+        orderData.cashOnDelivery = true;
+        break;
+      }
+    }
+
+    // Termék név finomítása
+    for (const pattern of ORDER_PATTERNS.productName) {
+      const match = text.match(pattern);
+      if (match && match[1].length > 10) {
+        orderData.itemName = match[1].trim();
+        break;
+      }
+    }
+
+    return orderData;
+  };
+
+  // Gmail üzenetek lekérése
+  const fetchGmailMessages = async (maxResults = 50) => {
+    try {
+      if (!window.gapi?.client?.gmail) {
+        throw new Error("Gmail API nincs inicializálva");
+      }
+
+      // Keresési query - rendelés visszaigazolók és kézbesítési értesítések
+      const query = [
+        "(subject:order OR subject:rendelés OR subject:megrendelés OR subject:confirmation)",
+        "(subject:delivered OR subject:kézbesítve OR subject:csomag OR subject:package)",
+        "newer_than:30d", // Utolsó 30 nap
+      ].join(" OR ");
+
+      const response = await window.gapi.client.gmail.users.messages.list({
+        userId: "me",
+        q: query,
+        maxResults: maxResults,
+      });
+
+      return response.result.messages || [];
+    } catch (error) {
+      console.error("Gmail üzenetek lekérési hiba:", error);
+      throw error;
+    }
+  };
+
+  // Egyedi üzenet részletek lekérése
+  const fetchMessageDetails = async (messageId) => {
+    try {
+      const response = await window.gapi.client.gmail.users.messages.get({
+        userId: "me",
+        id: messageId,
+        format: "full",
+      });
+
+      const message = response.result;
+      const headers = message.payload.headers;
+
+      // Subject és From kinyerése
+      const subject = headers.find((h) => h.name === "Subject")?.value || "";
+      const from = headers.find((h) => h.name === "From")?.value || "";
+      const date = headers.find((h) => h.name === "Date")?.value || "";
+
+      // Body kinyerése
+      let body = "";
+      if (message.payload.parts) {
+        for (const part of message.payload.parts) {
+          if (part.mimeType === "text/plain" && part.body.data) {
+            body += atob(part.body.data.replace(/-/g, "+").replace(/_/g, "/"));
+          }
+        }
+      } else if (message.payload.body.data) {
+        body = atob(
+          message.payload.body.data.replace(/-/g, "+").replace(/_/g, "/")
+        );
+      }
+
+      return { subject, from, body, date, messageId };
+    } catch (error) {
+      console.error("Üzenet részletek lekérési hiba:", error);
+      return null;
+    }
+  };
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (user) => {
@@ -458,18 +830,29 @@ const FamilyOrganizerApp = () => {
       );
   }, []);
 
+  // Automatikus email szinkronizálás óránként (opcionális)
   useEffect(() => {
-    const savedData = localStorage.getItem("householdData");
-    if (savedData) {
-      setData(JSON.parse(savedData));
+    if (!gmailAuthenticated) return;
+
+    // Első szinkronizálás induláskor
+    if (!lastEmailSync) {
+      syncOrdersFromEmail();
     }
 
-    // Heti menük betöltése
-    const savedMenus = localStorage.getItem("weeklyMenus");
-    if (savedMenus) {
-      setWeeklyMenus(JSON.parse(savedMenus));
+    // Óránkénti szinkronizálás
+    const interval = setInterval(() => {
+      syncOrdersFromEmail();
+    }, 60 * 60 * 1000); // 1 óra
+
+    return () => clearInterval(interval);
+  }, [gmailAuthenticated]);
+
+  // Fiókok betöltése settings-ből
+  useEffect(() => {
+    if (settings.googleCalendarAccounts) {
+      setGoogleCalendarAccounts(settings.googleCalendarAccounts);
     }
-  }, []);
+  }, [settings]);
 
   const onTouchStart = (e) => {
     setTouchEnd(null);
@@ -538,6 +921,7 @@ const FamilyOrganizerApp = () => {
         // Alapértelmezett megosztott adatok
         homes: [],
         vehicles: [],
+        orders: [],
         familyMembers: [],
         healthAppointments: [],
         children: [],
@@ -1242,7 +1626,7 @@ const FamilyOrganizerApp = () => {
   const getWeekKey = (offset = 0) => {
     const now = new Date();
     const weekStart = new Date(now);
-    weekStart.setDate(now.getDate() - now.getDay() + 1 + offset * 7); // Hétfő
+    weekStart.setDate(now.getDate() - now.getDay() + 1 + offset * 7);
     return `${weekStart.getFullYear()}-W${Math.ceil(weekStart.getDate() / 7)}`;
   };
 
@@ -1275,14 +1659,13 @@ const FamilyOrganizerApp = () => {
     return `${formatDate(weekStart)} - ${formatDate(weekEnd)}`;
   };
 
-  // Recept importálás URL-ből
+  // Recept importálás URL-ből (valódi web scraping)
   const importRecipeFromUrl = async () => {
     if (!recipeImportUrl.trim()) return;
 
     setImportingRecipe(true);
 
     try {
-      // Weboldal tartalmának letöltése
       const response = await fetch(
         `https://api.allorigins.win/raw?url=${encodeURIComponent(
           recipeImportUrl
@@ -1290,18 +1673,16 @@ const FamilyOrganizerApp = () => {
       );
       const html = await response.text();
 
-      // HTML elemzése - keressük meg a recept adatokat
       const parser = new DOMParser();
       const doc = parser.parseFromString(html, "text/html");
 
-      // Általános metódus - keressük a receptet a HTML-ben
       let recipeName = "";
       let ingredients = [];
       let instructions = [];
       let prepTime = 30;
       let servings = 4;
 
-      // Név keresése (címkék: h1, .recipe-title, [itemprop="name"], stb.)
+      // Név keresése
       const titleSelectors = [
         "h1",
         ".recipe-title",
@@ -1332,7 +1713,6 @@ const FamilyOrganizerApp = () => {
           elements.forEach((el) => {
             const text = el.textContent.trim();
             if (text) {
-              // Próbáljuk szétbontani mennyiség és név szerint
               const match = text.match(/^([\d\.,\s\/]+)\s*(\w+)?\s*(.+)$/);
               if (match) {
                 ingredients.push({
@@ -1400,9 +1780,8 @@ const FamilyOrganizerApp = () => {
         }
       }
 
-      // Ha nem találtunk semmit, hibát dobunk
       if (!recipeName && ingredients.length === 0) {
-        throw new Error("Nem sikerült kinyerni a recept adatokat az oldalról");
+        throw new Error("Nem sikerült kinyerni a recept adatokat");
       }
 
       const importedRecipe = {
@@ -1460,7 +1839,6 @@ const FamilyOrganizerApp = () => {
   const getFilteredAndSortedRecipes = () => {
     let recipes = [...(data.recipes || [])];
 
-    // Szűrés szöveg alapján
     if (recipeFilters.searchText) {
       const searchLower = recipeFilters.searchText.toLowerCase();
       recipes = recipes.filter(
@@ -1470,31 +1848,26 @@ const FamilyOrganizerApp = () => {
       );
     }
 
-    // Szűrés kategória alapján
     if (recipeFilters.category) {
       recipes = recipes.filter((r) => r.category === recipeFilters.category);
     }
 
-    // Szűrés nehézség alapján
     if (recipeFilters.difficulty) {
       recipes = recipes.filter(
         (r) => r.difficulty === recipeFilters.difficulty
       );
     }
 
-    // Szűrés max idő alapján
     if (recipeFilters.maxTime) {
       recipes = recipes.filter(
         (r) => r.prepTime <= parseInt(recipeFilters.maxTime)
       );
     }
 
-    // Csak kedvencek
     if (recipeFilters.showFavoritesOnly) {
       recipes = recipes.filter((r) => r.favorite);
     }
 
-    // Rendezés
     switch (recipeSortBy) {
       case "name":
         recipes.sort((a, b) => a.name.localeCompare(b.name));
@@ -1525,57 +1898,6 @@ const FamilyOrganizerApp = () => {
     setRecipeSortBy("name");
   };
 
-  // Okosrecept keresés
-  const searchSmartRecipes = () => {
-    setSearching(true);
-
-    setTimeout(() => {
-      const recipes = data.recipes || [];
-      let results = [...recipes];
-
-      // Szűrés alapanyagok alapján
-      if (smartSearchCriteria.availableIngredients.trim()) {
-        const availableIngs = smartSearchCriteria.availableIngredients
-          .toLowerCase()
-          .split(",")
-          .map((i) => i.trim());
-
-        results = results.filter((recipe) => {
-          const recipeIngs = recipe.ingredients.map((i) =>
-            i.name.toLowerCase()
-          );
-          return availableIngs.some((ing) =>
-            recipeIngs.some((rIng) => rIng.includes(ing))
-          );
-        });
-      }
-
-      // Szűrés idő alapján
-      if (smartSearchCriteria.maxTime) {
-        results = results.filter(
-          (r) => r.prepTime <= parseInt(smartSearchCriteria.maxTime)
-        );
-      }
-
-      // Szűrés nehézség alapján
-      if (smartSearchCriteria.difficulty) {
-        results = results.filter(
-          (r) => r.difficulty === smartSearchCriteria.difficulty
-        );
-      }
-
-      // Szűrés kategória alapján
-      if (smartSearchCriteria.category) {
-        results = results.filter(
-          (r) => r.category === smartSearchCriteria.category
-        );
-      }
-
-      setSmartSearchResults(results);
-      setSearching(false);
-    }, 800);
-  };
-
   // Menü beállítása
   const setMenuForDay = (dayIndex, recipeId) => {
     const weekKey = getWeekKey(currentWeekOffset);
@@ -1587,8 +1909,6 @@ const FamilyOrganizerApp = () => {
 
     newMenus[weekKey][dayIndex] = recipeId;
     setWeeklyMenus(newMenus);
-
-    // Mentés localStorage-ba
     localStorage.setItem("weeklyMenus", JSON.stringify(newMenus));
   };
 
@@ -1604,7 +1924,7 @@ const FamilyOrganizerApp = () => {
     }
   };
 
-  // Bevásárlólista generálás heti menüből
+  // Bevásárlólista generálás
   const generateShoppingList = () => {
     const weekKey = getWeekKey(currentWeekOffset);
     const menu = weeklyMenus[weekKey] || {};
@@ -1612,7 +1932,6 @@ const FamilyOrganizerApp = () => {
 
     const ingredientsMap = {};
 
-    // Összes recept összetevőinek összegyűjtése
     Object.values(menu).forEach((recipeId) => {
       const recipe = recipes.find((r) => r.id === recipeId);
       if (recipe && recipe.ingredients) {
@@ -1627,7 +1946,6 @@ const FamilyOrganizerApp = () => {
               atHome: false,
             };
           }
-          // Mennyiségek összegzése (egyszerűsített)
           const amount = parseFloat(ing.amount) || 0;
           ingredientsMap[key].amount += amount;
         });
@@ -1644,15 +1962,14 @@ const FamilyOrganizerApp = () => {
     setShowShoppingListModal(true);
   };
 
-  /* Bevásárlólista elem toggle
-const toggleShoppingItem = (id, field) => {
-  setWeekShoppingList(prev => 
-    prev.map(item => 
-      item.id === id ? { ...item, [field]: !item[field] } : item
-    )
-  );
-};
-*/
+  // Bevásárlólista elem toggle
+  const toggleShoppingItem = (id, field) => {
+    setWeekShoppingList((prev) =>
+      prev.map((item) =>
+        item.id === id ? { ...item, [field]: !item[field] } : item
+      )
+    );
+  };
 
   // Bevásárlólistába küldés
   const addToMainShoppingList = () => {
@@ -1684,6 +2001,53 @@ const toggleShoppingItem = (id, field) => {
 
     alert(`${itemsToAdd.length} termék hozzáadva a bevásárlólistához! 🛒`);
     setShowShoppingListModal(false);
+  };
+
+  // Okosrecept keresés
+  const searchSmartRecipes = () => {
+    setSearching(true);
+
+    setTimeout(() => {
+      const recipes = data.recipes || [];
+      let results = [...recipes];
+
+      if (smartSearchCriteria.availableIngredients.trim()) {
+        const availableIngs = smartSearchCriteria.availableIngredients
+          .toLowerCase()
+          .split(",")
+          .map((i) => i.trim());
+
+        results = results.filter((recipe) => {
+          const recipeIngs = recipe.ingredients.map((i) =>
+            i.name.toLowerCase()
+          );
+          return availableIngs.some((ing) =>
+            recipeIngs.some((rIng) => rIng.includes(ing))
+          );
+        });
+      }
+
+      if (smartSearchCriteria.maxTime) {
+        results = results.filter(
+          (r) => r.prepTime <= parseInt(smartSearchCriteria.maxTime)
+        );
+      }
+
+      if (smartSearchCriteria.difficulty) {
+        results = results.filter(
+          (r) => r.difficulty === smartSearchCriteria.difficulty
+        );
+      }
+
+      if (smartSearchCriteria.category) {
+        results = results.filter(
+          (r) => r.category === smartSearchCriteria.category
+        );
+      }
+
+      setSmartSearchResults(results);
+      setSearching(false);
+    }, 800);
   };
 
   const addIngredient = () => {
@@ -2043,108 +2407,6 @@ const toggleShoppingItem = (id, field) => {
     await saveUserData(newData);
   };
 
-  // === PÉNZÜGYEK - SZÁMLÁK ===
-  const openAccountModal = (account = null) => {
-    if (account) {
-      setEditingItem(account);
-      setFormData({
-        ...account,
-        isShared: account.isShared !== false, // alapértelmezetten megosztott
-        ownerId: account.ownerId || currentUser?.uid,
-      });
-    } else {
-      setEditingItem(null);
-      setFormData({
-        name: "",
-        type: "bank",
-        balance: 0,
-        currency: "HUF",
-        isShared: true, // ÚJ - alapértelmezetten megosztott
-        ownerId: currentUser?.uid, // ÚJ - tulajdonos ID
-      });
-    }
-    setShowAccountModal(true);
-  };
-
-  const saveAccount = async () => {
-    if (!formData.name) {
-      alert("Számla neve kötelező!");
-      return;
-    }
-
-    let newData;
-    const accounts = data.finances?.accounts || [];
-
-    if (editingItem) {
-      newData = {
-        ...data,
-        finances: {
-          ...data.finances,
-          accounts: accounts.map((acc) =>
-            acc.id === editingItem.id
-              ? { ...formData, id: editingItem.id }
-              : acc
-          ),
-        },
-      };
-    } else {
-      newData = {
-        ...data,
-        finances: {
-          ...data.finances,
-          accounts: [...accounts, { ...formData, id: Date.now() }],
-        },
-      };
-    }
-
-    setData(newData);
-    await saveUserData(newData);
-    setShowAccountModal(false);
-    setFormData({});
-    setEditingItem(null);
-  };
-
-  const deleteAccount = async (accountId) => {
-    const newData = {
-      ...data,
-      finances: {
-        ...data.finances,
-        accounts: (data.finances?.accounts || []).filter(
-          (acc) => acc.id !== accountId
-        ),
-      },
-    };
-    setData(newData);
-    await saveUserData(newData);
-    setShowDeleteConfirm(null);
-  };
-
-  const addSubaccount = () => {
-    if (!tempCustomField.label) {
-      alert("Alszámla neve kötelező!");
-      return;
-    }
-    setFormData({
-      ...formData,
-      subaccounts: [
-        ...(formData.subaccounts || []),
-        {
-          id: Date.now(),
-          name: tempCustomField.label,
-          balance: parseFloat(tempCustomField.value) || 0,
-        },
-      ],
-    });
-    setTempCustomField({ label: "", value: "" });
-  };
-
-  const removeSubaccount = (index) => {
-    setFormData({
-      ...formData,
-      subaccounts: formData.subaccounts.filter((_, i) => i !== index),
-    });
-  };
-
   // === KATEGÓRIA TESTRESZABÁS ===
   const openCategoryModal = (type) => {
     setCategoryType(type);
@@ -2234,6 +2496,36 @@ const toggleShoppingItem = (id, field) => {
     setShowHomeModal(true);
   };
 
+  const saveQuickUtility = () => {
+    if (!formData.name || !formData.amount || !formData.dueDate) {
+      alert("Kérlek töltsd ki az összes kötelező mezőt!");
+      return;
+    }
+
+    const newData = { ...data };
+    const homeIndex = newData.homes.findIndex((h) => h.id === selectedHome.id);
+
+    if (homeIndex !== -1) {
+      if (!newData.homes[homeIndex].utilities) {
+        newData.homes[homeIndex].utilities = [];
+      }
+
+      newData.homes[homeIndex].utilities.unshift({
+        name: formData.name,
+        amount: formData.amount,
+        dueDate: formData.dueDate,
+        addedAt: new Date().toISOString(),
+      });
+
+      setData(newData);
+      localStorage.setItem("householdData", JSON.stringify(newData));
+      setShowQuickUtilityModal(false);
+
+      // Form reset
+      setFormData({});
+    }
+  };
+
   const addUtility = () => {
     if (!tempUtility.name || !tempUtility.amount || !tempUtility.dueDate) {
       alert("Minden mező kitöltése kötelező!");
@@ -2308,6 +2600,18 @@ const toggleShoppingItem = (id, field) => {
     setEditingItem(null);
   };
 
+  const openQuickUtilityModal = (home) => {
+    setEditingItem(null);
+    setSelectedHome(home);
+    setFormData({
+      name: "",
+      amount: "",
+      dueDate: new Date().toISOString().split("T")[0],
+      homeId: home.id,
+    });
+    setShowQuickUtilityModal(true);
+  };
+
   const deleteHome = async (homeId) => {
     const newData = {
       ...data,
@@ -2324,11 +2628,10 @@ const toggleShoppingItem = (id, field) => {
       setFormData({
         ...vehicle,
         serviceHistory: vehicle.serviceHistory || [],
-        tires: vehicle.tires || [],
-        oilChanges: vehicle.oilChanges || [],
-        vignettes: vehicle.vignettes || [],
-        fuelings: vehicle.fuelings || [], // ÚJ
-        kmReminder: vehicle.kmReminder || { enabled: false, lastRecorded: 0 },
+        tires: vehicle.tires || [], // MÓDOSÍTVA: már tömb lesz
+        oilChanges: vehicle.oilChanges || [], // ÚJ
+        vignettes: vehicle.vignettes || [], // ÚJ
+        kmReminder: vehicle.kmReminder || { enabled: false, lastRecorded: 0 }, // ÚJ
       });
     } else {
       setEditingItem(null);
@@ -2341,11 +2644,10 @@ const toggleShoppingItem = (id, field) => {
         insurance: "",
         km: 0,
         serviceHistory: [],
-        tires: [],
-        oilChanges: [],
-        vignettes: [],
-        fuelings: [], // ÚJ
-        kmReminder: { enabled: false, lastRecorded: 0 },
+        tires: [], // MÓDOSÍTVA
+        oilChanges: [], // ÚJ
+        vignettes: [], // ÚJ
+        kmReminder: { enabled: false, lastRecorded: 0 }, // ÚJ
       });
     }
     setShowVehicleModal(true);
@@ -2501,199 +2803,6 @@ const toggleShoppingItem = (id, field) => {
       ...formData,
       vignettes: formData.vignettes.filter((_, i) => i !== index),
     });
-  };
-
-  // TANKOLÁSOK
-  const addFueling = () => {
-    if (!tempFueling.date || !tempFueling.liters || !tempFueling.totalPrice) {
-      alert("Dátum, mennyiség és összeg kötelező!");
-      return;
-    }
-
-    const liters = parseFloat(tempFueling.liters);
-    const totalPrice = parseFloat(tempFueling.totalPrice);
-    const pricePerLiter = tempFueling.pricePerLiter
-      ? parseFloat(tempFueling.pricePerLiter)
-      : totalPrice / liters;
-
-    setFormData({
-      ...formData,
-      fuelings: [
-        ...(formData.fuelings || []),
-        {
-          ...tempFueling,
-          id: Date.now(),
-          liters: liters,
-          totalPrice: totalPrice,
-          pricePerLiter: pricePerLiter,
-          km: tempFueling.km ? parseInt(tempFueling.km) : null,
-        },
-      ],
-    });
-    setTempFueling({
-      date: new Date().toISOString().split("T")[0],
-      km: "",
-      liters: "",
-      pricePerLiter: "",
-      totalPrice: "",
-      station: "",
-      notes: "",
-    });
-  };
-
-  const removeFueling = (index) => {
-    setFormData({
-      ...formData,
-      fuelings: formData.fuelings.filter((_, i) => i !== index),
-    });
-  };
-
-  const openFuelingModal = (vehicle) => {
-    setSelectedVehicle(vehicle);
-    setTempFueling({
-      date: new Date().toISOString().split("T")[0],
-      km: vehicle.km || "",
-      liters: "",
-      pricePerLiter: "",
-      totalPrice: "",
-      station: "",
-      notes: "",
-    });
-    setShowFuelingModal(true);
-  };
-
-  const saveFueling = async () => {
-    if (!tempFueling.liters || !tempFueling.totalPrice) {
-      alert("Mennyiség és összeg kötelező!");
-      return;
-    }
-
-    const liters = parseFloat(tempFueling.liters);
-    const totalPrice = parseFloat(tempFueling.totalPrice);
-    const pricePerLiter = tempFueling.pricePerLiter
-      ? parseFloat(tempFueling.pricePerLiter)
-      : totalPrice / liters;
-
-    const updatedVehicle = {
-      ...selectedVehicle,
-      fuelings: [
-        ...(selectedVehicle.fuelings || []),
-        {
-          date: tempFueling.date,
-          km: tempFueling.km ? parseInt(tempFueling.km) : null,
-          liters: liters,
-          pricePerLiter: pricePerLiter,
-          totalPrice: totalPrice,
-          station: tempFueling.station,
-          notes: tempFueling.notes,
-          id: Date.now(),
-        },
-      ],
-      // Frissítjük a km állást is, ha meg van adva
-      km: tempFueling.km ? parseInt(tempFueling.km) : selectedVehicle.km,
-    };
-
-    const newData = {
-      ...data,
-      vehicles: data.vehicles.map((v) =>
-        v.id === selectedVehicle.id ? updatedVehicle : v
-      ),
-    };
-
-    setData(newData);
-    await saveUserData(newData);
-    setShowFuelingModal(false);
-    setSelectedVehicle(null);
-    setTempFueling({
-      date: new Date().toISOString().split("T")[0],
-      km: "",
-      liters: "",
-      pricePerLiter: "",
-      totalPrice: "",
-      station: "",
-      notes: "",
-    });
-  };
-
-  // Automatikus számítások a tankoláshoz
-  const handleFuelingLitersChange = (value) => {
-    const liters = parseFloat(value) || 0;
-    const pricePerLiter = parseFloat(tempFueling.pricePerLiter) || 0;
-
-    setTempFueling({
-      ...tempFueling,
-      liters: value,
-      totalPrice:
-        pricePerLiter > 0
-          ? (liters * pricePerLiter).toFixed(0)
-          : tempFueling.totalPrice,
-    });
-  };
-
-  const handleFuelingPricePerLiterChange = (value) => {
-    const pricePerLiter = parseFloat(value) || 0;
-    const liters = parseFloat(tempFueling.liters) || 0;
-
-    setTempFueling({
-      ...tempFueling,
-      pricePerLiter: value,
-      totalPrice:
-        liters > 0
-          ? (liters * pricePerLiter).toFixed(0)
-          : tempFueling.totalPrice,
-    });
-  };
-
-  const handleFuelingTotalPriceChange = (value) => {
-    const totalPrice = parseFloat(value) || 0;
-    const liters = parseFloat(tempFueling.liters) || 0;
-
-    setTempFueling({
-      ...tempFueling,
-      totalPrice: value,
-      pricePerLiter:
-        liters > 0
-          ? (totalPrice / liters).toFixed(2)
-          : tempFueling.pricePerLiter,
-    });
-  };
-
-  // GUMI PROFILMÉLYSÉG SZERKESZTÉSE
-  const openEditTireModal = (vehicle, tireIndex) => {
-    setSelectedVehicle(vehicle);
-    setSelectedTire({ ...vehicle.tires[tireIndex], index: tireIndex });
-    setShowEditTireModal(true);
-  };
-
-  const saveEditedTire = async () => {
-    if (!selectedTire.treadDepth) {
-      alert("Add meg a profilmélységet!");
-      return;
-    }
-
-    const updatedTires = [...selectedVehicle.tires];
-    updatedTires[selectedTire.index] = {
-      ...updatedTires[selectedTire.index],
-      treadDepth: selectedTire.treadDepth,
-    };
-
-    const updatedVehicle = {
-      ...selectedVehicle,
-      tires: updatedTires,
-    };
-
-    const newData = {
-      ...data,
-      vehicles: data.vehicles.map((v) =>
-        v.id === selectedVehicle.id ? updatedVehicle : v
-      ),
-    };
-
-    setData(newData);
-    await saveUserData(newData);
-    setShowEditTireModal(false);
-    setSelectedVehicle(null);
-    setSelectedTire(null);
   };
 
   const quickAddService = async (vehicleId) => {
@@ -2978,8 +3087,851 @@ const toggleShoppingItem = (id, field) => {
     setEditingItem(null);
   };
 
-  // === HITELEK ===
+  //Pénzügyi függvények, FUNKCIÓK
+  // === HÓNAP NAVIGÁCIÓ ===
+  const goToPreviousMonth = () => {
+    setSelectedMonth((prev) => {
+      const newDate = new Date(prev);
+      newDate.setMonth(newDate.getMonth() - 1);
+      return newDate;
+    });
+  };
 
+  const goToNextMonth = () => {
+    setSelectedMonth((prev) => {
+      const newDate = new Date(prev);
+      newDate.setMonth(newDate.getMonth() + 1);
+      return newDate;
+    });
+  };
+
+  const goToCurrentMonth = () => {
+    setSelectedMonth(new Date());
+  };
+
+  // === SZÁMLA SZŰRÉS ===
+  const toggleAccountFilter = (accountId) => {
+    setSelectedAccounts((prev) => {
+      if (prev.includes(accountId)) {
+        return prev.filter((id) => id !== accountId);
+      } else {
+        return [...prev, accountId];
+      }
+    });
+  };
+
+  const selectAllAccounts = () => {
+    setSelectedAccounts([]);
+  };
+
+  const filterTransactionsByMonthAndAccounts = (transactions) => {
+    return (transactions || []).filter((t) => {
+      if (!t) return false;
+
+      // Privát tranzakciók szűrése
+      if (t.isShared === false && t.ownerId !== currentUser?.uid) {
+        return false;
+      }
+
+      // Hónap szűrés
+      const transDate = new Date(t.date);
+      const selectedYear = selectedMonth.getFullYear();
+      const selectedMonthNum = selectedMonth.getMonth();
+
+      if (
+        transDate.getFullYear() !== selectedYear ||
+        transDate.getMonth() !== selectedMonthNum
+      ) {
+        return false;
+      }
+
+      // Számla szűrés (ha van kiválasztva konkrét számla)
+      if (
+        selectedAccounts.length > 0 &&
+        !selectedAccounts.includes(t.account)
+      ) {
+        return false;
+      }
+
+      return true;
+    });
+  };
+
+  // === TRANSACTION KEZELÉS ===
+  const openTransactionModal = (type) => {
+    setTransactionType(type);
+    setFormData({
+      amount: "",
+      category: "",
+      account: "",
+      date: new Date().toISOString().split("T")[0],
+      description: "",
+      currency: "HUF",
+    });
+    setEditingItem(null);
+    setShowTransactionModal(true);
+  };
+
+  const saveTransaction = async () => {
+    if (!formData.amount || !formData.category || !formData.account) {
+      alert("Összeg, kategória és számla kötelező!");
+      return;
+    }
+
+    const accountsSource = Array.isArray(data?.accounts)
+      ? data.accounts
+      : Array.isArray(data?.finances?.accounts)
+      ? data.finances.accounts
+      : [];
+
+    if (accountsSource.length === 0) {
+      alert("Nincs elérhető számla! Először hozz létre egy számlát.");
+      return;
+    }
+
+    const selectedAccount = accountsSource.find(
+      (acc) => acc.id === parseInt(formData.account)
+    );
+
+    if (!selectedAccount) {
+      alert("Érvénytelen számla!");
+      return;
+    }
+
+    const transaction = {
+      id: editingItem?.id || Date.now(),
+      type: transactionType,
+      amount: parseFloat(formData.amount),
+      category: formData.category,
+      account: parseInt(formData.account),
+      accountName: selectedAccount.name || selectedAccount.displayName,
+      date: formData.date || new Date().toISOString().split("T")[0],
+      description: formData.description || "",
+      isShared: selectedAccount.isShared !== false,
+      ownerId: selectedAccount.ownerId || currentUser?.uid,
+      currency: formData.currency || "HUF",
+    };
+
+    const useFinancesStructure = Array.isArray(data?.finances?.transactions);
+    let newData;
+
+    if (useFinancesStructure) {
+      const existingTransactions = data.finances.transactions || [];
+      if (editingItem) {
+        newData = {
+          ...data,
+          finances: {
+            ...data.finances,
+            transactions: existingTransactions.map((t) =>
+              t.id === editingItem.id ? transaction : t
+            ),
+          },
+        };
+      } else {
+        newData = {
+          ...data,
+          finances: {
+            ...data.finances,
+            transactions: [...existingTransactions, transaction],
+          },
+        };
+      }
+    } else {
+      const existingTransactions = data.transactions || [];
+      if (editingItem) {
+        newData = {
+          ...data,
+          transactions: existingTransactions.map((t) =>
+            t.id === editingItem.id ? transaction : t
+          ),
+        };
+      } else {
+        newData = {
+          ...data,
+          transactions: [...existingTransactions, transaction],
+        };
+      }
+    }
+
+    // Számla egyenleg frissítése
+    if (Array.isArray(newData?.accounts)) {
+      newData.accounts = newData.accounts.map((acc) => {
+        if (acc.id === parseInt(formData.account)) {
+          let balanceChange = parseFloat(formData.amount);
+          if (transactionType === "expense") balanceChange = -balanceChange;
+
+          if (editingItem && editingItem.account === acc.id) {
+            let oldChange = parseFloat(editingItem.amount);
+            if (editingItem.type === "expense") oldChange = -oldChange;
+            return {
+              ...acc,
+              balance: acc.balance - oldChange + balanceChange,
+            };
+          }
+
+          return {
+            ...acc,
+            balance: (acc.balance || 0) + balanceChange,
+          };
+        }
+        return acc;
+      });
+    }
+
+    setData(newData);
+    await saveUserData(newData);
+    setShowTransactionModal(false);
+    setFormData({});
+    setEditingItem(null);
+  };
+
+  // === ACCOUNT KEZELÉS ===
+  const openAccountModal = (account = null) => {
+    if (account) {
+      setEditingItem(account);
+      setFormData({
+        ...account,
+        isShared:
+          typeof account.isShared === "boolean" ? account.isShared : true, // ✅ JÓ
+        ownerId: account.ownerId || currentUser?.uid,
+      });
+    } else {
+      setEditingItem(null);
+      setFormData({
+        name: "",
+        type: "bank",
+        balance: 0,
+        currency: "HUF",
+        isShared: true,
+        ownerId: currentUser?.uid,
+      });
+    }
+    setShowAccountModal(true);
+  };
+
+  const saveAccount = async () => {
+    if (!formData.name) {
+      alert("Számla neve kötelező!");
+      return;
+    }
+
+    const account = {
+      id: editingItem?.id || Date.now(),
+      name: formData.name,
+      type: formData.type || "bank",
+      balance: parseFloat(formData.balance) || 0,
+      currency: formData.currency || "HUF",
+      isShared:
+        typeof formData.isShared === "boolean" ? formData.isShared : true, // ✅ JÓ
+      ownerId: currentUser?.uid,
+    };
+
+    let newData;
+    if (editingItem) {
+      newData = {
+        ...data,
+        accounts: (data.accounts || []).map((a) =>
+          a.id === editingItem.id ? account : a
+        ),
+      };
+    } else {
+      newData = {
+        ...data,
+        accounts: [...(data.accounts || []), account],
+      };
+    }
+
+    setData(newData);
+    await saveUserData(newData);
+    setShowAccountModal(false);
+    setFormData({});
+    setEditingItem(null);
+  };
+
+  const addSubaccount = () => {
+    if (!tempCustomField.label) {
+      alert("Alszámla neve kötelező!");
+      return;
+    }
+    setFormData({
+      ...formData,
+      subaccounts: [
+        ...(formData.subaccounts || []),
+        {
+          id: Date.now(),
+          name: tempCustomField.label,
+          balance: parseFloat(tempCustomField.value) || 0,
+        },
+      ],
+    });
+    setTempCustomField({ label: "", value: "" });
+  };
+
+  const removeSubaccount = (index) => {
+    setFormData({
+      ...formData,
+      subaccounts: formData.subaccounts.filter((_, i) => i !== index),
+    });
+  };
+
+  // === BUDGET KEZELÉS ===
+  const openBudgetModal = (budget = null) => {
+    if (budget) {
+      setEditingItem(budget);
+      setFormData(budget);
+    } else {
+      setEditingItem(null);
+      setFormData({
+        type: "month",
+        totalBudget: "",
+        categories: [],
+        startDate: new Date().toISOString().split("T")[0],
+      });
+    }
+    setShowBudgetModal(true);
+  };
+
+  const saveBudget = async () => {
+    if (!formData.totalBudget) {
+      alert("Teljes költségvetés kötelező!");
+      return;
+    }
+
+    const budget = {
+      id: editingItem?.id || Date.now(),
+      type: formData.type || "month",
+      totalBudget: parseFloat(formData.totalBudget),
+      categories: formData.categories || [],
+      startDate: formData.startDate || new Date().toISOString().split("T")[0],
+      createdBy: currentUser?.uid,
+    };
+
+    let newData;
+    if (editingItem) {
+      newData = {
+        ...data,
+        budgets: (data.budgets || []).map((b) =>
+          b.id === editingItem.id ? budget : b
+        ),
+      };
+    } else {
+      newData = {
+        ...data,
+        budgets: [...(data.budgets || []), budget],
+      };
+    }
+
+    setData(newData);
+    await saveUserData(newData);
+    setShowBudgetModal(false);
+    setFormData({});
+    setEditingItem(null);
+  };
+
+  const addBudgetCategory = () => {
+    const categoryName = prompt("Kategória neve:");
+    if (!categoryName) return;
+    const limit = prompt("Limit összege (Ft):");
+    if (!limit) return;
+
+    setFormData({
+      ...formData,
+      categories: [
+        ...(formData.categories || []),
+        {
+          id: Date.now(),
+          name: categoryName,
+          limit: parseFloat(limit),
+        },
+      ],
+    });
+  };
+
+  const removeBudgetCategory = (categoryId) => {
+    setFormData({
+      ...formData,
+      categories: (formData.categories || []).filter(
+        (c) => c.id !== categoryId
+      ),
+    });
+  };
+
+  const calculateBudgetStatus = (budget, transactions) => {
+    if (!budget) return null;
+
+    const budgetStartDate = new Date(budget.startDate);
+    let budgetEndDate = new Date(budgetStartDate);
+
+    if (budget.type === "month") {
+      budgetEndDate.setMonth(budgetEndDate.getMonth() + 1);
+    } else {
+      budgetEndDate.setFullYear(budgetEndDate.getFullYear() + 1);
+    }
+
+    const relevantTransactions = (transactions || []).filter((t) => {
+      if (t.isShared === false && t.ownerId !== currentUser?.uid) return false;
+      if (t.type !== "expense") return false;
+
+      const tDate = new Date(t.date);
+      const isInBudgetPeriod =
+        tDate >= budgetStartDate && tDate < budgetEndDate;
+
+      if (!isInBudgetPeriod) return false;
+
+      if (
+        selectedAccounts.length > 0 &&
+        !selectedAccounts.includes(t.account)
+      ) {
+        return false;
+      }
+
+      return true;
+    });
+
+    const totalSpent = relevantTransactions.reduce(
+      (sum, t) => sum + (parseFloat(t.amount) || 0),
+      0
+    );
+
+    const percentage = (totalSpent / budget.totalBudget) * 100;
+    const remaining = budget.totalBudget - totalSpent;
+
+    const categorySpending = {};
+    (budget.categories || []).forEach((cat) => {
+      const spent = relevantTransactions
+        .filter((t) => t.category === cat.name)
+        .reduce((sum, t) => sum + (parseFloat(t.amount) || 0), 0);
+
+      categorySpending[cat.name] = {
+        limit: cat.limit,
+        spent: spent,
+        remaining: cat.limit - spent,
+        percentage: (spent / cat.limit) * 100,
+      };
+    });
+
+    return {
+      totalBudget: budget.totalBudget,
+      totalSpent,
+      remaining,
+      percentage,
+      categorySpending,
+      isOverBudget: totalSpent > budget.totalBudget,
+      transactions: relevantTransactions,
+    };
+  };
+
+  const getCurrentBudget = () => {
+    const budgets = data.budgets || [];
+    const now = selectedMonth;
+
+    return budgets.find((budget) => {
+      const budgetStart = new Date(budget.startDate);
+      let budgetEnd = new Date(budgetStart);
+
+      if (budget.type === "month") {
+        budgetEnd.setMonth(budgetEnd.getMonth() + 1);
+      } else {
+        budgetEnd.setFullYear(budgetEnd.getFullYear() + 1);
+      }
+
+      return now >= budgetStart && now < budgetEnd;
+    });
+  };
+
+  // BANK FORMÁTUM DETEKTÁLÁS
+  const detectBankFormat = (headers) => {
+    const headersLower = headers.map((h) => h.toLowerCase().trim());
+
+    // Revolut
+    if (
+      headersLower.includes("type") &&
+      headersLower.includes("product") &&
+      headersLower.includes("started date")
+    ) {
+      return {
+        bank: "Revolut",
+        mapping: {
+          date: "Started Date",
+          description: "Description",
+          amount: "Amount",
+          currency: "Currency",
+          category: "Category",
+        },
+      };
+    }
+
+    // OTP Bank
+    if (
+      headersLower.includes("könyvelés dátuma") ||
+      headersLower.includes("érték dátuma")
+    ) {
+      return {
+        bank: "OTP Bank",
+        mapping: {
+          date: "Könyvelés dátuma",
+          description: "Tranzakció leírása",
+          amount: "Összeg",
+          currency: "Deviza",
+        },
+      };
+    }
+
+    // Erste Bank
+    if (
+      headersLower.includes("buchungsdatum") ||
+      headersLower.includes("booking date")
+    ) {
+      return {
+        bank: "Erste Bank",
+        mapping: {
+          date: "Booking date",
+          description: "Details",
+          amount: "Amount",
+          currency: "Currency",
+        },
+      };
+    }
+
+    // K&H Bank
+    if (
+      headersLower.includes("tranzakció dátuma") &&
+      headersLower.includes("jogcím")
+    ) {
+      return {
+        bank: "K&H Bank",
+        mapping: {
+          date: "Tranzakció dátuma",
+          description: "Jogcím",
+          amount: "Összeg",
+          currency: "Pénznem",
+        },
+      };
+    }
+
+    // Általános CSV
+    return {
+      bank: "Általános",
+      mapping: {
+        date: headers[0],
+        description: headers[1],
+        amount: headers[2],
+      },
+    };
+  };
+
+  // CSV FÁJL FELTÖLTÉS ÉS PARSING
+  const handleFileUpload = async (file) => {
+    const fileName = file.name.toLowerCase();
+
+    try {
+      if (fileName.endsWith(".csv")) {
+        const text = await file.text();
+        const lines = text.split(/\r?\n/).filter((line) => line.trim());
+
+        if (lines.length === 0) {
+          alert("Üres fájl!");
+          return;
+        }
+
+        // Elválasztó felismerés
+        const firstLine = lines[0];
+        let delimiter = ",";
+        if (firstLine.split(";").length > firstLine.split(",").length) {
+          delimiter = ";";
+        } else if (firstLine.split("\t").length > firstLine.split(",").length) {
+          delimiter = "\t";
+        }
+
+        // CSV sor parsing (idézőjelek kezelésével)
+        const parseCSVLine = (line, delim) => {
+          const values = [];
+          let current = "";
+          let inQuotes = false;
+
+          for (let i = 0; i < line.length; i++) {
+            const char = line[i];
+            const nextChar = line[i + 1];
+
+            if (char === '"') {
+              if (inQuotes && nextChar === '"') {
+                current += '"';
+                i++;
+              } else {
+                inQuotes = !inQuotes;
+              }
+            } else if (char === delim && !inQuotes) {
+              values.push(current.trim());
+              current = "";
+            } else {
+              current += char;
+            }
+          }
+          values.push(current.trim());
+          return values;
+        };
+
+        // Header parsing
+        const headers = parseCSVLine(lines[0], delimiter);
+
+        // Data parsing
+        const data = [];
+        for (let i = 1; i < lines.length; i++) {
+          const line = lines[i];
+          if (!line.trim()) continue;
+
+          const values = parseCSVLine(line, delimiter);
+
+          if (values.length >= headers.length && values.some((v) => v)) {
+            const row = {};
+            headers.forEach((header, idx) => {
+              row[header] = values[idx] || "";
+            });
+            data.push(row);
+          }
+        }
+
+        if (data.length === 0) {
+          alert("Nem sikerült adatokat olvasni a fájlból!");
+          return;
+        }
+
+        const detected = detectBankFormat(headers);
+        setDetectedBank(detected);
+        setImportedData(data);
+        setImportStep(2);
+      } else if (fileName.endsWith(".xlsx") || fileName.endsWith(".xls")) {
+        alert(
+          "❌ Excel import jelenleg nem támogatott\n\n" +
+            "✅ Mentsd el CSV formátumban:\n" +
+            "Fájl → Mentés másként → CSV\n\n" +
+            "Vagy exportáld CSV-ben a banki appból!"
+        );
+      } else {
+        alert("❌ Nem támogatott fájlformátum!");
+      }
+    } catch (error) {
+      alert("❌ Hiba: " + error.message);
+    }
+  };
+
+  // TRANZAKCIÓ KONVERTÁLÁSA
+  const parseImportedTransaction = (row, mapping) => {
+    // Dátum parsing
+    let date = row[mapping.date];
+    if (date) {
+      if (typeof date === "string") {
+        if (!isNaN(date) && date > 40000) {
+          // Excel serial date
+          const excelEpoch = new Date(1900, 0, 1);
+          date = new Date(excelEpoch.getTime() + (date - 2) * 86400000);
+        } else {
+          date = new Date(date);
+        }
+      }
+      date =
+        date instanceof Date && !isNaN(date)
+          ? date.toISOString().split("T")[0]
+          : null;
+    }
+
+    // Összeg parsing
+    let amount = row[mapping.amount];
+    if (typeof amount === "string") {
+      amount = amount.replace(/[^\d.,-]/g, "").replace(",", ".");
+    }
+    amount = parseFloat(amount) || 0;
+
+    // Típus meghatározása
+    const type = amount >= 0 ? "income" : "expense";
+    amount = Math.abs(amount);
+
+    const description = row[mapping.description] || "";
+    const category = autoCategorize(description, type);
+
+    return {
+      date,
+      amount,
+      type,
+      description,
+      category,
+      currency: row[mapping.currency] || "HUF",
+      original: row,
+    };
+  };
+
+  // AUTOMATIKUS KATEGORIZÁLÁS
+  const autoCategorize = (description, type) => {
+    const desc = description.toLowerCase();
+
+    if (type === "expense") {
+      if (
+        desc.includes("lidl") ||
+        desc.includes("tesco") ||
+        desc.includes("aldi") ||
+        desc.includes("spar") ||
+        desc.includes("cba")
+      ) {
+        return "Étel";
+      }
+      if (
+        desc.includes("mol") ||
+        desc.includes("shell") ||
+        desc.includes("omv") ||
+        desc.includes("benzin")
+      ) {
+        return "Közlekedés";
+      }
+      if (
+        desc.includes("gym") ||
+        desc.includes("fitnesz") ||
+        desc.includes("orvos") ||
+        desc.includes("patika")
+      ) {
+        return "Egészség";
+      }
+      if (
+        desc.includes("netflix") ||
+        desc.includes("spotify") ||
+        desc.includes("hbo") ||
+        desc.includes("cinema") ||
+        desc.includes("mozi")
+      ) {
+        return "Szórakozás";
+      }
+      if (
+        desc.includes("lakbér") ||
+        desc.includes("rezsi") ||
+        desc.includes("áram") ||
+        desc.includes("gáz") ||
+        desc.includes("víz")
+      ) {
+        return "Lakhatás";
+      }
+      if (
+        desc.includes("zara") ||
+        desc.includes("h&m") ||
+        desc.includes("ruha")
+      ) {
+        return "Ruházat";
+      }
+      return "Egyéb kiadás";
+    } else {
+      if (desc.includes("fizetés") || desc.includes("bér")) {
+        return "Fizetés";
+      }
+      if (desc.includes("prémium") || desc.includes("bónusz")) {
+        return "Prémium";
+      }
+      return "Egyéb bevétel";
+    }
+  };
+
+  // DUPLIKÁCIÓ ELLENŐRZÉS
+  const checkDuplicates = (newTransactions) => {
+    const existingTransactions =
+      data.transactions || data.finances?.transactions || [];
+
+    return newTransactions.map((newTx) => {
+      const isDuplicate = existingTransactions.some(
+        (existing) =>
+          existing.date === newTx.date &&
+          Math.abs(existing.amount - newTx.amount) < 0.01 &&
+          existing.description === newTx.description
+      );
+      return { ...newTx, isDuplicate };
+    });
+  };
+
+  // IMPORT VÉGREHAJTÁSA
+  const executeImport = async () => {
+    if (!importAccount) {
+      alert("Válassz ki egy számlát!");
+      return;
+    }
+
+    const accountsSource = Array.isArray(data?.accounts)
+      ? data.accounts
+      : Array.isArray(data?.finances?.accounts)
+      ? data.finances.accounts
+      : [];
+
+    const selectedAccount = accountsSource.find(
+      (acc) => acc.id === parseInt(importAccount)
+    );
+
+    if (!selectedAccount) {
+      alert("Érvénytelen számla!");
+      return;
+    }
+
+    const parsedTransactions = importedData
+      .map((row) => parseImportedTransaction(row, detectedBank.mapping))
+      .filter((tx) => tx.date && tx.amount > 0);
+
+    const checkedTransactions = checkDuplicates(parsedTransactions);
+
+    const newTransactions = checkedTransactions
+      .filter((tx) => !tx.isDuplicate)
+      .map((tx) => ({
+        id: Date.now() + Math.random(),
+        type: tx.type,
+        amount: tx.amount,
+        category: tx.category,
+        account: parseInt(importAccount),
+        accountName: selectedAccount.name,
+        date: tx.date,
+        description: tx.description,
+        isShared: selectedAccount.isShared !== false,
+        ownerId: selectedAccount.ownerId || currentUser?.uid,
+        currency: tx.currency,
+        imported: true,
+      }));
+
+    if (newTransactions.length === 0) {
+      alert("Minden tranzakció már szerepel a rendszerben!");
+      return;
+    }
+
+    const existingTransactions =
+      data.transactions || data.finances?.transactions || [];
+    const useFinancesStructure = Array.isArray(data?.finances?.transactions);
+
+    let newData;
+    if (useFinancesStructure) {
+      newData = {
+        ...data,
+        finances: {
+          ...data.finances,
+          transactions: [...existingTransactions, ...newTransactions],
+        },
+      };
+    } else {
+      newData = {
+        ...data,
+        transactions: [...existingTransactions, ...newTransactions],
+      };
+    }
+
+    setData(newData);
+    await saveUserData(newData);
+
+    alert(
+      `✅ ${newTransactions.length} tranzakció sikeresen importálva!\n\n` +
+        `${
+          checkedTransactions.length - newTransactions.length
+        } duplikált tranzakciót kihagytunk.`
+    );
+
+    // Reset
+    setShowImportModal(false);
+    setImportStep(1);
+    setImportedData([]);
+    setDetectedBank(null);
+    setImportAccount(null);
+  };
+
+  // ==================== LOAN (HITEL) FÜGGVÉNYEK ====================
   const openLoanModal = (loan = null) => {
     if (loan) {
       setEditingItem(loan);
@@ -2989,15 +3941,14 @@ const toggleShoppingItem = (id, field) => {
       setFormData({
         name: "",
         lender: "",
-        principal: 0,
-        currentBalance: 0,
-        monthlyPayment: 0,
-        interestRate: 0,
-        thm: 0,
-        startDate: "",
+        principal: "",
+        currentBalance: "",
+        interestRate: "",
+        thm: "",
+        monthlyPayment: "",
+        startDate: new Date().toISOString().split("T")[0],
         endDate: "",
         paymentDay: "",
-        reminderEnabled: true,
         notes: "",
       });
     }
@@ -3006,20 +3957,34 @@ const toggleShoppingItem = (id, field) => {
 
   const saveLoan = async () => {
     if (!formData.name || !formData.principal || !formData.monthlyPayment) {
-      alert("Név, kölcsönösszeg és havi törlesztő kötelező!");
+      alert("Név, felvett összeg és havi törlesztő kötelező!");
       return;
     }
 
-    let newData;
-    const loans = data.finances?.loans || [];
+    const loan = {
+      id: editingItem?.id || Date.now(),
+      name: formData.name,
+      lender: formData.lender || "",
+      principal: parseFloat(formData.principal),
+      currentBalance:
+        parseFloat(formData.currentBalance) || parseFloat(formData.principal),
+      interestRate: parseFloat(formData.interestRate) || 0,
+      thm: parseFloat(formData.thm) || 0,
+      monthlyPayment: parseFloat(formData.monthlyPayment),
+      startDate: formData.startDate || new Date().toISOString().split("T")[0],
+      endDate: formData.endDate || "",
+      paymentDay: formData.paymentDay || "",
+      notes: formData.notes || "",
+    };
 
+    let newData;
     if (editingItem) {
       newData = {
         ...data,
         finances: {
           ...data.finances,
-          loans: loans.map((l) =>
-            l.id === editingItem.id ? { ...formData, id: editingItem.id } : l
+          loans: (data.finances?.loans || []).map((l) =>
+            l.id === editingItem.id ? loan : l
           ),
         },
       };
@@ -3028,7 +3993,7 @@ const toggleShoppingItem = (id, field) => {
         ...data,
         finances: {
           ...data.finances,
-          loans: [...loans, { ...formData, id: Date.now() }],
+          loans: [...(data.finances?.loans || []), loan],
         },
       };
     }
@@ -3040,20 +4005,7 @@ const toggleShoppingItem = (id, field) => {
     setEditingItem(null);
   };
 
-  const deleteLoan = async (loanId) => {
-    const newData = {
-      ...data,
-      finances: {
-        ...data.finances,
-        loans: (data.finances?.loans || []).filter((l) => l.id !== loanId),
-      },
-    };
-    setData(newData);
-    await saveUserData(newData);
-    setShowDeleteConfirm(null);
-  };
-
-  // === MEGTAKARÍTÁSI CÉLOK ===
+  // ==================== SAVING GOAL (MEGTAKARÍTÁS) FÜGGVÉNYEK ====================
 
   const openSavingGoalModal = (goal = null) => {
     if (goal) {
@@ -3063,10 +4015,10 @@ const toggleShoppingItem = (id, field) => {
       setEditingItem(null);
       setFormData({
         name: "",
-        targetAmount: 0,
+        category: "other",
+        targetAmount: "",
         currentAmount: 0,
         deadline: "",
-        category: "vacation",
         notes: "",
         deposits: [],
       });
@@ -3080,16 +4032,25 @@ const toggleShoppingItem = (id, field) => {
       return;
     }
 
-    let newData;
-    const goals = data.finances?.savingGoals || [];
+    const goal = {
+      id: editingItem?.id || Date.now(),
+      name: formData.name,
+      category: formData.category || "other",
+      targetAmount: parseFloat(formData.targetAmount),
+      currentAmount: parseFloat(formData.currentAmount) || 0,
+      deadline: formData.deadline || "",
+      notes: formData.notes || "",
+      deposits: formData.deposits || [],
+    };
 
+    let newData;
     if (editingItem) {
       newData = {
         ...data,
         finances: {
           ...data.finances,
-          savingGoals: goals.map((g) =>
-            g.id === editingItem.id ? { ...formData, id: editingItem.id } : g
+          savingGoals: (data.finances?.savingGoals || []).map((g) =>
+            g.id === editingItem.id ? goal : g
           ),
         },
       };
@@ -3098,10 +4059,7 @@ const toggleShoppingItem = (id, field) => {
         ...data,
         finances: {
           ...data.finances,
-          savingGoals: [
-            ...goals,
-            { ...formData, id: Date.now(), deposits: [] },
-          ],
+          savingGoals: [...(data.finances?.savingGoals || []), goal],
         },
       };
     }
@@ -3113,62 +4071,109 @@ const toggleShoppingItem = (id, field) => {
     setEditingItem(null);
   };
 
-  const deleteSavingGoal = async (goalId) => {
-    const newData = {
-      ...data,
-      finances: {
-        ...data.finances,
-        savingGoals: (data.finances?.savingGoals || []).filter(
-          (g) => g.id !== goalId
-        ),
-      },
-    };
-    setData(newData);
-    await saveUserData(newData);
-    setShowDeleteConfirm(null);
-  };
-
   const addDeposit = async () => {
     if (!depositAmount || parseFloat(depositAmount) <= 0) {
       alert("Adj meg egy érvényes összeget!");
       return;
     }
 
-    const amount = parseFloat(depositAmount);
-    const goals = data.finances?.savingGoals || [];
+    const deposit = {
+      id: Date.now(),
+      amount: parseFloat(depositAmount),
+      date: new Date().toISOString().split("T")[0],
+      addedBy: currentUser?.displayName || currentUser?.email || "Felhasználó",
+    };
 
-    const updatedGoals = goals.map((goal) => {
-      if (goal.id === selectedGoal.id) {
-        return {
-          ...goal,
-          currentAmount: (goal.currentAmount || 0) + amount,
-          deposits: [
-            ...(goal.deposits || []),
-            {
-              id: Date.now(),
-              amount: amount,
-              date: new Date().toISOString(),
-              addedBy: currentUser.email,
-            },
-          ],
-        };
-      }
-      return goal;
-    });
+    const updatedGoal = {
+      ...selectedGoal,
+      currentAmount:
+        (selectedGoal.currentAmount || 0) + parseFloat(depositAmount),
+      deposits: [...(selectedGoal.deposits || []), deposit],
+    };
 
     const newData = {
       ...data,
       finances: {
         ...data.finances,
-        savingGoals: updatedGoals,
+        savingGoals: (data.finances?.savingGoals || []).map((g) =>
+          g.id === selectedGoal.id ? updatedGoal : g
+        ),
       },
     };
 
     setData(newData);
     await saveUserData(newData);
     setShowDepositModal(false);
-    setDepositAmount("");
     setSelectedGoal(null);
+    setDepositAmount("");
+  };
+
+  // ==================== INVESTMENT (BEFEKTETÉS) FÜGGVÉNYEK ====================
+
+  const openInvestmentModal = (investment = null) => {
+    if (investment) {
+      setEditingItem(investment);
+      setFormData(investment);
+    } else {
+      setEditingItem(null);
+      setFormData({
+        name: "",
+        type: "stock",
+        amount: "",
+        currentValue: "",
+        currency: "HUF",
+        purchaseDate: new Date().toISOString().split("T")[0],
+        notes: "",
+      });
+    }
+    setShowInvestmentModal(true);
+  };
+
+  const saveInvestment = async () => {
+    if (!formData.name || !formData.amount) {
+      alert("Név és befektetett összeg kötelező!");
+      return;
+    }
+
+    const investment = {
+      id: editingItem?.id || Date.now(),
+      name: formData.name,
+      type: formData.type || "stock",
+      amount: parseFloat(formData.amount),
+      currentValue:
+        parseFloat(formData.currentValue) || parseFloat(formData.amount),
+      currency: formData.currency || "HUF",
+      purchaseDate:
+        formData.purchaseDate || new Date().toISOString().split("T")[0],
+      notes: formData.notes || "",
+    };
+
+    let newData;
+    if (editingItem) {
+      newData = {
+        ...data,
+        finances: {
+          ...data.finances,
+          investments: (data.finances?.investments || []).map((inv) =>
+            inv.id === editingItem.id ? investment : inv
+          ),
+        },
+      };
+    } else {
+      newData = {
+        ...data,
+        finances: {
+          ...data.finances,
+          investments: [...(data.finances?.investments || []), investment],
+        },
+      };
+    }
+
+    setData(newData);
+    await saveUserData(newData);
+    setShowInvestmentModal(false);
+    setFormData({});
+    setEditingItem(null);
   };
 
   // === CHAT FUNKCIÓK ===
@@ -3310,7 +4315,10 @@ const toggleShoppingItem = (id, field) => {
   // === JÁRMŰVEK - GYORSGOMBOK ===
   const openKmModal = (vehicle) => {
     setSelectedVehicle(vehicle);
-    setFormData({ km: vehicle.km || 0 });
+    setFormData({
+      km: vehicle.km || 0,
+      date: new Date().toISOString().split("T")[0],
+    });
     setShowKmModal(true);
   };
 
@@ -3320,9 +4328,22 @@ const toggleShoppingItem = (id, field) => {
       return;
     }
 
+    const newKm = parseInt(formData.km);
+    const previousKm = selectedVehicle.km || 0;
+    const kmDriven = newKm - previousKm;
+
     const updatedVehicle = {
       ...selectedVehicle,
-      km: parseInt(formData.km),
+      km: newKm,
+      kmHistory: [
+        ...(selectedVehicle.kmHistory || []),
+        {
+          date: formData.date || new Date().toISOString().split("T")[0],
+          km: newKm,
+          kmDriven: kmDriven > 0 ? kmDriven : 0,
+          id: Date.now(),
+        },
+      ],
       kmReminder: {
         ...selectedVehicle.kmReminder,
         lastRecorded: new Date().toISOString(),
@@ -3384,6 +4405,408 @@ const toggleShoppingItem = (id, field) => {
     setShowQuickServiceModal(false);
     setFormData({});
     setSelectedVehicle(null);
+  };
+
+  const openRefuelModal = (vehicle) => {
+    setSelectedVehicle(vehicle);
+    setFormData({
+      date: new Date().toISOString().split("T")[0],
+      liters: "",
+      cost: "",
+      pricePerLiter: "",
+      km: vehicle.km || 0,
+      fuelType: "benzin",
+    });
+    setShowRefuelModal(true);
+  };
+
+  const saveRefuel = async () => {
+    if (!formData.liters || !formData.cost) {
+      alert("Liter és költség megadása kötelező!");
+      return;
+    }
+
+    const updatedVehicle = {
+      ...selectedVehicle,
+      refuels: [
+        ...(selectedVehicle.refuels || []),
+        {
+          date: formData.date,
+          liters: parseFloat(formData.liters),
+          cost: parseFloat(formData.cost),
+          pricePerLiter: formData.pricePerLiter
+            ? parseFloat(formData.pricePerLiter)
+            : parseFloat(formData.cost) / parseFloat(formData.liters),
+          km: parseInt(formData.km) || selectedVehicle.km || 0,
+          fuelType: formData.fuelType || "benzin",
+          id: Date.now(),
+        },
+      ],
+    };
+
+    const newData = {
+      ...data,
+      vehicles: data.vehicles.map((v) =>
+        v.id === selectedVehicle.id ? updatedVehicle : v
+      ),
+    };
+
+    setData(newData);
+    await saveUserData(newData);
+    setShowRefuelModal(false);
+    setFormData({});
+    setSelectedVehicle(null);
+  };
+
+  const openStatsModal = (vehicle) => {
+    setSelectedVehicle(vehicle);
+    const today = new Date();
+    setFormData({
+      currentYear: today.getFullYear(),
+      currentMonth: today.getMonth() + 1,
+      viewMode: "month",
+    });
+    setShowStatsModal(true);
+  };
+
+  const calculateMonthlyStats = (vehicle, year, month) => {
+    const kmHistory = vehicle.kmHistory || [];
+    const refuels = vehicle.refuels || [];
+
+    const monthData = {
+      kmRecords: kmHistory.filter((k) => {
+        const date = new Date(k.date);
+        return date.getFullYear() === year && date.getMonth() + 1 === month;
+      }),
+      refuels: refuels.filter((r) => {
+        const date = new Date(r.date);
+        return date.getFullYear() === year && date.getMonth() + 1 === month;
+      }),
+    };
+
+    const totalKm = monthData.kmRecords.reduce(
+      (sum, k) => sum + (k.kmDriven || 0),
+      0
+    );
+    const totalRefuelCost = monthData.refuels.reduce(
+      (sum, r) => sum + r.cost,
+      0
+    );
+    const totalLiters = monthData.refuels.reduce((sum, r) => sum + r.liters, 0);
+    const avgPricePerLiter =
+      totalLiters > 0 ? totalRefuelCost / totalLiters : 0;
+    const avgConsumption =
+      totalKm > 0 && totalLiters > 0 ? (totalLiters / totalKm) * 100 : 0;
+
+    return {
+      ...monthData,
+      totalKm,
+      totalRefuelCost,
+      totalLiters,
+      avgPricePerLiter,
+      avgConsumption,
+    };
+  };
+
+  const calculateYearlyStats = (vehicle, year) => {
+    const months = [];
+    for (let i = 1; i <= 12; i++) {
+      months.push(calculateMonthlyStats(vehicle, year, i));
+    }
+
+    const totals = {
+      totalKm: months.reduce((sum, m) => sum + m.totalKm, 0),
+      totalRefuelCost: months.reduce((sum, m) => sum + m.totalRefuelCost, 0),
+      totalLiters: months.reduce((sum, m) => sum + m.totalLiters, 0),
+      refuelCount: months.reduce((sum, m) => sum + m.refuels.length, 0),
+    };
+
+    totals.avgPricePerLiter =
+      totals.totalLiters > 0 ? totals.totalRefuelCost / totals.totalLiters : 0;
+    totals.avgConsumption =
+      totals.totalKm > 0 && totals.totalLiters > 0
+        ? (totals.totalLiters / totals.totalKm) * 100
+        : 0;
+
+    return { months, totals };
+  };
+
+  //Rendelések FUNKCIÓK
+  // === RENDELÉSEK ===
+  const openOrderModal = (order = null) => {
+    if (order) {
+      setEditingItem(order);
+      setFormData({
+        itemName: order.itemName || "",
+        price: order.price || "",
+        orderDate: order.orderDate || "",
+        expectedDelivery: order.expectedDelivery || "",
+        deliveryAddress: order.deliveryAddress || "",
+        deliveryType: order.deliveryType || "cím",
+        webshop: order.webshop || "",
+        cashOnDelivery: order.cashOnDelivery || false,
+        status: order.status || "feldolgozás alatt",
+        trackingNumber: order.trackingNumber || "",
+        notes: order.notes || "",
+      });
+    } else {
+      setEditingItem(null);
+      setFormData({
+        itemName: "",
+        price: "",
+        orderDate: new Date().toISOString().split("T")[0],
+        expectedDelivery: "",
+        deliveryAddress: "",
+        deliveryType: "cím",
+        webshop: "",
+        cashOnDelivery: false,
+        status: "feldolgozás alatt",
+        trackingNumber: "",
+        notes: "",
+      });
+    }
+    setShowOrderModal(true);
+  };
+
+  const saveOrder = async () => {
+    if (!formData.itemName || !formData.orderDate) {
+      alert("Tétel neve és rendelés dátuma kötelező!");
+      return;
+    }
+
+    const orderData = {
+      id: editingItem?.id || Date.now(),
+      itemName: formData.itemName,
+      price: parseFloat(formData.price) || 0,
+      orderDate: formData.orderDate,
+      expectedDelivery: formData.expectedDelivery || "",
+      deliveryAddress: formData.deliveryAddress || "",
+      deliveryType: formData.deliveryType || "cím",
+      webshop: formData.webshop || "",
+      cashOnDelivery: formData.cashOnDelivery || false,
+      status: formData.status || "feldolgozás alatt",
+      trackingNumber: formData.trackingNumber || "",
+      notes: formData.notes || "",
+      deliveredDate:
+        formData.status === "kézbesítve" && !editingItem?.deliveredDate
+          ? new Date().toISOString().split("T")[0]
+          : editingItem?.deliveredDate || null,
+      createdAt: editingItem?.createdAt || new Date().toISOString(),
+    };
+
+    console.log("Mentendő rendelés:", orderData); // DEBUG
+    console.log("Jelenlegi data.orders:", data.orders); // DEBUG
+
+    const newData = {
+      ...data,
+      orders: editingItem
+        ? (data.orders || []).map((o) =>
+            o.id === editingItem.id ? orderData : o
+          )
+        : [...(data.orders || []), orderData],
+    };
+
+    console.log("Új data.orders:", newData.orders); // DEBUG
+
+    setData(newData);
+    await saveUserData(newData);
+    setShowOrderModal(false);
+    setFormData({});
+    setEditingItem(null);
+  };
+
+  const deleteOrder = async (orderId) => {
+    const newData = {
+      ...data,
+      orders: data.orders.filter((o) => o.id !== orderId),
+    };
+    setData(newData);
+    await saveUserData(newData);
+    setShowDeleteConfirm(null);
+  };
+
+  const markAsDelivered = async (orderId) => {
+    const newData = {
+      ...data,
+      orders: data.orders.map((o) =>
+        o.id === orderId
+          ? {
+              ...o,
+              status: "kézbesítve",
+              deliveredDate: new Date().toISOString().split("T")[0],
+            }
+          : o
+      ),
+    };
+    setData(newData);
+    await saveUserData(newData);
+  };
+
+  const syncOrdersFromEmail = async () => {
+    if (!gmailAuthenticated) {
+      alert(
+        'Először csatlakozz a Gmail fiókodhoz az "Email szinkronizálás" gombbal!'
+      );
+      return;
+    }
+
+    setGmailAuthInProgress(true);
+
+    try {
+      // Üzenetek lekérése
+      const messages = await fetchGmailMessages(50);
+
+      if (!messages || messages.length === 0) {
+        alert(
+          "Nem találtam rendelésekkel kapcsolatos emaileket az utóbbi 30 napban."
+        );
+        setGmailAuthInProgress(false);
+        return;
+      }
+
+      let newOrdersCount = 0;
+      let updatedOrdersCount = 0;
+      const existingOrders = data.orders || [];
+      const updatedOrders = [...existingOrders];
+
+      // Minden üzenet feldolgozása
+      for (const message of messages) {
+        const details = await fetchMessageDetails(message.id);
+        if (!details) continue;
+
+        const orderData = parseOrderEmail(details.body, details.subject);
+
+        // Ha nem találtunk rendelésszámot, skip
+        if (
+          !orderData.itemName ||
+          orderData.itemName === "Rendelés undefined"
+        ) {
+          continue;
+        }
+
+        // Frissítjük a tétel nevét a subject alapján, ha üres
+        if (orderData.itemName.startsWith("Rendelés")) {
+          orderData.itemName = details.subject.substring(0, 100);
+        }
+
+        orderData.notes = `Automatikusan detektálva emailből (${new Date(
+          details.date
+        ).toLocaleDateString("hu-HU")})`;
+
+        // Keresés: van-e már ilyen rendelés?
+        const existingIndex = updatedOrders.findIndex(
+          (o) =>
+            o.trackingNumber &&
+            orderData.trackingNumber &&
+            o.trackingNumber === orderData.trackingNumber
+        );
+
+        if (existingIndex >= 0) {
+          // Meglévő rendelés frissítése
+          if (
+            orderData.isDelivered &&
+            updatedOrders[existingIndex].status !== "kézbesítve"
+          ) {
+            updatedOrders[existingIndex] = {
+              ...updatedOrders[existingIndex],
+              status: "kézbesítve",
+              deliveredDate: new Date().toISOString().split("T")[0],
+              notes:
+                updatedOrders[existingIndex].notes +
+                " | Kézbesítve frissítve emailből",
+            };
+            updatedOrdersCount++;
+          }
+        } else {
+          // Új rendelés hozzáadása
+          updatedOrders.push({
+            id: Date.now() + newOrdersCount,
+            ...orderData,
+            createdAt: new Date().toISOString(),
+          });
+          newOrdersCount++;
+        }
+
+        // Kis késleltetés, hogy ne terhelje túl az API-t
+        await new Promise((resolve) => setTimeout(resolve, 200));
+      }
+
+      // Adatok mentése
+      const newData = {
+        ...data,
+        orders: updatedOrders,
+      };
+
+      setData(newData);
+      await saveUserData(newData);
+      setLastEmailSync(new Date().toISOString());
+
+      alert(
+        `Email szinkronizálás kész!\n\n✅ ${newOrdersCount} új rendelés\n🔄 ${updatedOrdersCount} frissített rendelés`
+      );
+    } catch (error) {
+      console.error("Email szinkronizálási hiba:", error);
+      alert(
+        "Hiba történt az email szinkronizálás során. Ellenőrizd a konzolt."
+      );
+    } finally {
+      setGmailAuthInProgress(false);
+    }
+  };
+
+  const getSortedOrders = (ordersList) => {
+    return [...ordersList].sort((a, b) => {
+      switch (orderSortBy) {
+        case "orderDate":
+          return new Date(b.orderDate) - new Date(a.orderDate);
+        case "expectedDelivery":
+          if (!a.expectedDelivery) return 1;
+          if (!b.expectedDelivery) return -1;
+          return new Date(a.expectedDelivery) - new Date(b.expectedDelivery);
+        case "price":
+          return b.price - a.price;
+        case "status":
+          const statusOrder = {
+            "feldolgozás alatt": 1,
+            "szállítás alatt": 2,
+            csomagautomatában: 3,
+            kézbesítve: 4,
+          };
+          return (statusOrder[a.status] || 0) - (statusOrder[b.status] || 0);
+        default:
+          return 0;
+      }
+    });
+  };
+
+  const getStatusColor = (status) => {
+    switch (status) {
+      case "feldolgozás alatt":
+        return "bg-yellow-100 text-yellow-800 border-yellow-300";
+      case "szállítás alatt":
+        return "bg-blue-100 text-blue-800 border-blue-300";
+      case "csomagautomatában":
+        return "bg-purple-100 text-purple-800 border-purple-300";
+      case "kézbesítve":
+        return "bg-green-100 text-green-800 border-green-300";
+      default:
+        return "bg-gray-100 text-gray-800 border-gray-300";
+    }
+  };
+
+  const getStatusIcon = (status) => {
+    switch (status) {
+      case "feldolgozás alatt":
+        return "🔄";
+      case "szállítás alatt":
+        return "🚚";
+      case "csomagautomatában":
+        return "📦";
+      case "kézbesítve":
+        return "✅";
+      default:
+        return "📋";
+    }
   };
 
   // GUMIABRONCS ELLENŐRZÉS
@@ -3509,943 +4932,6 @@ const toggleShoppingItem = (id, field) => {
     return amount * rates[currency];
   };
 
-  // === BEFEKTETÉSEK ===
-  const openInvestmentModal = (investment = null) => {
-    if (investment) {
-      setEditingItem(investment);
-      setFormData(investment);
-    } else {
-      setEditingItem(null);
-      setFormData({
-        name: "",
-        type: "stock",
-        amount: 0,
-        currency: "HUF",
-        purchaseDate: "",
-        currentValue: 0,
-        notes: "",
-      });
-    }
-    setShowInvestmentModal(true);
-  };
-
-  const saveInvestment = async () => {
-    if (!formData.name || !formData.amount) {
-      alert("Név és összeg kötelező!");
-      return;
-    }
-
-    let newData;
-    const investments = data.finances?.investments || [];
-
-    if (editingItem) {
-      newData = {
-        ...data,
-        finances: {
-          ...data.finances,
-          investments: investments.map((inv) =>
-            inv.id === editingItem.id
-              ? { ...formData, id: editingItem.id }
-              : inv
-          ),
-        },
-      };
-    } else {
-      newData = {
-        ...data,
-        finances: {
-          ...data.finances,
-          investments: [...investments, { ...formData, id: Date.now() }],
-        },
-      };
-    }
-
-    setData(newData);
-    await saveUserData(newData);
-    setShowInvestmentModal(false);
-    setFormData({});
-    setEditingItem(null);
-  };
-
-  const deleteInvestment = async (investmentId) => {
-    const newData = {
-      ...data,
-      finances: {
-        ...data.finances,
-        investments: (data.finances?.investments || []).filter(
-          (inv) => inv.id !== investmentId
-        ),
-      },
-    };
-    setData(newData);
-    await saveUserData(newData);
-    setShowDeleteConfirm(null);
-  };
-
-  // === TRANZAKCIÓK ===
-  const openTransactionModal = (type) => {
-    setTransactionType(type);
-    setFormData({
-      amount: "",
-      category: "",
-      account: "",
-      date: new Date().toISOString().split("T")[0],
-      description: "",
-      currency: "HUF",
-    });
-    setEditingItem(null);
-    setShowTransactionModal(true);
-  };
-
-  const saveTransaction = async () => {
-    // Debug: nézzük meg, mi van a formData-ban
-    console.log("saveTransaction called with formData:", formData);
-    console.log("transactionType:", transactionType);
-
-    if (!formData.amount || !formData.category || !formData.account) {
-      alert("Összeg, kategória és számla kötelező!");
-      return;
-    }
-
-    // Keressük meg a számlákat több helyen is (ugyanaz, mint a modal-ban)
-    const accountsSource = Array.isArray(data?.accounts)
-      ? data.accounts
-      : Array.isArray(data?.finances?.accounts)
-      ? data.finances.accounts
-      : [];
-
-    console.log("accountsSource:", accountsSource);
-
-    if (accountsSource.length === 0) {
-      alert("Nincs elérhető számla! Először hozz létre egy számlát.");
-      return;
-    }
-
-    const selectedAccount = accountsSource.find(
-      (acc) => acc.id === parseInt(formData.account)
-    );
-
-    console.log("selectedAccount:", selectedAccount);
-
-    if (!selectedAccount) {
-      alert("Érvénytelen számla!");
-      return;
-    }
-
-    const transaction = {
-      id: editingItem?.id || Date.now(),
-      type: transactionType,
-      amount: parseFloat(formData.amount),
-      category: formData.category,
-      account: parseInt(formData.account),
-      accountName: selectedAccount.name || selectedAccount.displayName,
-      date: formData.date || new Date().toISOString().split("T")[0],
-      description: formData.description || "",
-      isShared: selectedAccount.isShared !== false,
-      ownerId: selectedAccount.ownerId || currentUser?.uid,
-      currency: formData.currency || "HUF",
-    };
-
-    console.log("Saving transaction:", transaction);
-
-    // Eldöntjük, melyik alatt tároljuk a tranzakciókat
-    const useFinancesStructure = Array.isArray(data?.finances?.transactions);
-
-    let newData;
-    if (useFinancesStructure) {
-      // Ha data.finances.transactions létezik, oda mentjük
-      const existingTransactions = data.finances.transactions || [];
-      if (editingItem) {
-        newData = {
-          ...data,
-          finances: {
-            ...data.finances,
-            transactions: existingTransactions.map((t) =>
-              t.id === editingItem.id ? transaction : t
-            ),
-          },
-        };
-      } else {
-        newData = {
-          ...data,
-          finances: {
-            ...data.finances,
-            transactions: [...existingTransactions, transaction],
-          },
-        };
-      }
-    } else {
-      // Ha data.transactions alatt van
-      const existingTransactions = data.transactions || [];
-      if (editingItem) {
-        newData = {
-          ...data,
-          transactions: existingTransactions.map((t) =>
-            t.id === editingItem.id ? transaction : t
-          ),
-        };
-      } else {
-        newData = {
-          ...data,
-          transactions: [...existingTransactions, transaction],
-        };
-      }
-    }
-
-    // Számla egyenleg frissítése - több helyen is keresve
-    if (Array.isArray(newData?.accounts)) {
-      newData.accounts = newData.accounts.map((acc) => {
-        if (acc.id === parseInt(formData.account)) {
-          let balanceChange = parseFloat(formData.amount);
-          if (transactionType === "expense") balanceChange = -balanceChange;
-
-          // Ha szerkesztés, először vonjuk vissza a régi tranzakciót
-          if (editingItem && editingItem.account === acc.id) {
-            let oldChange = parseFloat(editingItem.amount);
-            if (editingItem.type === "expense") oldChange = -oldChange;
-            return {
-              ...acc,
-              balance: acc.balance - oldChange + balanceChange,
-            };
-          }
-
-          return {
-            ...acc,
-            balance: (acc.balance || 0) + balanceChange,
-          };
-        }
-        return acc;
-      });
-    } else if (Array.isArray(newData?.finances?.accounts)) {
-      newData.finances.accounts = newData.finances.accounts.map((acc) => {
-        if (acc.id === parseInt(formData.account)) {
-          let balanceChange = parseFloat(formData.amount);
-          if (transactionType === "expense") balanceChange = -balanceChange;
-
-          // Ha szerkesztés, először vonjuk vissza a régi tranzakciót
-          if (editingItem && editingItem.account === acc.id) {
-            let oldChange = parseFloat(editingItem.amount);
-            if (editingItem.type === "expense") oldChange = -oldChange;
-            return {
-              ...acc,
-              balance: acc.balance - oldChange + balanceChange,
-            };
-          }
-
-          return {
-            ...acc,
-            balance: (acc.balance || 0) + balanceChange,
-          };
-        }
-        return acc;
-      });
-    }
-
-    console.log("newData to save:", newData);
-
-    setData(newData);
-    await saveUserData(newData);
-    setShowTransactionModal(false);
-    setFormData({});
-    setEditingItem(null);
-    alert("Tranzakció sikeresen mentve!");
-  };
-
-  // HÓNAP NAVIGÁCIÓ
-  const goToPreviousMonth = () => {
-    setSelectedMonth((prev) => {
-      const newDate = new Date(prev);
-      newDate.setMonth(newDate.getMonth() - 1);
-      return newDate;
-    });
-  };
-
-  const goToNextMonth = () => {
-    setSelectedMonth((prev) => {
-      const newDate = new Date(prev);
-      newDate.setMonth(newDate.getMonth() + 1);
-      return newDate;
-    });
-  };
-
-  const goToCurrentMonth = () => {
-    setSelectedMonth(new Date());
-  };
-
-  // BUDGET MODAL
-  const openBudgetModal = (budget = null) => {
-    if (budget) {
-      setEditingItem(budget);
-      setFormData(budget);
-    } else {
-      setEditingItem(null);
-      setFormData({
-        type: "month", // 'month' vagy 'year'
-        totalBudget: "",
-        categories: [],
-        startDate: new Date().toISOString().split("T")[0],
-      });
-    }
-    setShowBudgetModal(true);
-  };
-
-  const saveBudget = async () => {
-    if (!formData.totalBudget) {
-      alert("Teljes költségvetés kötelező!");
-      return;
-    }
-
-    const budget = {
-      id: editingItem?.id || Date.now(),
-      type: formData.type || "month",
-      totalBudget: parseFloat(formData.totalBudget),
-      categories: formData.categories || [],
-      startDate: formData.startDate || new Date().toISOString().split("T")[0],
-      createdBy: currentUser?.uid,
-    };
-
-    let newData;
-    if (editingItem) {
-      newData = {
-        ...data,
-        budgets: (data.budgets || []).map((b) =>
-          b.id === editingItem.id ? budget : b
-        ),
-      };
-    } else {
-      newData = {
-        ...data,
-        budgets: [...(data.budgets || []), budget],
-      };
-    }
-
-    setData(newData);
-    await saveUserData(newData);
-    setShowBudgetModal(false);
-    setFormData({});
-    setEditingItem(null);
-  };
-
-  const deleteBudget = async (budgetId) => {
-    const newData = {
-      ...data,
-      budgets: (data.budgets || []).filter((b) => b.id !== budgetId),
-    };
-    setData(newData);
-    await saveUserData(newData);
-    setShowDeleteConfirm(null);
-  };
-
-  // Kategória hozzáadása/törlése a budgethez
-  const addBudgetCategory = () => {
-    const categoryName = prompt("Kategória neve:");
-    if (!categoryName) return;
-    const limit = prompt("Limit összege (Ft):");
-    if (!limit) return;
-
-    setFormData({
-      ...formData,
-      categories: [
-        ...(formData.categories || []),
-        {
-          id: Date.now(),
-          name: categoryName,
-          limit: parseFloat(limit),
-        },
-      ],
-    });
-  };
-
-  const removeBudgetCategory = (categoryId) => {
-    setFormData({
-      ...formData,
-      categories: (formData.categories || []).filter(
-        (c) => c.id !== categoryId
-      ),
-    });
-  };
-
-  // Budget számítások
-  const calculateBudgetStatus = (budget, transactions) => {
-    if (!budget) return null;
-
-    const budgetStartDate = new Date(budget.startDate);
-    let budgetEndDate = new Date(budgetStartDate);
-
-    if (budget.type === "month") {
-      budgetEndDate.setMonth(budgetEndDate.getMonth() + 1);
-    } else {
-      budgetEndDate.setFullYear(budgetEndDate.getFullYear() + 1);
-    }
-
-    // Szűrjük a tranzakciókat az időszakra ÉS a kiválasztott számlákra
-    const relevantTransactions = (transactions || []).filter((t) => {
-      if (t.isShared === false && t.ownerId !== currentUser?.uid) return false;
-      if (t.type !== "expense") return false;
-
-      const tDate = new Date(t.date);
-      const isInBudgetPeriod =
-        tDate >= budgetStartDate && tDate < budgetEndDate;
-
-      if (!isInBudgetPeriod) return false;
-
-      // Számla szűrés
-      if (
-        selectedAccounts.length > 0 &&
-        !selectedAccounts.includes(t.account)
-      ) {
-        return false;
-      }
-
-      return true;
-    });
-
-    const totalSpent = relevantTransactions.reduce(
-      (sum, t) => sum + (parseFloat(t.amount) || 0),
-      0
-    );
-
-    const percentage = (totalSpent / budget.totalBudget) * 100;
-    const remaining = budget.totalBudget - totalSpent;
-
-    // Kategóriánkénti költések
-    const categorySpending = {};
-    (budget.categories || []).forEach((cat) => {
-      const spent = relevantTransactions
-        .filter((t) => t.category === cat.name)
-        .reduce((sum, t) => sum + (parseFloat(t.amount) || 0), 0);
-
-      categorySpending[cat.name] = {
-        limit: cat.limit,
-        spent: spent,
-        remaining: cat.limit - spent,
-        percentage: (spent / cat.limit) * 100,
-      };
-    });
-
-    return {
-      totalBudget: budget.totalBudget,
-      totalSpent,
-      remaining,
-      percentage,
-      categorySpending,
-      isOverBudget: totalSpent > budget.totalBudget,
-      transactions: relevantTransactions,
-    };
-  };
-
-  // Aktuális budget keresése
-  const getCurrentBudget = () => {
-    const budgets = data.budgets || [];
-    const now = selectedMonth;
-
-    return budgets.find((budget) => {
-      const budgetStart = new Date(budget.startDate);
-      let budgetEnd = new Date(budgetStart);
-
-      if (budget.type === "month") {
-        budgetEnd.setMonth(budgetEnd.getMonth() + 1);
-      } else {
-        budgetEnd.setFullYear(budgetEnd.getFullYear() + 1);
-      }
-
-      return now >= budgetStart && now < budgetEnd;
-    });
-  };
-
-  // BANK FORMÁTUMOK DETEKTÁLÁSA
-  const detectBankFormat = (headers) => {
-    const headersLower = headers.map((h) => h.toLowerCase().trim());
-
-    // Revolut
-    if (
-      headersLower.includes("type") &&
-      headersLower.includes("product") &&
-      headersLower.includes("started date")
-    ) {
-      return {
-        bank: "Revolut",
-        mapping: {
-          date: "Started Date",
-          description: "Description",
-          amount: "Amount",
-          currency: "Currency",
-          category: "Category",
-        },
-      };
-    }
-
-    // OTP Bank
-    if (
-      headersLower.includes("könyvelés dátuma") ||
-      headersLower.includes("érték dátuma")
-    ) {
-      return {
-        bank: "OTP Bank",
-        mapping: {
-          date: "Könyvelés dátuma",
-          description: "Tranzakció leírása",
-          amount: "Összeg",
-          currency: "Deviza",
-        },
-      };
-    }
-
-    // Erste Bank
-    if (
-      headersLower.includes("buchungsdatum") ||
-      headersLower.includes("booking date")
-    ) {
-      return {
-        bank: "Erste Bank",
-        mapping: {
-          date: "Booking date",
-          description: "Details",
-          amount: "Amount",
-          currency: "Currency",
-        },
-      };
-    }
-
-    // K&H Bank
-    if (
-      headersLower.includes("tranzakció dátuma") &&
-      headersLower.includes("jogcím")
-    ) {
-      return {
-        bank: "K&H Bank",
-        mapping: {
-          date: "Tranzakció dátuma",
-          description: "Jogcím",
-          amount: "Összeg",
-          currency: "Pénznem",
-        },
-      };
-    }
-
-    // Általános CSV
-    return {
-      bank: "Általános",
-      mapping: {
-        date: headers[0],
-        description: headers[1],
-        amount: headers[2],
-      },
-    };
-  };
-
-  // FÁJL FELTÖLTÉS ÉS PARSING (külső könyvtár nélkül)
-  const handleFileUpload = async (file) => {
-    const fileName = file.name.toLowerCase();
-
-    try {
-      if (fileName.endsWith(".csv")) {
-        // CSV parsing natív JavaScript-tel
-        const text = await file.text();
-
-        // Sorok szétválasztása
-        const lines = text.split(/\r?\n/).filter((line) => line.trim());
-
-        if (lines.length === 0) {
-          alert("Üres fájl!");
-          return;
-        }
-
-        // Felismerés: vessző, pontosvessző vagy tab elválasztó
-        const firstLine = lines[0];
-        let delimiter = ",";
-        if (firstLine.split(";").length > firstLine.split(",").length) {
-          delimiter = ";";
-        } else if (firstLine.split("\t").length > firstLine.split(",").length) {
-          delimiter = "\t";
-        }
-
-        console.log("Detected delimiter:", delimiter);
-
-        // CSV parsing idézőjelek kezelésével
-        const parseCSVLine = (line, delim) => {
-          const values = [];
-          let current = "";
-          let inQuotes = false;
-
-          for (let i = 0; i < line.length; i++) {
-            const char = line[i];
-            const nextChar = line[i + 1];
-
-            if (char === '"') {
-              if (inQuotes && nextChar === '"') {
-                current += '"';
-                i++; // skip next quote
-              } else {
-                inQuotes = !inQuotes;
-              }
-            } else if (char === delim && !inQuotes) {
-              values.push(current.trim());
-              current = "";
-            } else {
-              current += char;
-            }
-          }
-          values.push(current.trim());
-          return values;
-        };
-
-        // Header parsing
-        const headers = parseCSVLine(lines[0], delimiter);
-        console.log("Headers:", headers);
-
-        // Data parsing
-        const data = [];
-        for (let i = 1; i < lines.length; i++) {
-          const line = lines[i];
-          if (!line.trim()) continue;
-
-          const values = parseCSVLine(line, delimiter);
-
-          if (values.length >= headers.length && values.some((v) => v)) {
-            const row = {};
-            headers.forEach((header, idx) => {
-              row[header] = values[idx] || "";
-            });
-            data.push(row);
-          }
-        }
-
-        console.log("Parsed data:", data);
-
-        if (data.length === 0) {
-          alert(
-            "Nem sikerült adatokat olvasni a fájlból!\n\nEllenőrizd, hogy:\n• A fájl CSV formátumú\n• Van benne fejléc sor\n• Van benne legalább 1 adat sor"
-          );
-          return;
-        }
-
-        const detected = detectBankFormat(headers);
-        console.log("Detected bank:", detected);
-        setDetectedBank(detected);
-        setImportedData(data);
-        setImportStep(2);
-      } else if (fileName.endsWith(".xlsx") || fileName.endsWith(".xls")) {
-        alert(
-          "❌ Excel import jelenleg nem támogatott\n\n" +
-            "✅ Megoldás:\n" +
-            "1. Nyisd meg az Excel fájlt\n" +
-            "2. Fájl → Mentés másként → CSV (vesszővel elválasztott)\n" +
-            "3. Importáld a CSV fájlt\n\n" +
-            "VAGY exportáld közvetlenül CSV formátumban a banki alkalmazásból:\n" +
-            "• Revolut: Account → Statements → Export CSV\n" +
-            "• OTP: Lekérdezések → Export → CSV\n" +
-            "• Erste/K&H: Transactions → Export → CSV"
-        );
-      } else {
-        alert(
-          "❌ Nem támogatott fájlformátum!\n\nCsak CSV fájlokat fogadunk el."
-        );
-      }
-    } catch (error) {
-      console.error("Import error:", error);
-      alert(
-        "❌ Hiba történt a fájl feldolgozása során:\n\n" +
-          error.message +
-          "\n\nEllenőrizd a fájl formátumát és próbáld újra!"
-      );
-    }
-  };
-
-  // TRANZAKCIÓ KONVERTÁLÁSA
-  const parseImportedTransaction = (row, mapping) => {
-    // Dátum
-    let date = row[mapping.date];
-    if (date) {
-      // Különböző dátum formátumok kezelése
-      if (typeof date === "string") {
-        // Excel serial date (ha szám formátumban jön)
-        if (!isNaN(date) && date > 40000) {
-          const excelEpoch = new Date(1900, 0, 1);
-          date = new Date(excelEpoch.getTime() + (date - 2) * 86400000);
-        } else {
-          date = new Date(date);
-        }
-      }
-      date =
-        date instanceof Date && !isNaN(date)
-          ? date.toISOString().split("T")[0]
-          : null;
-    }
-
-    // Összeg
-    let amount = row[mapping.amount];
-    if (typeof amount === "string") {
-      amount = amount.replace(/[^\d.,-]/g, "").replace(",", ".");
-    }
-    amount = parseFloat(amount) || 0;
-
-    // Típus meghatározása (bevétel vagy kiadás)
-    const type = amount >= 0 ? "income" : "expense";
-    amount = Math.abs(amount);
-
-    // Leírás
-    const description = row[mapping.description] || "";
-
-    // Kategória automatikus felismerése
-    const category = autoCategorize(description, type);
-
-    return {
-      date,
-      amount,
-      type,
-      description,
-      category,
-      currency: row[mapping.currency] || "HUF",
-      original: row,
-    };
-  };
-
-  // AUTOMATIKUS KATEGORIZÁLÁS
-  const autoCategorize = (description, type) => {
-    const desc = description.toLowerCase();
-
-    if (type === "expense") {
-      if (
-        desc.includes("lidl") ||
-        desc.includes("tesco") ||
-        desc.includes("aldi") ||
-        desc.includes("spar") ||
-        desc.includes("cba")
-      ) {
-        return "Étel";
-      }
-      if (
-        desc.includes("mol") ||
-        desc.includes("shell") ||
-        desc.includes("omv") ||
-        desc.includes("benzin")
-      ) {
-        return "Közlekedés";
-      }
-      if (
-        desc.includes("gym") ||
-        desc.includes("fitnesz") ||
-        desc.includes("orvos") ||
-        desc.includes("patika")
-      ) {
-        return "Egészség";
-      }
-      if (
-        desc.includes("netflix") ||
-        desc.includes("spotify") ||
-        desc.includes("hbo") ||
-        desc.includes("cinema")
-      ) {
-        return "Szórakozás";
-      }
-      if (
-        desc.includes("lakbér") ||
-        desc.includes("rezsi") ||
-        desc.includes("áram") ||
-        desc.includes("gáz") ||
-        desc.includes("víz")
-      ) {
-        return "Lakhatás";
-      }
-      return "Egyéb kiadás";
-    } else {
-      if (desc.includes("fizetés") || desc.includes("bér")) {
-        return "Fizetés";
-      }
-      return "Egyéb bevétel";
-    }
-  };
-
-  // DUPLIKÁCIÓ ELLENŐRZÉS
-  const checkDuplicates = (newTransactions) => {
-    const existingTransactions =
-      data.transactions || data.finances?.transactions || [];
-
-    return newTransactions.map((newTx) => {
-      const isDuplicate = existingTransactions.some(
-        (existing) =>
-          existing.date === newTx.date &&
-          Math.abs(existing.amount - newTx.amount) < 0.01 &&
-          existing.description === newTx.description
-      );
-      return { ...newTx, isDuplicate };
-    });
-  };
-
-  // IMPORT VÉGREHAJTÁSA
-  const executeImport = async () => {
-    if (!importAccount) {
-      alert("Válassz ki egy számlát!");
-      return;
-    }
-
-    const accountsSource = Array.isArray(data?.accounts)
-      ? data.accounts
-      : Array.isArray(data?.finances?.accounts)
-      ? data.finances.accounts
-      : [];
-
-    const selectedAccount = accountsSource.find(
-      (acc) => acc.id === parseInt(importAccount)
-    );
-
-    if (!selectedAccount) {
-      alert("Érvénytelen számla!");
-      return;
-    }
-
-    // Tranzakciók konvertálása
-    const parsedTransactions = importedData
-      .map((row) => parseImportedTransaction(row, detectedBank.mapping))
-      .filter((tx) => tx.date && tx.amount > 0);
-
-    // Duplikáció ellenőrzés
-    const checkedTransactions = checkDuplicates(parsedTransactions);
-
-    // Csak nem duplikált tranzakciók importálása
-    const newTransactions = checkedTransactions
-      .filter((tx) => !tx.isDuplicate)
-      .map((tx) => ({
-        id: Date.now() + Math.random(),
-        type: tx.type,
-        amount: tx.amount,
-        category: tx.category,
-        account: parseInt(importAccount),
-        accountName: selectedAccount.name,
-        date: tx.date,
-        description: tx.description,
-        isShared: selectedAccount.isShared !== false,
-        ownerId: selectedAccount.ownerId || currentUser?.uid,
-        currency: tx.currency,
-        imported: true,
-      }));
-
-    if (newTransactions.length === 0) {
-      alert("Minden tranzakció már szerepel a rendszerben!");
-      return;
-    }
-
-    // Mentés
-    const existingTransactions =
-      data.transactions || data.finances?.transactions || [];
-    const useFinancesStructure = Array.isArray(data?.finances?.transactions);
-
-    let newData;
-    if (useFinancesStructure) {
-      newData = {
-        ...data,
-        finances: {
-          ...data.finances,
-          transactions: [...existingTransactions, ...newTransactions],
-        },
-      };
-    } else {
-      newData = {
-        ...data,
-        transactions: [...existingTransactions, ...newTransactions],
-      };
-    }
-
-    setData(newData);
-    await saveUserData(newData);
-
-    alert(
-      `${newTransactions.length} tranzakció sikeresen importálva!\n${
-        checkedTransactions.length - newTransactions.length
-      } duplikált tranzakciót kihagytunk.`
-    );
-
-    // Reset
-    setShowImportModal(false);
-    setImportStep(1);
-    setImportedData([]);
-    setDetectedBank(null);
-    setImportAccount(null);
-  };
-
-  // Számla szűrés kezelése
-  const toggleAccountFilter = (accountId) => {
-    setSelectedAccounts((prev) => {
-      if (prev.includes(accountId)) {
-        return prev.filter((id) => id !== accountId);
-      } else {
-        return [...prev, accountId];
-      }
-    });
-  };
-
-  const selectAllAccounts = () => {
-    setSelectedAccounts([]);
-  };
-
-  const deselectAllAccounts = () => {
-    const accountsSource = Array.isArray(data?.accounts)
-      ? data.accounts
-      : Array.isArray(data?.finances?.accounts)
-      ? data.finances.accounts
-      : [];
-
-    setSelectedAccounts(
-      accountsSource
-        .filter(
-          (acc) => acc.isShared !== false || acc.ownerId === currentUser?.uid
-        )
-        .map((acc) => acc.id)
-    );
-    // Ha minden ki van választva, töröljük az összes kiválasztást
-    setSelectedAccounts([]);
-  };
-
-  // Tranzakciók szűrése hónap és számlák szerint
-  const filterTransactionsByMonthAndAccounts = (transactions) => {
-    return (transactions || []).filter((t) => {
-      if (!t) return false;
-
-      // Privát tranzakciók szűrése
-      if (t.isShared === false && t.ownerId !== currentUser?.uid) {
-        return false;
-      }
-
-      // Hónap szűrés
-      const transDate = new Date(t.date);
-      const selectedYear = selectedMonth.getFullYear();
-      const selectedMonthNum = selectedMonth.getMonth();
-
-      if (
-        transDate.getFullYear() !== selectedYear ||
-        transDate.getMonth() !== selectedMonthNum
-      ) {
-        return false;
-      }
-
-      // Számla szűrés (ha van kiválasztva konkrét számla)
-      if (
-        selectedAccounts.length > 0 &&
-        !selectedAccounts.includes(t.account)
-      ) {
-        return false;
-      }
-
-      return true;
-    });
-  };
-
-  const deleteTransaction = async (transactionId) => {
-    const newData = {
-      ...data,
-      finances: {
-        ...data.finances,
-        transactions: (data.finances?.transactions || []).filter(
-          (t) => t.id !== transactionId
-        ),
-      },
-    };
-    setData(newData);
-    await saveUserData(newData);
-    setShowDeleteConfirm(null);
-  };
-
   const deleteDevice = async (deviceId) => {
     const newData = {
       ...data,
@@ -4509,17 +4995,6 @@ const toggleShoppingItem = (id, field) => {
     setShowShoppingItemModal(false);
     setFormData({});
     setEditingItem(null);
-  };
-
-  const toggleShoppingItem = async (itemId) => {
-    const newData = {
-      ...data,
-      shoppingList: data.shoppingList.map((item) =>
-        item.id === itemId ? { ...item, checked: !item.checked } : item
-      ),
-    };
-    setData(newData);
-    await saveUserData(newData);
   };
 
   const deleteShoppingItem = async (itemId) => {
@@ -4705,6 +5180,279 @@ const toggleShoppingItem = (id, field) => {
   };
 
   // ============= NAPTÁR FUNKCIÓK =============
+  // Magyar hét kezelése: hétfővel kezdődik (1 = hétfő, 7 = vasárnap)
+  const getHungarianDay = (date) => {
+    const day = date.getDay();
+    return day === 0 ? 7 : day; // Vasárnap = 7, többi változatlan
+  };
+
+  // Netlify Functions URL-ek
+  const NETLIFY_FUNCTIONS_URL = process.env.REACT_APP_NETLIFY_URL || "";
+
+  // Fiókok betöltése
+  useEffect(() => {
+    const loadGoogleAccounts = async () => {
+      if (!currentUser) return;
+
+      try {
+        const response = await fetch(
+          `${NETLIFY_FUNCTIONS_URL}/.netlify/functions/get-google-accounts`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ userId: currentUser.uid }),
+          }
+        );
+
+        const data = await response.json();
+        if (data.success) {
+          setGoogleCalendarAccounts(data.accounts);
+        }
+      } catch (error) {
+        console.error("Error loading accounts:", error);
+      }
+    };
+
+    loadGoogleAccounts();
+  }, [currentUser]);
+
+  // Google fiók hozzáadása
+  const addGoogleCalendarAccount = async () => {
+    if (!googleAccountForm.email || !googleAccountForm.email.includes("@")) {
+      alert("Kérlek adj meg egy érvényes email címet!");
+      return;
+    }
+
+    try {
+      const response = await fetch(
+        `${NETLIFY_FUNCTIONS_URL}/.netlify/functions/google-auth-url?` +
+          `email=${encodeURIComponent(googleAccountForm.email)}&` +
+          `service=${googleAccountForm.service}&` +
+          `userId=${currentUser.uid}`
+      );
+
+      const data = await response.json();
+
+      // OAuth ablak megnyitása
+      const width = 500;
+      const height = 600;
+      const left = window.screen.width / 2 - width / 2;
+      const top = window.screen.height / 2 - height / 2;
+
+      const authWindow = window.open(
+        data.authUrl,
+        "Google Authorization",
+        `width=${width},height=${height},left=${left},top=${top}`
+      );
+
+      // Figyelés az ablak bezárására
+      const checkWindow = setInterval(async () => {
+        if (authWindow.closed) {
+          clearInterval(checkWindow);
+
+          // Fiókok újratöltése
+          const accountsResponse = await fetch(
+            `${NETLIFY_FUNCTIONS_URL}/.netlify/functions/get-google-accounts`,
+            {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ userId: currentUser.uid }),
+            }
+          );
+
+          const accountsData = await accountsResponse.json();
+          if (accountsData.success) {
+            setGoogleCalendarAccounts(accountsData.accounts);
+            setShowGoogleAccountModal(false);
+            setGoogleAccountForm({ email: "", name: "", service: "calendar" });
+            alert("✅ Fiók sikeresen hozzáadva!");
+          }
+        }
+      }, 500);
+    } catch (error) {
+      console.error("Error adding account:", error);
+      alert("Hiba történt a fiók hozzáadása során!");
+    }
+  };
+
+  // Google Calendar szinkronizálás
+  const syncGoogleCalendar = async (email) => {
+    try {
+      const response = await fetch(
+        `${NETLIFY_FUNCTIONS_URL}/.netlify/functions/sync-google-calendar`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ email, userId: currentUser.uid }),
+        }
+      );
+
+      const result = await response.json();
+
+      if (result.success) {
+        // Események konvertálása
+        const convertedEvents = result.events.map((event) => ({
+          id: `gcal-${event.id}`,
+          title: event.summary || "(Név nélküli esemény)",
+          dueDate: event.start.dateTime || event.start.date,
+          time: event.start.dateTime
+            ? new Date(event.start.dateTime).toTimeString().slice(0, 5)
+            : null,
+          allDay: !event.start.dateTime,
+          category: "google-calendar",
+          description: event.description || "",
+          location: event.location || "",
+          completed: false,
+          source: "google-calendar",
+          googleCalendarAccount: email,
+          htmlLink: event.htmlLink,
+        }));
+
+        // Meglévő események frissítése
+        const filteredTasks = data.tasks.filter(
+          (task) =>
+            !(
+              task.source === "google-calendar" &&
+              task.googleCalendarAccount === email
+            )
+        );
+
+        const newData = {
+          ...data,
+          tasks: [...filteredTasks, ...convertedEvents],
+        };
+
+        setData(newData);
+        await saveUserData(newData);
+
+        return result.count;
+      }
+    } catch (error) {
+      console.error("Error syncing calendar:", error);
+      throw error;
+    }
+  };
+
+  // Fiók eltávolítása
+  const removeGoogleCalendarAccount = async (email) => {
+    if (!confirm(`Biztosan eltávolítod a(z) ${email} fiókot?`)) {
+      return;
+    }
+
+    try {
+      await fetch(
+        `${NETLIFY_FUNCTIONS_URL}/.netlify/functions/remove-google-account`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ email, userId: currentUser.uid }),
+        }
+      );
+
+      // Események törlése
+      const filteredTasks = data.tasks.filter(
+        (task) =>
+          !(
+            task.source === "google-calendar" &&
+            task.googleCalendarAccount === email
+          )
+      );
+
+      const newData = { ...data, tasks: filteredTasks };
+      setData(newData);
+      await saveUserData(newData);
+
+      // Fiókok újratöltése
+      const response = await fetch(
+        `${NETLIFY_FUNCTIONS_URL}/.netlify/functions/get-google-accounts`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ userId: currentUser.uid }),
+        }
+      );
+
+      const accountsData = await response.json();
+      if (accountsData.success) {
+        setGoogleCalendarAccounts(accountsData.accounts);
+      }
+
+      alert("Fiók eltávolítva!");
+    } catch (error) {
+      console.error("Error removing account:", error);
+      alert("Hiba történt!");
+    }
+  };
+
+  // Összes aktív fiók szinkronizálása
+  const syncAllGoogleCalendars = async () => {
+    const enabledAccounts = googleCalendarAccounts.filter(
+      (acc) => acc.syncEnabled && acc.connected
+    );
+
+    if (enabledAccounts.length === 0) {
+      alert("Nincs aktív Google Calendar fiók!");
+      return;
+    }
+
+    if (!googleApiLoaded) {
+      alert(
+        "Google API még betöltés alatt van. Kérlek próbáld újra pár másodperc múlva."
+      );
+      return;
+    }
+
+    setSyncInProgress(true);
+    let totalEventsSynced = 0;
+    const errors = [];
+
+    try {
+      for (const account of enabledAccounts) {
+        try {
+          const eventCount = await syncSingleAccount(account);
+          totalEventsSynced += eventCount;
+          console.log(
+            `✅ ${account.email}: ${eventCount} esemény szinkronizálva`
+          );
+        } catch (error) {
+          console.error(`❌ Hiba ${account.email} szinkronizálásakor:`, error);
+          errors.push(`${account.email}: ${error.message}`);
+        }
+      }
+
+      if (errors.length === 0) {
+        alert(
+          `✅ Szinkronizáció sikeres!\n\n` +
+            `${enabledAccounts.length} fiók szinkronizálva\n` +
+            `${totalEventsSynced} esemény importálva`
+        );
+      } else {
+        alert(
+          `⚠️ Szinkronizáció részben sikeres\n\n` +
+            `Sikeres: ${enabledAccounts.length - errors.length} fiók\n` +
+            `Hibák: ${errors.length}\n\n` +
+            `Hibák:\n${errors.join("\n")}`
+        );
+      }
+    } finally {
+      setSyncInProgress(false);
+    }
+  };
+
+  // Szinkronizáció be/kikapcsolása
+  const toggleAccountSync = async (accountId) => {
+    const updatedAccounts = googleCalendarAccounts.map((acc) =>
+      acc.id === accountId ? { ...acc, syncEnabled: !acc.syncEnabled } : acc
+    );
+
+    setGoogleCalendarAccounts(updatedAccounts);
+
+    const newSettings = {
+      ...settings,
+      googleCalendarAccounts: updatedAccounts,
+    };
+    await updateSettings(newSettings);
+  };
 
   const getCalendarEvents = (startDate, endDate) => {
     const events = [];
@@ -4821,43 +5569,54 @@ const toggleShoppingItem = (id, field) => {
   const getMonthCalendar = (date) => {
     const year = date.getFullYear();
     const month = date.getMonth();
-
     const firstDay = new Date(year, month, 1);
     const lastDay = new Date(year, month + 1, 0);
 
-    const startDate = new Date(firstDay);
-    startDate.setDate(startDate.getDate() - firstDay.getDay());
-
-    const endDate = new Date(lastDay);
-    endDate.setDate(endDate.getDate() + (6 - lastDay.getDay()));
+    const startDay = getHungarianDay(firstDay); // 1-7 (hétfő-vasárnap)
+    const daysInMonth = lastDay.getDate();
 
     const weeks = [];
     let currentWeek = [];
-    const current = new Date(startDate);
 
-    while (current <= endDate) {
-      currentWeek.push(new Date(current));
+    // Előző hónap napjai
+    const prevMonthLastDay = new Date(year, month, 0).getDate();
+    for (let i = startDay - 1; i > 0; i--) {
+      currentWeek.push(new Date(year, month - 1, prevMonthLastDay - i + 1));
+    }
+
+    // Aktuális hónap napjai
+    for (let day = 1; day <= daysInMonth; day++) {
+      currentWeek.push(new Date(year, month, day));
       if (currentWeek.length === 7) {
         weeks.push(currentWeek);
         currentWeek = [];
       }
-      current.setDate(current.getDate() + 1);
+    }
+
+    // Következő hónap napjai
+    if (currentWeek.length > 0) {
+      let nextDay = 1;
+      while (currentWeek.length < 7) {
+        currentWeek.push(new Date(year, month + 1, nextDay));
+        nextDay++;
+      }
+      weeks.push(currentWeek);
     }
 
     return weeks;
   };
 
   const getWeekDays = (date) => {
-    const start = new Date(date);
-    start.setDate(start.getDate() - start.getDay());
+    const hunDay = getHungarianDay(date);
+    const monday = new Date(date);
+    monday.setDate(date.getDate() - hunDay + 1);
 
     const days = [];
     for (let i = 0; i < 7; i++) {
-      const day = new Date(start);
-      day.setDate(day.getDate() + i);
+      const day = new Date(monday);
+      day.setDate(monday.getDate() + i);
       days.push(day);
     }
-
     return days;
   };
 
@@ -4927,10 +5686,10 @@ const toggleShoppingItem = (id, field) => {
       date: date
         ? date.toISOString().split("T")[0]
         : new Date().toISOString().split("T")[0],
+      time: "09:00", // ÚJ sor
       type: "egyéb",
       description: "",
       allDay: true,
-      time: "",
     });
     setShowEventModal(true);
   };
@@ -4941,11 +5700,19 @@ const toggleShoppingItem = (id, field) => {
       return;
     }
 
+    // Dátum és időpont egyesítése
+    let finalDate = formData.date;
+    if (!formData.allDay && formData.time) {
+      finalDate = `${formData.date}T${formData.time}:00`;
+    }
+
     // Új esemény létrehozása task-ként
     const newTask = {
       id: Date.now(),
       title: formData.title,
-      dueDate: formData.date,
+      dueDate: finalDate,
+      time: formData.allDay ? null : formData.time, // Időpont mentése
+      allDay: formData.allDay,
       category: formData.type || "egyéb",
       description: formData.description || "",
       completed: false,
@@ -4965,11 +5732,15 @@ const toggleShoppingItem = (id, field) => {
     setSelectedDate(null);
   };
 
-  const updateSettings = async (newSettings) => {
-    const newData = { ...data, settings: newSettings };
+  const updateSettings = (newSettings) => {
     setSettings(newSettings);
-    setData(newData);
-    await saveUserData(newData);
+    localStorage.setItem("userSettings", JSON.stringify(newSettings));
+
+    // Ha van Firebase sync, ott is frissítjük
+    if (data.familyId && currentUser) {
+      // Firebase update logika ide
+      console.log("Beállítások frissítve:", newSettings);
+    }
   };
 
   const moveModule = (moduleId, direction) => {
@@ -5701,6 +6472,68 @@ const toggleShoppingItem = (id, field) => {
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, [showNotifications]);
 
+  useEffect(() => {
+    if (settings.googleCalendarAccounts) {
+      setGoogleCalendarAccounts(settings.googleCalendarAccounts);
+    }
+  }, [settings]);
+
+  useEffect(() => {
+    const savedData = localStorage.getItem("householdData");
+    if (savedData) {
+      setData(JSON.parse(savedData));
+    }
+
+    // Heti menük betöltése
+    const savedMenus = localStorage.getItem("weeklyMenus");
+    if (savedMenus) {
+      setWeeklyMenus(JSON.parse(savedMenus));
+    }
+  }, []);
+
+  // SETTINGS BETÖLTÉSE INICIALIZÁLÁSKOR
+  useEffect(() => {
+    const defaultSettings = getDefaultData().settings;
+
+    // Beállítások betöltése localStorage-ból
+    const savedSettings = localStorage.getItem("userSettings");
+    if (savedSettings) {
+      try {
+        const parsedSettings = JSON.parse(savedSettings);
+        // Merge default settings with saved settings
+        setSettings({
+          ...defaultSettings,
+          ...parsedSettings,
+          activeModules:
+            parsedSettings.activeModules || defaultSettings.activeModules,
+          moduleOrder:
+            parsedSettings.moduleOrder || defaultSettings.moduleOrder,
+          mobileBottomNav:
+            parsedSettings.mobileBottomNav || defaultSettings.mobileBottomNav,
+        });
+      } catch (error) {
+        console.error("Hiba a beállítások betöltésénél:", error);
+        setSettings(defaultSettings);
+      }
+    } else {
+      // Első indítás - mentjük a default beállításokat
+      localStorage.setItem("userSettings", JSON.stringify(defaultSettings));
+      setSettings(defaultSettings);
+    }
+
+    // Egyéb adatok betöltése
+    const savedData = localStorage.getItem("householdData");
+    if (savedData) {
+      setData(JSON.parse(savedData));
+    }
+
+    // Heti menük betöltése (receptekhez)
+    const savedMenus = localStorage.getItem("weeklyMenus");
+    if (savedMenus) {
+      setWeeklyMenus(JSON.parse(savedMenus));
+    }
+  }, []);
+
   const renderDashboard = () => {
     const totalTasks = data.tasks.length;
     const completedTasks = data.tasks.filter((t) => t.completed).length;
@@ -6371,6 +7204,13 @@ const toggleShoppingItem = (id, field) => {
                     <Edit2 size={18} />
                   </button>
                   <button
+                    onClick={() => openQuickMaintenanceModal(home)}
+                    className="px-3 py-2 text-sm bg-orange-600 text-white rounded hover:bg-orange-700 flex items-center gap-1 shadow-sm"
+                  >
+                    <Plus size={16} />
+                    Új karbantartás
+                  </button>
+                  <button
                     onClick={() =>
                       setShowDeleteConfirm({
                         type: "home",
@@ -6384,7 +7224,6 @@ const toggleShoppingItem = (id, field) => {
                   </button>
                 </div>
               </div>
-
               {/* Mérőórák */}
               {home.meters && home.meters.length > 0 && (
                 <div className="p-4 bg-purple-50 border-b border-gray-200">
@@ -6456,19 +7295,182 @@ const toggleShoppingItem = (id, field) => {
                   </div>
                 </div>
               )}
-
-              {/* Rezsik */}
-              {home.utilities && home.utilities.length > 0 && (
-                <div className="p-4">
-                  <h4 className="font-semibold text-gray-800 mb-3 flex items-center gap-2">
+              {/* Rezsik - MINDIG LÁTHATÓ */}
+              <div className="p-4 border-t border-gray-200">
+                {/* FEJLÉC GYORSGOMBBAL - MINDIG LÁTHATÓ */}
+                <div className="flex items-center justify-between mb-3">
+                  <h4 className="font-semibold text-gray-800 flex items-center gap-2">
                     <DollarSign size={18} />
                     Rezsik
                   </h4>
+                  <button
+                    onClick={() => openQuickUtilityModal(home)}
+                    className="px-3 py-2 text-sm bg-green-600 text-white rounded hover:bg-green-700 flex items-center gap-1 shadow-sm transition-all active:scale-95"
+                  >
+                    <Plus size={16} />
+                    Új rezsi
+                  </button>
+                </div>
+
+                {/* HA VANNAK REZSIK */}
+                {home.utilities && home.utilities.length > 0 ? (
+                  <>
+                    <div className="grid gap-3">
+                      {currentUtilities.map((utility, idx) => (
+                        <div
+                          key={idx}
+                          className="flex justify-between items-center p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition"
+                        >
+                          <span className="font-medium text-gray-700">
+                            {utility.name}
+                          </span>
+                          <div className="text-right">
+                            <div className="font-semibold text-gray-800">
+                              {utility.amount.toLocaleString()} Ft
+                            </div>
+                            <div className="text-sm text-gray-600">
+                              Határidő:{" "}
+                              {new Date(utility.dueDate).toLocaleDateString(
+                                "hu-HU"
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                      {isExpanded &&
+                        olderUtilities.map((utility, idx) => (
+                          <div
+                            key={idx + 3}
+                            className="flex justify-between items-center p-3 bg-gray-50 rounded-lg opacity-70"
+                          >
+                            <span className="font-medium text-gray-700">
+                              {utility.name}
+                            </span>
+                            <div className="text-right">
+                              <div className="font-semibold text-gray-800">
+                                {utility.amount.toLocaleString()} Ft
+                              </div>
+                              <div className="text-sm text-gray-600">
+                                {new Date(utility.dueDate).toLocaleDateString(
+                                  "hu-HU"
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                    </div>
+                    {olderUtilities.length > 0 && (
+                      <button
+                        onClick={() =>
+                          setShowAllUtilities({
+                            ...showAllUtilities,
+                            [home.id]: !isExpanded,
+                          })
+                        }
+                        className="mt-3 text-sm text-blue-600 hover:text-blue-700 font-medium"
+                      >
+                        {isExpanded
+                          ? "Régebbiek elrejtése"
+                          : `${olderUtilities.length} régebbi megjelenítése`}
+                      </button>
+                    )}
+                  </>
+                ) : (
+                  /* HA NINCS REZSI - ÜRES ÁLLAPOT */
+                  <div className="text-center py-6 bg-gray-50 rounded-lg">
+                    <DollarSign
+                      size={32}
+                      className="mx-auto text-gray-400 mb-2"
+                    />
+                    <p className="text-sm text-gray-500">
+                      Még nincs hozzáadott rezsi
+                    </p>
+                  </div>
+                )}
+              </div>
+              {/* Karbantartások - MINDIG LÁTHATÓ */}
+              <div className="p-4 border-t border-gray-200">
+                {/* FEJLÉC GYORSGOMBBAL - MINDIG LÁTHATÓ */}
+                <div className="flex items-center justify-between mb-3">
+                  <h4 className="font-semibold text-gray-800 flex items-center gap-2">
+                    <Wrench size={18} />
+                    Karbantartások
+                  </h4>
+                  <button
+                    onClick={() => openQuickMaintenanceModal(home)}
+                    className="px-3 py-2 text-sm bg-orange-600 text-white rounded hover:bg-orange-700 flex items-center gap-1 shadow-sm transition-all active:scale-95"
+                  >
+                    <Plus size={16} />
+                    Új
+                  </button>
+                </div>
+
+                {/* HA VANNAK KARBANTARTÁSOK */}
+                {home.maintenance && home.maintenance.length > 0 ? (
+                  <div className="grid gap-3">
+                    {home.maintenance.map((maint, idx) => {
+                      const getFrequencyText = () => {
+                        if (maint.frequency === "x évente") {
+                          return `${maint.customYears} évente`;
+                        }
+                        return maint.frequency;
+                      };
+
+                      return (
+                        <div
+                          key={idx}
+                          className="flex justify-between items-center p-3 bg-blue-50 rounded-lg hover:bg-blue-100 transition"
+                        >
+                          <span className="font-medium text-gray-700">
+                            {maint.task}
+                          </span>
+                          <div className="text-right">
+                            <div className="text-sm font-semibold text-gray-800">
+                              {new Date(maint.nextDate).toLocaleDateString(
+                                "hu-HU"
+                              )}
+                            </div>
+                            <div className="text-xs text-gray-600">
+                              {getFrequencyText()}
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  /* HA NINCS KARBANTARTÁS - ÜRES ÁLLAPOT */
+                  <div className="text-center py-6 bg-gray-50 rounded-lg">
+                    <Wrench size={32} className="mx-auto text-gray-400 mb-2" />
+                    <p className="text-sm text-gray-500">
+                      Még nincs hozzáadott karbantartás
+                    </p>
+                  </div>
+                )}
+              </div>
+
+              {/* Rezsik - TELJES JAVÍTOTT VERZIÓ */}
+              {home.utilities && home.utilities.length > 0 && (
+                <div className="p-4 border-t border-gray-200">
+                  <div className="flex items-center justify-between mb-3">
+                    <h4 className="font-semibold text-gray-800 flex items-center gap-2">
+                      <DollarSign size={18} />
+                      Rezsik
+                    </h4>
+                    <button
+                      onClick={() => openQuickUtilityModal(home)}
+                      className="px-3 py-2 text-sm bg-green-600 text-white rounded hover:bg-green-700 flex items-center gap-1 shadow-sm transition-all active:scale-95"
+                    >
+                      <Plus size={16} />
+                      Új rezsi
+                    </button>
+                  </div>
+
                   <div className="grid gap-3">
                     {currentUtilities.map((utility, idx) => (
                       <div
                         key={idx}
-                        className="flex justify-between items-center p-3 bg-gray-50 rounded-lg"
+                        className="flex justify-between items-center p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition"
                       >
                         <span className="font-medium text-gray-700">
                           {utility.name}
@@ -6523,56 +7525,6 @@ const toggleShoppingItem = (id, field) => {
                         : `${olderUtilities.length} régebbi megjelenítése`}
                     </button>
                   )}
-                </div>
-              )}
-
-              {/* Karbantartások */}
-              {home.maintenance && home.maintenance.length > 0 && (
-                <div className="p-4 border-t border-gray-200">
-                  <div className="flex items-center justify-between mb-3">
-                    <h4 className="font-semibold text-gray-800 flex items-center gap-2">
-                      <Wrench size={18} />
-                      Karbantartások
-                    </h4>
-                    <button
-                      onClick={() => openQuickMaintenanceModal(home)}
-                      className="px-3 py-2 text-sm bg-orange-600 text-white rounded hover:bg-orange-700 flex items-center gap-1"
-                    >
-                      <Plus size={16} />
-                      Új
-                    </button>
-                  </div>
-                  <div className="grid gap-3">
-                    {home.maintenance.map((maint, idx) => {
-                      const getFrequencyText = () => {
-                        if (maint.frequency === "x évente") {
-                          return `${maint.customYears} évente`;
-                        }
-                        return maint.frequency;
-                      };
-
-                      return (
-                        <div
-                          key={idx}
-                          className="flex justify-between items-center p-3 bg-blue-50 rounded-lg"
-                        >
-                          <span className="font-medium text-gray-700">
-                            {maint.task}
-                          </span>
-                          <div className="text-right">
-                            <div className="text-sm font-semibold text-gray-800">
-                              {new Date(maint.nextDate).toLocaleDateString(
-                                "hu-HU"
-                              )}
-                            </div>
-                            <div className="text-xs text-gray-600">
-                              {getFrequencyText()}
-                            </div>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
                 </div>
               )}
             </div>
@@ -6638,11 +7590,20 @@ const toggleShoppingItem = (id, field) => {
                     Szervíz
                   </button>
                   <button
-                    onClick={() => openFuelingModal(vehicle)}
-                    className="p-2 bg-yellow-500 text-white rounded-lg hover:bg-yellow-600"
+                    onClick={() => openRefuelModal(vehicle)}
+                    className="px-3 py-2 text-sm bg-orange-600 text-white rounded hover:bg-orange-700 flex items-center gap-1"
                     title="Tankolás"
                   >
-                    <Fuel size={20} />
+                    <DollarSign size={16} />
+                    Tank
+                  </button>
+                  <button
+                    onClick={() => openStatsModal(vehicle)}
+                    className="px-3 py-2 text-sm bg-indigo-600 text-white rounded hover:bg-indigo-700 flex items-center gap-1"
+                    title="Statisztikák"
+                  >
+                    <Activity size={16} />
+                    Stat
                   </button>
                   <button
                     onClick={() => openVehicleModal(vehicle)}
@@ -6708,59 +7669,85 @@ const toggleShoppingItem = (id, field) => {
             {vehicle.tires && vehicle.tires.length > 0 && (
               <div className="p-4 border-t border-gray-200 bg-blue-50">
                 <h4 className="font-semibold text-gray-800 mb-3 text-sm flex items-center gap-2">
-                  <span>🛞</span> Gumiabroncsok
+                  <span>🚗</span> Gumiabroncsok ({vehicle.tires.length})
                 </h4>
-                <div className="space-y-2">
+                <div className="grid gap-2">
                   {vehicle.tires.map((tire, idx) => {
                     const warnings = checkTireCondition(tire);
+                    const hasWarning = warnings.length > 0;
+                    const hasCritical = warnings.some(
+                      (w) => w.type === "age" || w.type === "depth"
+                    );
+
                     return (
                       <div
                         key={idx}
-                        className="flex items-start justify-between p-2 bg-blue-50 rounded text-sm"
+                        className={`p-3 rounded-lg shadow-sm ${
+                          hasCritical
+                            ? "bg-red-50 border-2 border-red-500"
+                            : hasWarning
+                            ? "bg-orange-50 border-2 border-orange-400"
+                            : "bg-white"
+                        }`}
                       >
-                        <div className="flex-1">
-                          <span className="font-medium">
-                            {tire.position} - {tire.type}
-                          </span>
-                          <br />
-                          <span className="text-gray-600 text-xs">
-                            {tire.brand} {tire.size}
-                            {tire.manufactureYear &&
-                              ` (${tire.manufactureYear})`}
-                          </span>
-                          {tire.treadDepth && (
-                            <div className="mt-1">
-                              <span className="text-xs font-semibold text-blue-700">
-                                Profil: {tire.treadDepth} mm
+                        <div className="flex justify-between items-center">
+                          <div className="flex-1">
+                            <div className="flex items-center gap-2 mb-1">
+                              {hasCritical && (
+                                <span className="text-red-600 font-bold">
+                                  ⚠️
+                                </span>
+                              )}
+                              <span className="font-semibold text-gray-800">
+                                {tire.position}
+                              </span>
+                              <span className="px-2 py-1 bg-gray-100 text-gray-700 text-xs rounded">
+                                {tire.type}
                               </span>
                             </div>
-                          )}
-                          {warnings.length > 0 && (
-                            <div className="mt-1 space-y-1">
-                              {warnings.map((warn, wIdx) => (
-                                <div
-                                  key={wIdx}
-                                  className={`text-xs font-semibold ${
-                                    warn.type === "depth"
+                            <div className="text-sm text-gray-600">
+                              {tire.brand && (
+                                <span className="font-medium">
+                                  {tire.brand}{" "}
+                                </span>
+                              )}
+                              {tire.size}
+                              {tire.manufactureYear && (
+                                <span> • {tire.manufactureYear}</span>
+                              )}
+                              {tire.treadDepth && (
+                                <span
+                                  className={`ml-2 font-semibold ${
+                                    parseFloat(tire.treadDepth) <= 1.6
                                       ? "text-red-600"
-                                      : warn.type === "age"
+                                      : parseFloat(tire.treadDepth) <= 3
                                       ? "text-orange-600"
-                                      : "text-yellow-600"
+                                      : "text-green-600"
                                   }`}
                                 >
-                                  ⚠️ {warn.message}
-                                </div>
-                              ))}
+                                  • Profil: {tire.treadDepth} mm
+                                </span>
+                              )}
                             </div>
-                          )}
+                            {hasWarning && (
+                              <div className="mt-2 space-y-1">
+                                {warnings.map((warning, wIdx) => (
+                                  <div
+                                    key={wIdx}
+                                    className={`text-xs font-semibold ${
+                                      warning.type === "age" ||
+                                      warning.type === "depth"
+                                        ? "text-red-700"
+                                        : "text-orange-700"
+                                    }`}
+                                  >
+                                    • {warning.message}
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </div>
                         </div>
-                        <button
-                          onClick={() => openEditTireModal(vehicle, idx)}
-                          className="ml-2 text-blue-600 hover:text-blue-700"
-                          title="Profilmélység frissítése"
-                        >
-                          <Edit2 size={16} />
-                        </button>
                       </div>
                     );
                   })}
@@ -6919,6 +7906,255 @@ const toggleShoppingItem = (id, field) => {
       )}
     </div>
   );
+
+  const renderRendelesek = () => {
+    // Biztos, hogy van orders tömb
+    if (!data.orders) {
+      console.warn("data.orders nem létezik, inicializálás...");
+      setData({ ...data, orders: [] });
+      return <div>Betöltés...</div>;
+    }
+
+    const allOrders = data.orders;
+    const activeOrders = allOrders.filter((o) => o.status !== "kézbesítve");
+    const archivedOrders = allOrders.filter((o) => o.status === "kézbesítve");
+    const displayOrders = showArchive ? archivedOrders : activeOrders;
+    const sortedOrders = getSortedOrders(displayOrders);
+
+    return (
+      <div className="space-y-6">
+        {/* Fejléc */}
+        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+          <div>
+            <h2 className="text-2xl font-bold text-gray-800">Rendelések</h2>
+            {lastEmailSync && (
+              <p className="text-xs text-gray-500 mt-1">
+                Utolsó szinkronizálás:{" "}
+                {new Date(lastEmailSync).toLocaleString("hu-HU")}
+              </p>
+            )}
+          </div>
+          <div className="flex gap-2 flex-wrap">
+            <button
+              onClick={() => openOrderModal()}
+              className="flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 shadow-md"
+            >
+              <Plus size={20} />
+              Új rendelés
+            </button>
+          </div>
+        </div>
+
+        {/* Statisztikák */}
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <div className="bg-gradient-to-br from-yellow-50 to-yellow-100 p-4 rounded-lg border border-yellow-200">
+            <p className="text-sm text-gray-600 mb-1">Feldolgozás alatt</p>
+            <p className="text-2xl font-bold text-yellow-700">
+              {
+                activeOrders.filter((o) => o.status === "feldolgozás alatt")
+                  .length
+              }
+            </p>
+          </div>
+          <div className="bg-gradient-to-br from-blue-50 to-blue-100 p-4 rounded-lg border border-blue-200">
+            <p className="text-sm text-gray-600 mb-1">Szállítás alatt</p>
+            <p className="text-2xl font-bold text-blue-700">
+              {
+                activeOrders.filter((o) => o.status === "szállítás alatt")
+                  .length
+              }
+            </p>
+          </div>
+          <div className="bg-gradient-to-br from-purple-50 to-purple-100 p-4 rounded-lg border border-purple-200">
+            <p className="text-sm text-gray-600 mb-1">Átvehető</p>
+            <p className="text-2xl font-bold text-purple-700">
+              {
+                activeOrders.filter((o) => o.status === "csomagautomatában")
+                  .length
+              }
+            </p>
+          </div>
+          <div className="bg-gradient-to-br from-green-50 to-green-100 p-4 rounded-lg border border-green-200">
+            <p className="text-sm text-gray-600 mb-1">Archívum</p>
+            <p className="text-2xl font-bold text-green-700">
+              {archivedOrders.length}
+            </p>
+          </div>
+        </div>
+
+        {/* Szűrés és rendezés */}
+        <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-center bg-gray-50 p-4 rounded-lg">
+          <div className="flex items-center gap-2">
+            <label className="text-sm font-medium text-gray-700">
+              Rendezés:
+            </label>
+            <select
+              value={orderSortBy}
+              onChange={(e) => setOrderSortBy(e.target.value)}
+              className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500"
+            >
+              <option value="expectedDelivery">Várható szállítás</option>
+              <option value="orderDate">Rendelés dátuma</option>
+              <option value="price">Ár</option>
+              <option value="status">Státusz</option>
+            </select>
+          </div>
+          <button
+            onClick={() => setShowArchive(!showArchive)}
+            className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+              showArchive
+                ? "bg-green-600 text-white hover:bg-green-700"
+                : "bg-white text-gray-700 border border-gray-300 hover:bg-gray-50"
+            }`}
+          >
+            {showArchive ? "📦 Aktív rendelések" : "📁 Archívum"}
+          </button>
+        </div>
+
+        {/* Debug info */}
+        <div className="bg-blue-50 border border-blue-200 rounded p-3 text-sm">
+          <strong>Debug:</strong> Összes rendelés: {allOrders.length} | Aktív:{" "}
+          {activeOrders.length} | Archív: {archivedOrders.length} |
+          Megjelenítve: {sortedOrders.length}
+        </div>
+
+        {/* Rendelések listája */}
+        {sortedOrders.length === 0 ? (
+          <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-8 text-center text-gray-500">
+            <Package size={48} className="mx-auto mb-3 text-gray-400" />
+            <p>
+              {showArchive
+                ? "Még nincs archivált rendelés"
+                : "Még nincs aktív rendelés"}
+            </p>
+            <button
+              onClick={() => openOrderModal()}
+              className="mt-4 text-blue-600 hover:text-blue-700 font-medium"
+            >
+              + Adj hozzá egyet
+            </button>
+          </div>
+        ) : (
+          <div className="grid gap-4">
+            {sortedOrders.map((order) => {
+              const isExpiringSoon =
+                order.expectedDelivery &&
+                new Date(order.expectedDelivery) <=
+                  new Date(Date.now() + 2 * 24 * 60 * 60 * 1000) &&
+                order.status !== "kézbesítve";
+
+              return (
+                <div
+                  key={order.id}
+                  className={`bg-white rounded-lg shadow-sm border-2 transition-all hover:shadow-md ${
+                    isExpiringSoon && order.status !== "kézbesítve"
+                      ? "border-orange-400"
+                      : "border-gray-200"
+                  }`}
+                >
+                  <div className="p-4">
+                    <div className="flex justify-between items-start gap-4">
+                      <div className="flex-1">
+                        <div className="flex items-center gap-3 mb-2">
+                          <span className="text-2xl">
+                            {getStatusIcon(order.status)}
+                          </span>
+                          <div>
+                            <h3 className="font-bold text-gray-800 text-lg">
+                              {order.itemName}
+                            </h3>
+                            {order.webshop && (
+                              <p className="text-sm text-gray-600">
+                                🏪 {order.webshop}
+                              </p>
+                            )}
+                          </div>
+                        </div>
+
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-3">
+                          <div>
+                            <p className="text-xs text-gray-500 mb-1">
+                              Rendelés dátuma
+                            </p>
+                            <p className="font-semibold text-gray-700">
+                              📅{" "}
+                              {new Date(order.orderDate).toLocaleDateString(
+                                "hu-HU"
+                              )}
+                            </p>
+                          </div>
+                          {order.expectedDelivery && (
+                            <div>
+                              <p className="text-xs text-gray-500 mb-1">
+                                Várható szállítás
+                              </p>
+                              <p
+                                className={`font-semibold ${
+                                  isExpiringSoon
+                                    ? "text-orange-600"
+                                    : "text-gray-700"
+                                }`}
+                              >
+                                📦{" "}
+                                {new Date(
+                                  order.expectedDelivery
+                                ).toLocaleDateString("hu-HU")}
+                              </p>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="flex flex-col items-end gap-2">
+                        <span
+                          className={`px-3 py-1 rounded-full text-xs font-semibold border ${getStatusColor(
+                            order.status
+                          )}`}
+                        >
+                          {order.status}
+                        </span>
+                        <div className="flex gap-1">
+                          {order.status !== "kézbesítve" && (
+                            <button
+                              onClick={() => markAsDelivered(order.id)}
+                              className="p-2 text-green-600 hover:bg-green-50 rounded"
+                              title="Kézbesítve jelölés"
+                            >
+                              <Check size={18} />
+                            </button>
+                          )}
+                          <button
+                            onClick={() => openOrderModal(order)}
+                            className="p-2 text-blue-600 hover:bg-blue-50 rounded"
+                            title="Szerkesztés"
+                          >
+                            <Edit2 size={18} />
+                          </button>
+                          <button
+                            onClick={() =>
+                              setShowDeleteConfirm({
+                                type: "order",
+                                id: order.id,
+                                name: order.itemName,
+                              })
+                            }
+                            className="p-2 text-red-600 hover:bg-red-50 rounded"
+                            title="Törlés"
+                          >
+                            <Trash2 size={18} />
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    );
+  };
 
   const renderEgeszseg = () => (
     <div className="space-y-6">
@@ -7474,7 +8710,7 @@ const toggleShoppingItem = (id, field) => {
               )}
 
               {/* Dokumentumok (csak felnőtteknél) */}
-              {isAdult && member.documents && (
+              {member.documents && (
                 <div className="p-4 border-t border-gray-200 bg-blue-50">
                   <h4 className="font-semibold text-gray-800 mb-3 text-sm flex items-center gap-2">
                     <Package size={16} className="text-blue-600" />
@@ -8349,7 +9585,9 @@ const toggleShoppingItem = (id, field) => {
             const visibleAccounts = accountsSource.filter(
               (acc) =>
                 acc &&
-                (acc.isShared !== false || acc.ownerId === currentUser?.uid)
+                acc.id &&
+                (acc.name || acc.displayName) &&
+                (acc.isShared === true || acc.ownerId === currentUser?.uid) // ✅ Egyértelmű true összehasonlítás
             );
 
             if (visibleAccounts.length === 0) return null;
@@ -8408,105 +9646,21 @@ const toggleShoppingItem = (id, field) => {
               </div>
             );
           })()}
-        </div>
 
-        {/* Transaction History - Bevétel/Kiadás összesítő */}
-        <div className="bg-white rounded-lg shadow-sm border border-gray-200">
-          <div className="p-4 border-b border-gray-200">
-            <h3 className="font-semibold text-gray-800 flex items-center gap-2">
-              <TrendingUp size={20} className="text-blue-600" />
-              Bevételek és Kiadások -{" "}
-              {selectedMonth.toLocaleDateString("hu-HU", {
-                year: "numeric",
-                month: "long",
-              })}
-            </h3>
-          </div>
+          {/* Transaction History - Bevétel/Kiadás összesítő */}
+          <div className="mt-6">
+            <div>
+              <h3 className="font-semibold text-gray-800 flex items-center gap-2">
+                <TrendingUp size={20} className="text-blue-600" />
+                Bevételek és Kiadások -{" "}
+                {selectedMonth.toLocaleDateString("hu-HU", {
+                  year: "numeric",
+                  month: "long",
+                })}
+              </h3>
+            </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 p-4">
-            {(() => {
-              const transactionsSource = Array.isArray(data?.transactions)
-                ? data.transactions
-                : Array.isArray(data?.finances?.transactions)
-                ? data.finances.transactions
-                : [];
-
-              const filteredTransactions =
-                filterTransactionsByMonthAndAccounts(transactionsSource);
-
-              const income = filteredTransactions
-                .filter((t) => t.type === "income")
-                .reduce((sum, t) => sum + (parseFloat(t.amount) || 0), 0);
-
-              const expenses = filteredTransactions
-                .filter((t) => t.type === "expense")
-                .reduce((sum, t) => sum + (parseFloat(t.amount) || 0), 0);
-
-              const balance = income - expenses;
-
-              return (
-                <>
-                  <div className="bg-gradient-to-br from-green-500 to-green-600 text-white p-6 rounded-lg shadow-lg">
-                    <div className="flex items-center justify-between mb-2">
-                      <h3 className="text-lg font-semibold">Bevétel</h3>
-                      <TrendingUp size={24} />
-                    </div>
-                    <p className="text-3xl font-bold">
-                      {income.toLocaleString()} Ft
-                    </p>
-                    <p className="text-sm opacity-90 mt-1">
-                      {
-                        filteredTransactions.filter((t) => t.type === "income")
-                          .length
-                      }{" "}
-                      tranzakció
-                    </p>
-                  </div>
-
-                  <div className="bg-gradient-to-br from-red-500 to-red-600 text-white p-6 rounded-lg shadow-lg">
-                    <div className="flex items-center justify-between mb-2">
-                      <h3 className="text-lg font-semibold">Kiadás</h3>
-                      <TrendingDown size={24} />
-                    </div>
-                    <p className="text-3xl font-bold">
-                      {expenses.toLocaleString()} Ft
-                    </p>
-                    <p className="text-sm opacity-90 mt-1">
-                      {
-                        filteredTransactions.filter((t) => t.type === "expense")
-                          .length
-                      }{" "}
-                      tranzakció
-                    </p>
-                  </div>
-
-                  <div className="bg-gradient-to-br from-blue-500 to-blue-600 text-white p-6 rounded-lg shadow-lg">
-                    <div className="flex items-center justify-between mb-2">
-                      <h3 className="text-lg font-semibold">Egyenleg</h3>
-                      <Wallet size={24} />
-                    </div>
-                    <p className="text-3xl font-bold">
-                      {balance.toLocaleString()} Ft
-                    </p>
-                    <p
-                      className={`text-sm mt-1 ${
-                        balance >= 0 ? "text-green-200" : "text-red-200"
-                      }`}
-                    >
-                      {balance >= 0 ? "Pozitív" : "Negatív"} mérleg
-                    </p>
-                  </div>
-                </>
-              );
-            })()}
-          </div>
-
-          {/* Tranzakciók listája */}
-          <div className="p-4 border-t">
-            <h4 className="font-semibold text-gray-800 mb-3">
-              Tranzakciók ebben a hónapban
-            </h4>
-            <div className="space-y-2">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 p-4">
               {(() => {
                 const transactionsSource = Array.isArray(data?.transactions)
                   ? data.transactions
@@ -8517,108 +9671,204 @@ const toggleShoppingItem = (id, field) => {
                 const filteredTransactions =
                   filterTransactionsByMonthAndAccounts(transactionsSource);
 
-                if (filteredTransactions.length === 0) {
-                  return (
-                    <div className="text-center py-8 text-gray-500">
-                      <Package
-                        size={48}
-                        className="mx-auto mb-2 text-gray-400"
-                      />
-                      <p>Nincs tranzakció ebben a hónapban</p>
-                      {selectedAccounts.length > 0 && (
-                        <p className="text-sm mt-1">a kiválasztott számlákon</p>
-                      )}
-                    </div>
-                  );
-                }
+                const income = filteredTransactions
+                  .filter((t) => t.type === "income")
+                  .reduce((sum, t) => sum + (parseFloat(t.amount) || 0), 0);
 
-                return filteredTransactions
-                  .sort((a, b) => new Date(b.date) - new Date(a.date))
-                  .map((transaction) => (
-                    <div
-                      key={transaction.id}
-                      className="flex items-center justify-between p-3 bg-gray-50 rounded-lg hover:bg-gray-100"
-                    >
-                      <div className="flex items-center gap-3 flex-1">
-                        <div
-                          className={`w-10 h-10 rounded-full flex items-center justify-center ${
-                            transaction?.type === "income"
-                              ? "bg-green-100"
-                              : "bg-red-100"
-                          }`}
-                        >
-                          {transaction?.type === "income" ? (
-                            <TrendingUp size={20} className="text-green-600" />
-                          ) : (
-                            <TrendingDown size={20} className="text-red-600" />
-                          )}
-                        </div>
-                        <div className="flex-1">
-                          <div className="flex items-center gap-2">
-                            <p className="font-medium text-gray-800">
-                              {transaction?.category}
-                            </p>
-                            {transaction?.isShared === false && (
-                              <span className="text-xs bg-yellow-100 text-yellow-800 px-2 py-0.5 rounded-full">
-                                Privát
-                              </span>
-                            )}
-                          </div>
-                          <p className="text-sm text-gray-600">
-                            {transaction?.description || "Nincs leírás"}
+                const expenses = filteredTransactions
+                  .filter((t) => t.type === "expense")
+                  .reduce((sum, t) => sum + (parseFloat(t.amount) || 0), 0);
+
+                const balance = income - expenses;
+
+                return (
+                  <>
+                    <div className="bg-gradient-to-br from-green-500 to-green-600 text-white p-6 rounded-lg shadow-lg">
+                      <div className="flex items-center justify-between mb-2">
+                        <h3 className="text-lg font-semibold">Bevétel</h3>
+                        <TrendingUp size={24} />
+                      </div>
+                      <p className="text-3xl font-bold">
+                        {income.toLocaleString()} Ft
+                      </p>
+                      <p className="text-sm opacity-90 mt-1">
+                        {
+                          filteredTransactions.filter(
+                            (t) => t.type === "income"
+                          ).length
+                        }{" "}
+                        tranzakció
+                      </p>
+                    </div>
+
+                    <div className="bg-gradient-to-br from-red-500 to-red-600 text-white p-6 rounded-lg shadow-lg">
+                      <div className="flex items-center justify-between mb-2">
+                        <h3 className="text-lg font-semibold">Kiadás</h3>
+                        <TrendingDown size={24} />
+                      </div>
+                      <p className="text-3xl font-bold">
+                        {expenses.toLocaleString()} Ft
+                      </p>
+                      <p className="text-sm opacity-90 mt-1">
+                        {
+                          filteredTransactions.filter(
+                            (t) => t.type === "expense"
+                          ).length
+                        }{" "}
+                        tranzakció
+                      </p>
+                    </div>
+
+                    <div className="bg-gradient-to-br from-blue-500 to-blue-600 text-white p-6 rounded-lg shadow-lg">
+                      <div className="flex items-center justify-between mb-2">
+                        <h3 className="text-lg font-semibold">Egyenleg</h3>
+                        <Wallet size={24} />
+                      </div>
+                      <p className="text-3xl font-bold">
+                        {balance.toLocaleString()} Ft
+                      </p>
+                      <p
+                        className={`text-sm mt-1 ${
+                          balance >= 0 ? "text-green-200" : "text-red-200"
+                        }`}
+                      >
+                        {balance >= 0 ? "Pozitív" : "Negatív"} mérleg
+                      </p>
+                    </div>
+                  </>
+                );
+              })()}
+            </div>
+
+            {/* Tranzakciók listája */}
+            <div className="p-4 border-t">
+              <h4 className="font-semibold text-gray-800 mb-3">
+                Tranzakciók ebben a hónapban
+              </h4>
+              <div className="space-y-2">
+                {(() => {
+                  const transactionsSource = Array.isArray(data?.transactions)
+                    ? data.transactions
+                    : Array.isArray(data?.finances?.transactions)
+                    ? data.finances.transactions
+                    : [];
+
+                  const filteredTransactions =
+                    filterTransactionsByMonthAndAccounts(transactionsSource);
+
+                  if (filteredTransactions.length === 0) {
+                    return (
+                      <div className="text-center py-8 text-gray-500">
+                        <Package
+                          size={48}
+                          className="mx-auto mb-2 text-gray-400"
+                        />
+                        <p>Nincs tranzakció ebben a hónapban</p>
+                        {selectedAccounts.length > 0 && (
+                          <p className="text-sm mt-1">
+                            a kiválasztott számlákon
                           </p>
-                          <p className="text-xs text-gray-500">
-                            {transaction?.date
-                              ? new Date(transaction.date).toLocaleDateString(
-                                  "hu-HU"
-                                )
-                              : ""}{" "}
-                            • {transaction?.accountName}
-                          </p>
-                        </div>
-                        <div className="text-right">
-                          <p
-                            className={`font-bold ${
+                        )}
+                      </div>
+                    );
+                  }
+
+                  return filteredTransactions
+                    .sort((a, b) => new Date(b.date) - new Date(a.date))
+                    .map((transaction) => (
+                      <div
+                        key={transaction.id}
+                        className="flex items-center justify-between p-3 bg-gray-50 rounded-lg hover:bg-gray-100"
+                      >
+                        <div className="flex items-center gap-3 flex-1">
+                          <div
+                            className={`w-10 h-10 rounded-full flex items-center justify-center ${
                               transaction?.type === "income"
-                                ? "text-green-600"
-                                : "text-red-600"
+                                ? "bg-green-100"
+                                : "bg-red-100"
                             }`}
                           >
-                            {transaction?.type === "income" ? "+" : "-"}
-                            {(
-                              parseFloat(transaction?.amount) || 0
-                            ).toLocaleString()}{" "}
-                            Ft
-                          </p>
+                            {transaction?.type === "income" ? (
+                              <TrendingUp
+                                size={20}
+                                className="text-green-600"
+                              />
+                            ) : (
+                              <TrendingDown
+                                size={20}
+                                className="text-red-600"
+                              />
+                            )}
+                          </div>
+                          <div className="flex-1">
+                            <div className="flex items-center gap-2">
+                              <p className="font-medium text-gray-800">
+                                {transaction?.category}
+                              </p>
+                              {transaction?.isShared === false && (
+                                <span className="text-xs bg-yellow-100 text-yellow-800 px-2 py-0.5 rounded-full">
+                                  Privát
+                                </span>
+                              )}
+                            </div>
+                            <p className="text-sm text-gray-600">
+                              {transaction?.description || "Nincs leírás"}
+                            </p>
+                            <p className="text-xs text-gray-500">
+                              {transaction?.date
+                                ? new Date(transaction.date).toLocaleDateString(
+                                    "hu-HU"
+                                  )
+                                : ""}{" "}
+                              • {transaction?.accountName}
+                            </p>
+                          </div>
+                          <div className="text-right">
+                            <p
+                              className={`font-bold ${
+                                transaction?.type === "income"
+                                  ? "text-green-600"
+                                  : "text-red-600"
+                              }`}
+                            >
+                              {transaction?.type === "income" ? "+" : "-"}
+                              {(
+                                parseFloat(transaction?.amount) || 0
+                              ).toLocaleString()}{" "}
+                              Ft
+                            </p>
+                          </div>
+                        </div>
+                        <div className="flex gap-1 ml-3">
+                          <button
+                            onClick={() => {
+                              setEditingItem(transaction);
+                              setTransactionType(
+                                transaction?.type || "expense"
+                              );
+                              setFormData(transaction);
+                              setShowTransactionModal(true);
+                            }}
+                            className="text-blue-600 hover:text-blue-700"
+                          >
+                            <Edit2 size={16} />
+                          </button>
+                          <button
+                            onClick={() =>
+                              setShowDeleteConfirm({
+                                type: "transaction",
+                                id: transaction.id,
+                              })
+                            }
+                            className="text-red-600 hover:text-red-700"
+                          >
+                            <Trash2 size={16} />
+                          </button>
                         </div>
                       </div>
-                      <div className="flex gap-1 ml-3">
-                        <button
-                          onClick={() => {
-                            setEditingItem(transaction);
-                            setTransactionType(transaction?.type || "expense");
-                            setFormData(transaction);
-                            setShowTransactionModal(true);
-                          }}
-                          className="text-blue-600 hover:text-blue-700"
-                        >
-                          <Edit2 size={16} />
-                        </button>
-                        <button
-                          onClick={() =>
-                            setShowDeleteConfirm({
-                              type: "transaction",
-                              id: transaction.id,
-                            })
-                          }
-                          className="text-red-600 hover:text-red-700"
-                        >
-                          <Trash2 size={16} />
-                        </button>
-                      </div>
-                    </div>
-                  ));
-              })()}
+                    ));
+                })()}
+              </div>
             </div>
           </div>
         </div>
@@ -9812,6 +11062,10 @@ const toggleShoppingItem = (id, field) => {
       setCurrentDate(newDate);
     };
 
+    const goToCurrentMonth = () => {
+      setSelectedMonth(new Date());
+    };
+
     const goToPreviousWeek = () => {
       const newDate = new Date(currentDate);
       newDate.setDate(newDate.getDate() - 7);
@@ -9847,6 +11101,17 @@ const toggleShoppingItem = (id, field) => {
           <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
             <h2 className="text-2xl font-bold text-gray-800">Naptár</h2>
             <div className="flex gap-2">
+              <button
+                onClick={syncGoogleCalendar}
+                className={`px-4 py-2 ${
+                  googleCalendarEnabled ? "bg-green-600" : "bg-gray-400"
+                } text-white rounded-lg hover:opacity-90 font-medium flex items-center gap-2`}
+              >
+                <Calendar size={18} />
+                {googleCalendarEnabled
+                  ? "Google Szinkron ✓"
+                  : "Google Szinkron"}
+              </button>
               <button
                 onClick={() => openEventModal()}
                 className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 font-medium flex items-center gap-2"
@@ -10571,6 +11836,198 @@ const toggleShoppingItem = (id, field) => {
           )}
         </div>
       </div>
+
+      {/* Google Calendar/Gmail Szinkronizáció */}
+      <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+        <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center gap-3">
+            <Calendar size={24} className="text-blue-600" />
+            <div>
+              <h3 className="font-semibold text-gray-800">Google Integráció</h3>
+              <p className="text-xs text-gray-500">
+                Calendar & Gmail szinkronizáció
+              </p>
+            </div>
+          </div>
+          <button
+            onClick={() => setShowGoogleAccountModal(true)}
+            className="flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 text-sm font-medium"
+          >
+            <Plus size={16} />
+            Fiók hozzáadása
+          </button>
+        </div>
+
+        {googleCalendarAccounts.length === 0 ? (
+          <div className="text-center py-8 bg-gray-50 rounded-lg">
+            <Calendar size={48} className="mx-auto text-gray-400 mb-3" />
+            <p className="text-gray-600 mb-2">
+              Még nincs Google fiók hozzáadva
+            </p>
+            <p className="text-sm text-gray-500">
+              Adj hozzá Google Calendar vagy Gmail fiókot
+            </p>
+          </div>
+        ) : (
+          <>
+            <div className="space-y-3 mb-4">
+              {googleCalendarAccounts.map((account) => (
+                <div
+                  key={account.id}
+                  className={`p-4 rounded-lg border-2 ${
+                    account.syncEnabled
+                      ? "bg-green-50 border-green-200"
+                      : "bg-gray-50 border-gray-200"
+                  }`}
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="flex-1">
+                      <div className="flex items-center gap-2 mb-1">
+                        <span className="text-lg">
+                          {account.service === "calendar" ? "📅" : "📧"}
+                        </span>
+                        <span className="font-medium text-gray-900">
+                          {account.name || account.email}
+                        </span>
+                        {account.syncEnabled && (
+                          <span className="text-xs bg-green-100 text-green-700 px-2 py-1 rounded">
+                            Aktív
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-sm text-gray-600">
+                        {account.email} •{" "}
+                        {account.service === "calendar" ? "Calendar" : "Gmail"}
+                      </p>
+                      {account.lastSync && (
+                        <p className="text-xs text-gray-500 mt-1">
+                          Utolsó szinkronizáció:{" "}
+                          {new Date(account.lastSync).toLocaleString("hu-HU")}
+                        </p>
+                      )}
+                    </div>
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => toggleAccountSync(account.email)}
+                        className={`p-2 rounded-lg ${
+                          account.syncEnabled
+                            ? "bg-green-100 text-green-700 hover:bg-green-200"
+                            : "bg-gray-200 text-gray-600 hover:bg-gray-300"
+                        }`}
+                        title={
+                          account.syncEnabled ? "Kikapcsolás" : "Bekapcsolás"
+                        }
+                      >
+                        {account.syncEnabled ? (
+                          <CheckCircle size={18} />
+                        ) : (
+                          <AlertCircle size={18} />
+                        )}
+                      </button>
+                      <button
+                        onClick={() =>
+                          removeGoogleCalendarAccount(account.email)
+                        }
+                        className="p-2 bg-red-100 text-red-700 rounded-lg hover:bg-red-200"
+                        title="Eltávolítás"
+                      >
+                        <Trash2 size={18} />
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <button
+              onClick={syncAllGoogleCalendars}
+              disabled={
+                !googleCalendarAccounts.some((acc) => acc.syncEnabled) ||
+                syncInProgress
+              }
+              className="w-full flex items-center justify-center gap-2 bg-blue-600 text-white px-4 py-3 rounded-lg hover:bg-blue-700 font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {syncInProgress ? (
+                <>
+                  <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div>
+                  Szinkronizálás folyamatban...
+                </>
+              ) : (
+                <>
+                  <Calendar size={20} />
+                  Aktív fiókok szinkronizálása
+                </>
+              )}
+            </button>
+          </>
+        )}
+
+        <div className="mt-4 bg-blue-50 border border-blue-200 rounded-lg p-4">
+          <h4 className="font-semibold text-blue-900 mb-2">ℹ️ Tudnivalók</h4>
+          <ul className="text-sm text-blue-800 space-y-1 list-disc list-inside">
+            <li>Több Google fiókot is hozzáadhatsz (Calendar és Gmail)</li>
+            <li>Minden fiókhoz külön be/kikapcsolható a szinkronizáció</li>
+            <li>Az API kulcsok biztonságosan a backend-en tárolódnak</li>
+            <li>OAuth bejelentkezés Google popup ablakban</li>
+          </ul>
+        </div>
+      </div>
+
+      {/* Gmail Konfiguráció Info */}
+      <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+        <div className="flex items-center gap-3 mb-4">
+          <Mail size={24} className="text-purple-600" />
+          <h3 className="font-semibold text-gray-800">Gmail Integráció</h3>
+        </div>
+
+        <div className="space-y-3">
+          <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+            <h4 className="font-semibold text-blue-900 mb-2">
+              ℹ️ Gmail fiók hozzáadása
+            </h4>
+            <p className="text-sm text-blue-800">
+              Gmail fiókokat a <strong>Google Calendar Szinkronizáció</strong>{" "}
+              szekcióban tudsz hozzáadni. A "Fiók hozzáadása" gombra kattintva
+              válaszd ki a <strong>Gmail</strong> szolgáltatást.
+            </p>
+          </div>
+
+          <div className="bg-green-50 border border-green-200 rounded-lg p-4">
+            <h4 className="font-semibold text-green-900 mb-2">
+              🔧 Backend konfiguráció
+            </h4>
+            <p className="text-sm text-green-800 mb-2">
+              A Gmail API beállítások biztonságosan a{" "}
+              <strong>Netlify Environment Variables</strong>-ben tárolódnak:
+            </p>
+            <ul className="text-sm text-green-800 space-y-1 list-disc list-inside ml-2">
+              <li>GOOGLE_CLIENT_ID</li>
+              <li>GOOGLE_CLIENT_SECRET</li>
+              <li>GOOGLE_REDIRECT_URI</li>
+              <li>FIREBASE_* változók</li>
+            </ul>
+            <p className="text-xs text-green-700 mt-2">
+              Ezek a Netlify Dashboard → Site settings → Environment variables
+              alatt találhatók.
+            </p>
+          </div>
+
+          <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
+            <h4 className="font-semibold text-yellow-900 mb-2">
+              ⚠️ Fontos tudnivalók
+            </h4>
+            <ul className="text-sm text-yellow-800 space-y-1 list-disc list-inside">
+              <li>Az API kulcsok NEM láthatók a frontend kódban</li>
+              <li>
+                Minden API hívás a Netlify Functions-ön keresztül történik
+              </li>
+              <li>A tokenek biztonságosan Firestore-ban tárolódnak</li>
+              <li>OAuth folyamat teljes mértékben szerver oldalon</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+
       <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
         <h3 className="font-semibold text-gray-800 mb-4">Modulok kezelése</h3>
 
@@ -11103,7 +12560,7 @@ const toggleShoppingItem = (id, field) => {
           <h2 className="text-2xl font-bold text-gray-800">
             Receptek & Menütervezés
           </h2>
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
             <button
               onClick={() => openRecipeModal()}
               className="flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700"
@@ -11138,7 +12595,6 @@ const toggleShoppingItem = (id, field) => {
         {/* SZŰRŐ ÉS RENDEZÉS PANEL */}
         <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4">
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-3">
-            {/* Keresés */}
             <div className="lg:col-span-2">
               <input
                 type="text"
@@ -11154,7 +12610,6 @@ const toggleShoppingItem = (id, field) => {
               />
             </div>
 
-            {/* Kategória */}
             <div>
               <select
                 value={recipeFilters.category}
@@ -11176,7 +12631,6 @@ const toggleShoppingItem = (id, field) => {
               </select>
             </div>
 
-            {/* Nehézség */}
             <div>
               <select
                 value={recipeFilters.difficulty}
@@ -11195,7 +12649,6 @@ const toggleShoppingItem = (id, field) => {
               </select>
             </div>
 
-            {/* Max idő */}
             <div>
               <input
                 type="number"
@@ -11213,7 +12666,6 @@ const toggleShoppingItem = (id, field) => {
           </div>
 
           <div className="flex flex-wrap items-center gap-3 mt-3 pt-3 border-t border-gray-200">
-            {/* Kedvencek szűrő */}
             <label className="flex items-center gap-2 cursor-pointer">
               <input
                 type="checkbox"
@@ -11229,7 +12681,6 @@ const toggleShoppingItem = (id, field) => {
               <span className="text-sm text-gray-700">⭐ Csak kedvencek</span>
             </label>
 
-            {/* Rendezés */}
             <div className="flex items-center gap-2 ml-auto">
               <span className="text-sm text-gray-600">Rendezés:</span>
               <select
@@ -11244,7 +12695,6 @@ const toggleShoppingItem = (id, field) => {
               </select>
             </div>
 
-            {/* Szűrők törlése */}
             {(recipeFilters.searchText ||
               recipeFilters.category ||
               recipeFilters.difficulty ||
@@ -11380,26 +12830,54 @@ const toggleShoppingItem = (id, field) => {
     );
   };
 
-  const getModules = () => [
-    { id: "dashboard", name: "Dashboard", icon: BarChart3 },
-    { id: "attekintes", name: "Áttekintés", icon: Calendar },
-    { id: "naptar", name: "Naptár", icon: Calendar },
-    { id: "chat", name: "Chat", icon: Mail }, // ÚJ - helyezd előre hogy látható legyen
-    { id: "bevasarlas", name: "Bevásárlás", icon: ShoppingCart },
-    { id: "elofizetesek", name: "Előfizetések", icon: Repeat },
-    { id: "penzugyek", name: "Pénzügyek", icon: DollarSign },
-    { id: "otthon", name: "Otthon", icon: Home },
-    { id: "jarmuvek", name: "Járművek", icon: Car },
-    { id: "eszkozok", name: "Eszközök", icon: Package },
-    { id: "egeszseg", name: "Egészség", icon: Heart },
-    { id: "gyerekek", name: "Gyerekek", icon: Baby },
-    { id: "csalad", name: "Család", icon: Users },
-    { id: "kisallatok", name: "Kisállatok", icon: Heart },
-    { id: "receptek", name: "Receptek", icon: BookOpen },
-    { id: "beallitasok", name: "Beállítások", icon: Settings },
-  ];
+  const getModules = () => {
+    const allModules = [
+      { id: "attekintes", name: "Áttekintés", icon: Calendar },
+      { id: "naptar", name: "Naptár", icon: Calendar },
+      { id: "bevasarlas", name: "Bevásárlás", icon: ShoppingCart },
+      { id: "penzugyek", name: "Pénzügyek", icon: DollarSign },
+      { id: "rendelesek", name: "Rendelések", icon: Package },
+      { id: "elofizetesek", name: "Előfizetések", icon: Repeat },
+      { id: "otthon", name: "Otthon", icon: Home },
+      { id: "jarmuvek", name: "Járművek", icon: Car },
+      { id: "eszkozok", name: "Eszközök", icon: Package },
+      { id: "egeszseg", name: "Egészség", icon: Heart },
+      { id: "gyerekek", name: "Gyerekek", icon: Baby },
+      { id: "csalad", name: "Család", icon: Users },
+      { id: "kisallatok", name: "Kisállatok", icon: Heart },
+      { id: "receptek", name: "Receptek", icon: BookOpen },
+      { id: "chat", name: "Chat", icon: Mail },
+      { id: "beallitasok", name: "Beállítások", icon: Settings },
+    ];
+
+    // Ha van mentett sorrend, azt használjuk
+    if (settings.moduleOrder && settings.moduleOrder.length > 0) {
+      const orderedModules = [];
+
+      // Először a rendezett modulok
+      settings.moduleOrder.forEach((moduleId) => {
+        const module = allModules.find((m) => m.id === moduleId);
+        if (module) {
+          orderedModules.push(module);
+        }
+      });
+
+      // Aztán az esetleg hiányzó új modulok
+      allModules.forEach((module) => {
+        if (!orderedModules.find((m) => m.id === module.id)) {
+          orderedModules.push(module);
+        }
+      });
+
+      return orderedModules;
+    }
+
+    return allModules;
+  };
 
   const renderContent = () => {
+    console.log("activeModule:", activeModule); // DEBUG
+
     switch (activeModule) {
       case "dashboard":
         return renderDashboard();
@@ -11421,6 +12899,9 @@ const toggleShoppingItem = (id, field) => {
         return renderEszkozok();
       case "bevasarlas":
         return renderBevasarlas();
+      case "rendelesek": // ÚJ
+        console.log("rendelesek case meghívva"); // DEBUG
+        return renderRendelesek();
       case "elofizetesek": // ÚJ
         return renderElofizetesek();
       case "chat":
@@ -11804,24 +13285,28 @@ const toggleShoppingItem = (id, field) => {
             showMobileMenu ? "block" : "hidden"
           } md:block w-64 bg-white border-r border-gray-200 h-[calc(100vh-57px)] md:min-h-[calc(100vh-57px)] fixed md:sticky top-[57px] left-0 z-20 overflow-y-auto`}
         >
+          {/* Menü gombok, oldalsó menü, hamburger */}
           <nav className="p-4 space-y-2 pb-4">
-            {orderedModules
-              .filter(
-                (module) => module.id !== "chat" && module.id !== "beallitasok"
-              )
+            {getModules()
+              .filter((module) => {
+                // Csak az aktív modulokat és a beállításokat jelenítjük meg
+                return (
+                  settings.activeModules.includes(module.id) ||
+                  module.id === "beallitasok"
+                );
+              })
               .map((module) => {
                 const Icon = module.icon;
+                const isActive = activeModule === module.id; // JAVÍTVA: activeModule
+
                 return (
                   <button
                     key={module.id}
-                    onClick={() => {
-                      setActiveModule(module.id);
-                      setShowMobileMenu(false);
-                    }}
-                    className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition relative ${
-                      activeModule === module.id
-                        ? "bg-blue-600 text-white"
-                        : "text-gray-700 hover:bg-gray-100"
+                    onClick={() => setActiveModule(module.id)} // JAVÍTVA: setActiveModule
+                    className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition ${
+                      isActive
+                        ? "bg-blue-50 text-blue-600"
+                        : "text-gray-700 hover:bg-gray-50"
                     }`}
                   >
                     <Icon size={20} />
@@ -11846,48 +13331,110 @@ const toggleShoppingItem = (id, field) => {
           <div className="max-w-6xl mx-auto">{renderContent()}</div>
         </main>
       </div>
-      <nav className="md:hidden fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 z-30 overflow-x-auto">
-        <div className="flex p-2 gap-1 min-w-max">
-          {orderedModules
-            .filter(
-              (module) =>
-                settings.mobileBottomNav?.includes(module.id) ||
-                (!settings.mobileBottomNav &&
-                  [
-                    "attekintes",
-                    "naptar",
-                    "bevasarlas",
-                    "penzugyek",
-                    "chat",
-                  ].includes(module.id))
-            )
+      <nav className="lg:hidden fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 z-40">
+        <div className="flex justify-around items-center h-16">
+          {getModules()
+            .filter((module) => {
+              const mobileNav = settings.mobileBottomNav || [
+                "attekintes",
+                "naptar",
+                "bevasarlas",
+                "penzugyek",
+                "chat",
+              ];
+              return mobileNav.includes(module.id);
+            })
+            .slice(0, 5)
             .map((module) => {
               const Icon = module.icon;
               const isActive = activeModule === module.id;
+
               return (
                 <button
                   key={module.id}
                   onClick={() => setActiveModule(module.id)}
-                  className={`flex flex-col items-center justify-center py-2 px-3 rounded-lg transition relative min-w-[70px] ${
-                    isActive
-                      ? "bg-blue-50 text-blue-600"
-                      : "text-gray-600 hover:bg-gray-50"
+                  className={`flex flex-col items-center justify-center flex-1 h-full ${
+                    isActive ? "text-blue-600" : "text-gray-600"
                   }`}
                 >
-                  <Icon size={22} className="mb-1" />
-                  <span className="text-xs font-medium truncate max-w-full">
-                    {module.name}
-                  </span>
-                  {module.id === "chat" && unreadMessagesCount > 0 && (
-                    <span className="absolute top-1 right-1 bg-red-500 text-white text-xs font-bold rounded-full w-4 h-4 flex items-center justify-center">
-                      {unreadMessagesCount > 9 ? "9" : unreadMessagesCount}
-                    </span>
-                  )}
+                  <Icon size={24} />
+                  <span className="text-xs mt-1">{module.name}</span>
                 </button>
               );
             })}
         </div>
       </nav>
+
+      {/* Mobil hamburger menü tartalom - JAVÍTOTT VERZIÓ */}
+      {showMobileMenu && (
+        <div
+          className="lg:hidden fixed inset-0 bg-black bg-opacity-50 z-50"
+          onClick={() => setShowMobileMenu(false)}
+        >
+          <div
+            className="bg-white w-64 h-full shadow-lg flex flex-col"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* FEJLÉC - FIX MAGASSÁG */}
+            <div className="flex justify-between items-center p-4 border-b border-gray-200 flex-shrink-0">
+              <h2 className="text-xl font-bold text-blue-600">Menü</h2>
+              <button
+                onClick={() => setShowMobileMenu(false)}
+                className="p-1 hover:bg-gray-100 rounded"
+              >
+                <X size={24} />
+              </button>
+            </div>
+
+            {/* SCROLLOZHATÓ NAVIGÁCIÓ */}
+            <nav className="flex-1 overflow-y-auto p-4 space-y-1">
+              {getModules()
+                .filter((module) => {
+                  // Minden aktív modul és a beállítások
+                  return (
+                    settings.activeModules.includes(module.id) ||
+                    module.id === "beallitasok"
+                  );
+                })
+                .map((module) => {
+                  const Icon = module.icon;
+                  const isActive = activeModule === module.id;
+
+                  return (
+                    <button
+                      key={module.id}
+                      onClick={() => {
+                        setActiveModule(module.id);
+                        setShowMobileMenu(false);
+                      }}
+                      className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition ${
+                        isActive
+                          ? "bg-blue-50 text-blue-600"
+                          : "text-gray-700 hover:bg-gray-50"
+                      }`}
+                    >
+                      <Icon size={20} />
+                      <span className="font-medium">{module.name}</span>
+                    </button>
+                  );
+                })}
+            </nav>
+
+            {/* ALSÓ RÉSZ (opcionális) - FIX MAGASSÁG */}
+            <div className="p-4 border-t border-gray-200 flex-shrink-0">
+              <p className="text-xs text-gray-500 text-center">
+                {
+                  getModules().filter((m) =>
+                    settings.activeModules.includes(m.id)
+                  ).length
+                }{" "}
+                aktív modul
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ALL MODALS */}
       {/* Task Modal */}
       {showTaskModal && (
@@ -12936,6 +14483,90 @@ const toggleShoppingItem = (id, field) => {
           </div>
         </div>
       )}
+
+      {/* Gyors Rezsi Modal */}
+      {showQuickUtilityModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-lg shadow-xl max-w-md w-full p-6">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-xl font-bold text-gray-800">
+                Új rezsi - {selectedHome?.name}
+              </h3>
+              <button
+                onClick={() => setShowQuickUtilityModal(false)}
+                className="text-gray-500 hover:text-gray-700"
+              >
+                <X size={24} />
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Rezsi típusa *
+                </label>
+                <input
+                  type="text"
+                  value={formData.name || ""}
+                  onChange={(e) =>
+                    setFormData({ ...formData, name: e.target.value })
+                  }
+                  placeholder="pl. Villany, Gáz, Víz"
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Összeg (Ft) *
+                </label>
+                <input
+                  type="number"
+                  value={formData.amount || ""}
+                  onChange={(e) =>
+                    setFormData({
+                      ...formData,
+                      amount: parseInt(e.target.value) || "",
+                    })
+                  }
+                  placeholder="pl. 15000"
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Fizetési határidő *
+                </label>
+                <input
+                  type="date"
+                  value={formData.dueDate || ""}
+                  onChange={(e) =>
+                    setFormData({ ...formData, dueDate: e.target.value })
+                  }
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500"
+                />
+              </div>
+            </div>
+
+            <div className="mt-6 flex gap-3">
+              <button
+                onClick={() => setShowQuickUtilityModal(false)}
+                className="flex-1 px-4 py-3 border border-gray-300 rounded-lg hover:bg-gray-50"
+              >
+                Mégse
+              </button>
+              <button
+                onClick={saveQuickUtility}
+                className="flex-1 px-4 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700"
+              >
+                Hozzáadás
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Vehicle Modal */}
       {showVehicleModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50 overflow-y-auto">
@@ -13400,139 +15031,6 @@ const toggleShoppingItem = (id, field) => {
                   className="mt-2 text-sm text-blue-600 hover:text-blue-700 flex items-center gap-1"
                 >
                   <Plus size={16} /> Matrica hozzáadása
-                </button>
-              </div>
-
-              {/* Tankolások */}
-              <div className="border-t pt-4">
-                <h4 className="font-semibold text-gray-800 mb-3">Tankolások</h4>
-                {formData.fuelings && formData.fuelings.length > 0 && (
-                  <div className="space-y-2 mb-3 max-h-60 overflow-y-auto">
-                    {formData.fuelings
-                      .sort((a, b) => new Date(b.date) - new Date(a.date))
-                      .map((fuel, idx) => (
-                        <div
-                          key={idx}
-                          className="flex items-center justify-between p-3 bg-yellow-50 rounded-lg"
-                        >
-                          <div className="flex-1">
-                            <div className="font-medium text-sm text-gray-800">
-                              {new Date(fuel.date).toLocaleDateString("hu-HU")}
-                              {fuel.km && ` • ${fuel.km.toLocaleString()} km`}
-                            </div>
-                            <div className="text-xs text-gray-600 mt-1">
-                              {fuel.liters} L × {fuel.pricePerLiter.toFixed(2)}{" "}
-                              Ft/L = {fuel.totalPrice.toLocaleString()} Ft
-                            </div>
-                            {fuel.station && (
-                              <div className="text-xs text-gray-500 mt-1">
-                                {fuel.station}
-                              </div>
-                            )}
-                            {fuel.notes && (
-                              <div className="text-xs text-gray-500 italic mt-1">
-                                {fuel.notes}
-                              </div>
-                            )}
-                          </div>
-                          <button
-                            onClick={() => removeFueling(idx)}
-                            className="text-red-600 hover:text-red-700"
-                          >
-                            <Trash2 size={16} />
-                          </button>
-                        </div>
-                      ))}
-                  </div>
-                )}
-
-                <div className="space-y-2">
-                  <div className="grid grid-cols-2 gap-2">
-                    <input
-                      type="date"
-                      value={tempFueling.date}
-                      onChange={(e) =>
-                        setTempFueling({ ...tempFueling, date: e.target.value })
-                      }
-                      className="px-3 py-2 border border-gray-300 rounded text-sm"
-                    />
-                    <input
-                      type="number"
-                      placeholder="Km állás (opcionális)"
-                      value={tempFueling.km}
-                      onChange={(e) =>
-                        setTempFueling({ ...tempFueling, km: e.target.value })
-                      }
-                      className="px-3 py-2 border border-gray-300 rounded text-sm"
-                    />
-                  </div>
-                  <div className="grid grid-cols-3 gap-2">
-                    <input
-                      type="number"
-                      step="0.01"
-                      placeholder="Mennyiség (L) *"
-                      value={tempFueling.liters}
-                      onChange={(e) =>
-                        handleFuelingLitersChange(e.target.value)
-                      }
-                      className="px-3 py-2 border border-gray-300 rounded text-sm"
-                    />
-                    <input
-                      type="number"
-                      step="0.01"
-                      placeholder="Egységár (Ft/L)"
-                      value={tempFueling.pricePerLiter}
-                      onChange={(e) =>
-                        handleFuelingPricePerLiterChange(e.target.value)
-                      }
-                      className="px-3 py-2 border border-gray-300 rounded text-sm"
-                    />
-                    <input
-                      type="number"
-                      placeholder="Fizetett (Ft) *"
-                      value={tempFueling.totalPrice}
-                      onChange={(e) =>
-                        handleFuelingTotalPriceChange(e.target.value)
-                      }
-                      className="px-3 py-2 border border-gray-300 rounded text-sm"
-                    />
-                  </div>
-                  <div className="grid grid-cols-2 gap-2">
-                    <input
-                      type="text"
-                      placeholder="Kút (pl. MOL)"
-                      value={tempFueling.station}
-                      onChange={(e) =>
-                        setTempFueling({
-                          ...tempFueling,
-                          station: e.target.value,
-                        })
-                      }
-                      className="px-3 py-2 border border-gray-300 rounded text-sm"
-                    />
-                    <input
-                      type="text"
-                      placeholder="Megjegyzés"
-                      value={tempFueling.notes}
-                      onChange={(e) =>
-                        setTempFueling({
-                          ...tempFueling,
-                          notes: e.target.value,
-                        })
-                      }
-                      className="px-3 py-2 border border-gray-300 rounded text-sm"
-                    />
-                  </div>
-                </div>
-                <p className="text-xs text-gray-500 mt-1">
-                  💡 Adj meg 2 értéket a 3-ból, a harmadikat automatikusan
-                  számoljuk
-                </p>
-                <button
-                  onClick={addFueling}
-                  className="mt-2 text-sm text-blue-600 hover:text-blue-700 flex items-center gap-1"
-                >
-                  <Plus size={16} /> Tankolás hozzáadása
                 </button>
               </div>
 
@@ -14944,6 +16442,215 @@ const toggleShoppingItem = (id, field) => {
           </div>
         </div>
       )}
+      {/* Import Modal */}
+      {showImportModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-lg shadow-xl max-w-3xl w-full p-6 max-h-[90vh] overflow-y-auto">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-xl font-bold text-gray-800">
+                Tranzakciók importálása
+              </h3>
+              <button
+                onClick={() => {
+                  setShowImportModal(false);
+                  setImportStep(1);
+                  setImportedData([]);
+                  setDetectedBank(null);
+                  setImportAccount(null);
+                }}
+                className="text-gray-500 hover:text-gray-700"
+              >
+                <X size={24} />
+              </button>
+            </div>
+
+            {/* STEP 1: Fájl feltöltés */}
+            {importStep === 1 && (
+              <div className="space-y-4">
+                <div className="text-center p-8 border-2 border-dashed border-gray-300 rounded-lg">
+                  <Upload size={48} className="mx-auto mb-4 text-gray-400" />
+                  <h4 className="text-lg font-semibold text-gray-800 mb-2">
+                    Válassz CSV fájlt
+                  </h4>
+                  <p className="text-sm text-gray-600 mb-4">
+                    Támogatott bankok: Revolut, OTP, Erste, K&H, vagy általános
+                    CSV
+                  </p>
+                  <input
+                    type="file"
+                    accept=".csv"
+                    onChange={(e) => {
+                      const file = e.target.files[0];
+                      if (file) handleFileUpload(file);
+                    }}
+                    className="hidden"
+                    id="csv-upload"
+                  />
+                  <label
+                    htmlFor="csv-upload"
+                    className="inline-block px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 cursor-pointer"
+                  >
+                    Fájl kiválasztása
+                  </label>
+                </div>
+
+                <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                  <h5 className="font-semibold text-blue-800 mb-2">
+                    💡 Hogyan exportálj CSV-t?
+                  </h5>
+                  <ul className="text-sm text-blue-700 space-y-1">
+                    <li>
+                      • <strong>Revolut:</strong> Statements → Export → CSV
+                    </li>
+                    <li>
+                      • <strong>OTP:</strong> Tranzakciók → Exportálás → CSV
+                    </li>
+                    <li>
+                      • <strong>Erste:</strong> Account → Export → CSV format
+                    </li>
+                    <li>
+                      • <strong>K&H:</strong> Számlakivonatok → Letöltés CSV-ben
+                    </li>
+                  </ul>
+                </div>
+              </div>
+            )}
+
+            {/* STEP 2: Bank konfiguráció és előnézet */}
+            {importStep === 2 && detectedBank && importedData.length > 0 && (
+              <div className="space-y-4">
+                <div className="bg-green-50 border border-green-200 rounded-lg p-4">
+                  <div className="flex items-center gap-2">
+                    <CheckCircle size={20} className="text-green-600" />
+                    <div>
+                      <p className="font-semibold text-green-800">
+                        Bank felismerve: {detectedBank.bank}
+                      </p>
+                      <p className="text-sm text-green-700">
+                        {importedData.length} tranzakció találva
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                <div>
+                  <h4 className="font-semibold text-gray-800 mb-3">
+                    Válassz számlát az importáláshoz:
+                  </h4>
+                  <select
+                    value={importAccount || ""}
+                    onChange={(e) => setImportAccount(e.target.value)}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                  >
+                    <option value="">Válassz számlát...</option>
+                    {(() => {
+                      const accountsSource = Array.isArray(data?.accounts)
+                        ? data.accounts
+                        : Array.isArray(data?.finances?.accounts)
+                        ? data.finances.accounts
+                        : [];
+
+                      const visibleAccounts = accountsSource.filter(
+                        (acc) =>
+                          acc &&
+                          (acc.isShared === true ||
+                            acc.ownerId === currentUser?.uid)
+                      );
+
+                      return visibleAccounts.map((account) => (
+                        <option key={account.id} value={account.id}>
+                          {account.name || account.displayName} (
+                          {(account.balance || 0).toLocaleString()}{" "}
+                          {account.currency || "HUF"})
+                        </option>
+                      ));
+                    })()}
+                  </select>
+                </div>
+
+                <div>
+                  <h4 className="font-semibold text-gray-800 mb-3">
+                    Előnézet (első 5 tranzakció):
+                  </h4>
+                  <div className="border border-gray-200 rounded-lg overflow-hidden">
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-sm">
+                        <thead className="bg-gray-50">
+                          <tr>
+                            <th className="px-4 py-2 text-left">Dátum</th>
+                            <th className="px-4 py-2 text-left">Leírás</th>
+                            <th className="px-4 py-2 text-right">Összeg</th>
+                            <th className="px-4 py-2 text-left">Kategória</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-gray-200">
+                          {importedData.slice(0, 5).map((row, idx) => {
+                            const parsed = parseImportedTransaction(
+                              row,
+                              detectedBank.mapping
+                            );
+                            return (
+                              <tr key={idx} className="hover:bg-gray-50">
+                                <td className="px-4 py-2">{parsed.date}</td>
+                                <td className="px-4 py-2 max-w-xs truncate">
+                                  {parsed.description}
+                                </td>
+                                <td
+                                  className={`px-4 py-2 text-right font-semibold ${
+                                    parsed.type === "income"
+                                      ? "text-green-600"
+                                      : "text-red-600"
+                                  }`}
+                                >
+                                  {parsed.type === "income" ? "+" : "-"}
+                                  {parsed.amount.toLocaleString()}{" "}
+                                  {parsed.currency}
+                                </td>
+                                <td className="px-4 py-2 text-xs">
+                                  {parsed.category}
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                  {importedData.length > 5 && (
+                    <p className="text-sm text-gray-600 mt-2">
+                      ... és még {importedData.length - 5} tranzakció
+                    </p>
+                  )}
+                </div>
+
+                <div className="flex gap-3">
+                  <button
+                    onClick={() => {
+                      setImportStep(1);
+                      setImportedData([]);
+                      setDetectedBank(null);
+                    }}
+                    className="flex-1 px-4 py-3 border border-gray-300 rounded-lg hover:bg-gray-50"
+                  >
+                    Vissza
+                  </button>
+                  <button
+                    onClick={executeImport}
+                    disabled={!importAccount}
+                    className={`flex-1 px-4 py-3 text-white rounded-lg ${
+                      importAccount
+                        ? "bg-green-600 hover:bg-green-700"
+                        : "bg-gray-400 cursor-not-allowed"
+                    }`}
+                  >
+                    Importálás végrehajtása
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
       {/* Transaction Modal */}
       {showTransactionModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
@@ -14961,6 +16668,7 @@ const toggleShoppingItem = (id, field) => {
                 <X size={24} />
               </button>
             </div>
+
             <div className="space-y-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -14968,10 +16676,9 @@ const toggleShoppingItem = (id, field) => {
                 </label>
                 <select
                   value={formData.category || ""}
-                  onChange={(e) => {
-                    console.log("Category changed to:", e.target.value);
-                    setFormData({ ...formData, category: e.target.value });
-                  }}
+                  onChange={(e) =>
+                    setFormData({ ...formData, category: e.target.value })
+                  }
                   className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
                 >
                   <option value="">Válassz kategóriát...</option>
@@ -15008,10 +16715,7 @@ const toggleShoppingItem = (id, field) => {
                     type="number"
                     value={formData.amount || ""}
                     onChange={(e) =>
-                      setFormData({
-                        ...formData,
-                        amount: e.target.value,
-                      })
+                      setFormData({ ...formData, amount: e.target.value })
                     }
                     className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
                     placeholder="10000"
@@ -15041,32 +16745,25 @@ const toggleShoppingItem = (id, field) => {
                 </label>
                 <select
                   value={formData.account || ""}
-                  onChange={(e) => {
-                    console.log("Account selected:", e.target.value);
-                    setFormData({ ...formData, account: e.target.value });
-                  }}
+                  onChange={(e) =>
+                    setFormData({ ...formData, account: e.target.value })
+                  }
                   className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
                 >
                   <option value="">Válassz számlát...</option>
                   {(() => {
-                    // Keressük meg a számlákat több helyen is
                     const accountsSource = Array.isArray(data?.accounts)
                       ? data.accounts
                       : Array.isArray(data?.finances?.accounts)
                       ? data.finances.accounts
                       : [];
 
-                    console.log("Available accounts:", accountsSource);
-
-                    // Szűrés: csak megosztott vagy saját számlák
                     const visibleAccounts = accountsSource.filter(
                       (acc) =>
                         acc &&
                         (acc.isShared !== false ||
                           acc.ownerId === currentUser?.uid)
                     );
-
-                    console.log("Visible accounts:", visibleAccounts);
 
                     if (visibleAccounts.length === 0) {
                       return (
@@ -15140,6 +16837,148 @@ const toggleShoppingItem = (id, field) => {
           </div>
         </div>
       )}
+      {/* Account Modal */}
+      {showAccountModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-lg shadow-xl max-w-md w-full p-6">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-xl font-bold text-gray-800">
+                {editingItem ? "Számla szerkesztése" : "Új számla"}
+              </h3>
+              <button
+                onClick={() => setShowAccountModal(false)}
+                className="text-gray-500 hover:text-gray-700"
+              >
+                <X size={24} />
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Számla neve *
+                </label>
+                <input
+                  type="text"
+                  value={formData.name || ""}
+                  onChange={(e) =>
+                    setFormData({ ...formData, name: e.target.value })
+                  }
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                  placeholder="pl. OTP folyószámla"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Típus
+                  </label>
+                  <select
+                    value={formData.type || "bank"}
+                    onChange={(e) =>
+                      setFormData({ ...formData, type: e.target.value })
+                    }
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                  >
+                    <option value="bank">Bankszámla</option>
+                    <option value="cash">Készpénz</option>
+                    <option value="savings">Megtakarítás</option>
+                    <option value="credit">Hitelkártya</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Valuta
+                  </label>
+                  <select
+                    value={formData.currency || "HUF"}
+                    onChange={(e) =>
+                      setFormData({ ...formData, currency: e.target.value })
+                    }
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                  >
+                    <option value="HUF">HUF (Ft)</option>
+                    <option value="EUR">EUR (€)</option>
+                    <option value="USD">USD ($)</option>
+                  </select>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Kezdő egyenleg
+                </label>
+                <input
+                  type="number"
+                  value={formData.balance || 0}
+                  onChange={(e) =>
+                    setFormData({
+                      ...formData,
+                      balance: parseFloat(e.target.value) || 0,
+                    })
+                  }
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+
+              <div className="border-t pt-4">
+                <label className="flex items-center gap-3 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={formData.isShared === true}
+                    onChange={(e) =>
+                      setFormData({ ...formData, isShared: e.target.checked })
+                    }
+                    className="w-5 h-5 text-blue-600 rounded"
+                  />
+                  <div>
+                    <span className="text-sm font-medium text-gray-700">
+                      Megosztott számla
+                    </span>
+                    <p className="text-xs text-gray-500 mt-1">
+                      Családtagok is láthatják és használhatják
+                    </p>
+                  </div>
+                </label>
+
+                {formData.isShared === false && (
+                  <div className="mt-3 p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
+                    <div className="flex items-start gap-2">
+                      <AlertCircle
+                        size={18}
+                        className="text-yellow-600 mt-0.5"
+                      />
+                      <div className="text-sm text-yellow-800">
+                        <p className="font-semibold">Privát számla</p>
+                        <p className="mt-1">
+                          Csak te látod ezt a számlát és a tranzakcióit
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="mt-6 flex gap-3">
+              <button
+                onClick={() => setShowAccountModal(false)}
+                className="flex-1 px-4 py-3 border border-gray-300 rounded-lg hover:bg-gray-50"
+              >
+                Mégse
+              </button>
+              <button
+                onClick={saveAccount}
+                className="flex-1 px-4 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+              >
+                Mentés
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       {/* Loan Modal */}
       {showLoanModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50 overflow-y-auto">
@@ -15155,6 +16994,7 @@ const toggleShoppingItem = (id, field) => {
                 <X size={24} />
               </button>
             </div>
+
             <div className="space-y-4">
               <div className="grid grid-cols-2 gap-4">
                 <div>
@@ -15168,7 +17008,7 @@ const toggleShoppingItem = (id, field) => {
                       setFormData({ ...formData, name: e.target.value })
                     }
                     className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
-                    placeholder="pl. Lakáshitel, Autóhitel"
+                    placeholder="Lakáshitel"
                   />
                 </div>
                 <div>
@@ -15182,7 +17022,7 @@ const toggleShoppingItem = (id, field) => {
                       setFormData({ ...formData, lender: e.target.value })
                     }
                     className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
-                    placeholder="pl. OTP Bank"
+                    placeholder="OTP Bank"
                   />
                 </div>
               </div>
@@ -15190,23 +17030,20 @@ const toggleShoppingItem = (id, field) => {
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Eredeti kölcsönösszeg (Ft) *
+                    Felvett összeg (Ft) *
                   </label>
                   <input
                     type="number"
                     value={formData.principal || ""}
                     onChange={(e) =>
-                      setFormData({
-                        ...formData,
-                        principal: e.target.value,
-                      })
+                      setFormData({ ...formData, principal: e.target.value })
                     }
                     className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
                   />
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Jelenlegi tartozás (Ft) *
+                    Jelenlegi tartozás (Ft)
                   </label>
                   <input
                     type="number"
@@ -15225,22 +17062,6 @@ const toggleShoppingItem = (id, field) => {
               <div className="grid grid-cols-3 gap-4">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Havi törlesztő (Ft) *
-                  </label>
-                  <input
-                    type="number"
-                    value={formData.monthlyPayment || ""}
-                    onChange={(e) =>
-                      setFormData({
-                        ...formData,
-                        monthlyPayment: e.target.value,
-                      })
-                    }
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
                     Kamat (%)
                   </label>
                   <input
@@ -15248,10 +17069,7 @@ const toggleShoppingItem = (id, field) => {
                     step="0.01"
                     value={formData.interestRate || ""}
                     onChange={(e) =>
-                      setFormData({
-                        ...formData,
-                        interestRate: e.target.value,
-                      })
+                      setFormData({ ...formData, interestRate: e.target.value })
                     }
                     className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
                   />
@@ -15266,6 +17084,22 @@ const toggleShoppingItem = (id, field) => {
                     value={formData.thm || ""}
                     onChange={(e) =>
                       setFormData({ ...formData, thm: e.target.value })
+                    }
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Havi törlesztő (Ft) *
+                  </label>
+                  <input
+                    type="number"
+                    value={formData.monthlyPayment || ""}
+                    onChange={(e) =>
+                      setFormData({
+                        ...formData,
+                        monthlyPayment: e.target.value,
+                      })
                     }
                     className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
                   />
@@ -15288,7 +17122,7 @@ const toggleShoppingItem = (id, field) => {
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Lejárat dátuma
+                    Befejező dátum
                   </label>
                   <input
                     type="date"
@@ -15309,34 +17143,12 @@ const toggleShoppingItem = (id, field) => {
                     max="31"
                     value={formData.paymentDay || ""}
                     onChange={(e) =>
-                      setFormData({
-                        ...formData,
-                        paymentDay: e.target.value,
-                      })
+                      setFormData({ ...formData, paymentDay: e.target.value })
                     }
                     className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
                     placeholder="15"
                   />
                 </div>
-              </div>
-
-              <div>
-                <label className="flex items-center gap-2 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={formData.reminderEnabled !== false}
-                    onChange={(e) =>
-                      setFormData({
-                        ...formData,
-                        reminderEnabled: e.target.checked,
-                      })
-                    }
-                    className="w-5 h-5 text-blue-600 rounded"
-                  />
-                  <span className="text-sm font-medium text-gray-700">
-                    Emlékeztető a fizetési határidő előtt
-                  </span>
-                </label>
               </div>
 
               <div>
@@ -15348,11 +17160,12 @@ const toggleShoppingItem = (id, field) => {
                   onChange={(e) =>
                     setFormData({ ...formData, notes: e.target.value })
                   }
+                  rows="3"
                   className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
-                  rows="2"
                 />
               </div>
             </div>
+
             <div className="mt-6 flex gap-3">
               <button
                 onClick={() => setShowLoanModal(false)}
@@ -15362,7 +17175,7 @@ const toggleShoppingItem = (id, field) => {
               </button>
               <button
                 onClick={saveLoan}
-                className="flex-1 px-4 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+                className="flex-1 px-4 py-3 bg-red-600 text-white rounded-lg hover:bg-red-700"
               >
                 Mentés
               </button>
@@ -15372,11 +17185,13 @@ const toggleShoppingItem = (id, field) => {
       )}
       {/* Saving Goal Modal */}
       {showSavingGoalModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-lg shadow-xl max-w-md w-full p-6 max-h-[90vh] overflow-y-auto">
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50 overflow-y-auto">
+          <div className="bg-white rounded-lg shadow-xl max-w-2xl w-full p-6 my-8 max-h-[90vh] overflow-y-auto">
             <div className="flex justify-between items-center mb-4">
               <h3 className="text-xl font-bold text-gray-800">
-                {editingItem ? "Cél szerkesztése" : "Új megtakarítási cél"}
+                {editingItem
+                  ? "Megtakarítási cél szerkesztése"
+                  : "Új megtakarítási cél"}
               </h3>
               <button
                 onClick={() => setShowSavingGoalModal(false)}
@@ -15385,6 +17200,7 @@ const toggleShoppingItem = (id, field) => {
                 <X size={24} />
               </button>
             </div>
+
             <div className="space-y-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -15397,7 +17213,7 @@ const toggleShoppingItem = (id, field) => {
                     setFormData({ ...formData, name: e.target.value })
                   }
                   className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
-                  placeholder="pl. Nyaralás Horvátországban"
+                  placeholder="Nyaralás"
                 />
               </div>
 
@@ -15406,7 +17222,7 @@ const toggleShoppingItem = (id, field) => {
                   Kategória
                 </label>
                 <select
-                  value={formData.category || "vacation"}
+                  value={formData.category || "other"}
                   onChange={(e) =>
                     setFormData({ ...formData, category: e.target.value })
                   }
@@ -15431,10 +17247,7 @@ const toggleShoppingItem = (id, field) => {
                     type="number"
                     value={formData.targetAmount || ""}
                     onChange={(e) =>
-                      setFormData({
-                        ...formData,
-                        targetAmount: e.target.value,
-                      })
+                      setFormData({ ...formData, targetAmount: e.target.value })
                     }
                     className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
                   />
@@ -15445,7 +17258,7 @@ const toggleShoppingItem = (id, field) => {
                   </label>
                   <input
                     type="number"
-                    value={formData.currentAmount || ""}
+                    value={formData.currentAmount || 0}
                     onChange={(e) =>
                       setFormData({
                         ...formData,
@@ -15459,7 +17272,7 @@ const toggleShoppingItem = (id, field) => {
 
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Határidő (opcionális)
+                  Határidő
                 </label>
                 <input
                   type="date"
@@ -15480,11 +17293,12 @@ const toggleShoppingItem = (id, field) => {
                   onChange={(e) =>
                     setFormData({ ...formData, notes: e.target.value })
                   }
+                  rows="3"
                   className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
-                  rows="2"
                 />
               </div>
             </div>
+
             <div className="mt-6 flex gap-3">
               <button
                 onClick={() => setShowSavingGoalModal(false)}
@@ -15494,7 +17308,7 @@ const toggleShoppingItem = (id, field) => {
               </button>
               <button
                 onClick={saveSavingGoal}
-                className="flex-1 px-4 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+                className="flex-1 px-4 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700"
               >
                 Mentés
               </button>
@@ -15505,12 +17319,15 @@ const toggleShoppingItem = (id, field) => {
       {/* Deposit Modal */}
       {showDepositModal && selectedGoal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-lg shadow-xl max-w-sm w-full p-6">
+          <div className="bg-white rounded-lg shadow-xl max-w-md w-full p-6">
             <div className="flex justify-between items-center mb-4">
-              <h3 className="text-xl font-bold text-gray-800">Befizetés</h3>
+              <h3 className="text-xl font-bold text-gray-800">
+                Befizetés - {selectedGoal.name}
+              </h3>
               <button
                 onClick={() => {
                   setShowDepositModal(false);
+                  setSelectedGoal(null);
                   setDepositAmount("");
                 }}
                 className="text-gray-500 hover:text-gray-700"
@@ -15518,13 +17335,21 @@ const toggleShoppingItem = (id, field) => {
                 <X size={24} />
               </button>
             </div>
-            <p className="text-gray-600 mb-4">
-              Befizetés ide: <strong>{selectedGoal.name}</strong>
-            </p>
+
             <div className="space-y-4">
+              <div className="bg-gray-50 p-4 rounded-lg">
+                <p className="text-sm text-gray-600">Jelenlegi összeg:</p>
+                <p className="text-2xl font-bold text-gray-800">
+                  {(selectedGoal.currentAmount || 0).toLocaleString()} Ft
+                </p>
+                <p className="text-sm text-gray-600 mt-2">
+                  Célösszeg: {selectedGoal.targetAmount.toLocaleString()} Ft
+                </p>
+              </div>
+
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Összeg (Ft)
+                  Befizetés összege (Ft)
                 </label>
                 <input
                   type="number"
@@ -15532,34 +17357,15 @@ const toggleShoppingItem = (id, field) => {
                   onChange={(e) => setDepositAmount(e.target.value)}
                   className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
                   placeholder="10000"
-                  autoFocus
                 />
               </div>
-              <div className="bg-blue-50 border border-blue-200 rounded p-3 text-sm">
-                <p className="text-gray-700">
-                  Jelenlegi:{" "}
-                  {(selectedGoal.currentAmount || 0).toLocaleString()} Ft
-                </p>
-                <p className="text-gray-700">
-                  Célösszeg:{" "}
-                  {parseFloat(selectedGoal.targetAmount).toLocaleString()} Ft
-                </p>
-                {depositAmount && parseFloat(depositAmount) > 0 && (
-                  <p className="text-green-600 font-semibold mt-2">
-                    Új összeg:{" "}
-                    {(
-                      (selectedGoal.currentAmount || 0) +
-                      parseFloat(depositAmount)
-                    ).toLocaleString()}{" "}
-                    Ft
-                  </p>
-                )}
-              </div>
             </div>
+
             <div className="mt-6 flex gap-3">
               <button
                 onClick={() => {
                   setShowDepositModal(false);
+                  setSelectedGoal(null);
                   setDepositAmount("");
                 }}
                 className="flex-1 px-4 py-3 border border-gray-300 rounded-lg hover:bg-gray-50"
@@ -15571,6 +17377,151 @@ const toggleShoppingItem = (id, field) => {
                 className="flex-1 px-4 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700"
               >
                 Befizetés
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {/* Investment Modal */}
+      {showInvestmentModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50 overflow-y-auto">
+          <div className="bg-white rounded-lg shadow-xl max-w-2xl w-full p-6 my-8 max-h-[90vh] overflow-y-auto">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-xl font-bold text-gray-800">
+                {editingItem ? "Befektetés szerkesztése" : "Új befektetés"}
+              </h3>
+              <button
+                onClick={() => setShowInvestmentModal(false)}
+                className="text-gray-500 hover:text-gray-700"
+              >
+                <X size={24} />
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Befektetés neve *
+                </label>
+                <input
+                  type="text"
+                  value={formData.name || ""}
+                  onChange={(e) =>
+                    setFormData({ ...formData, name: e.target.value })
+                  }
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                  placeholder="Tesla részvény"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Típus
+                </label>
+                <select
+                  value={formData.type || "stock"}
+                  onChange={(e) =>
+                    setFormData({ ...formData, type: e.target.value })
+                  }
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                >
+                  <option value="stock">📈 Részvény</option>
+                  <option value="bond">📊 Kötvény</option>
+                  <option value="crypto">₿ Kripto</option>
+                  <option value="real_estate">🏢 Ingatlan</option>
+                  <option value="fund">💼 Alap</option>
+                  <option value="other">💰 Egyéb</option>
+                </select>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Befektetett összeg *
+                  </label>
+                  <input
+                    type="number"
+                    value={formData.amount || ""}
+                    onChange={(e) =>
+                      setFormData({ ...formData, amount: e.target.value })
+                    }
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Jelenlegi érték
+                  </label>
+                  <input
+                    type="number"
+                    value={formData.currentValue || ""}
+                    onChange={(e) =>
+                      setFormData({ ...formData, currentValue: e.target.value })
+                    }
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Valuta
+                  </label>
+                  <select
+                    value={formData.currency || "HUF"}
+                    onChange={(e) =>
+                      setFormData({ ...formData, currency: e.target.value })
+                    }
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                  >
+                    <option value="HUF">HUF (Ft)</option>
+                    <option value="EUR">EUR (€)</option>
+                    <option value="USD">USD ($)</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Vásárlás dátuma
+                  </label>
+                  <input
+                    type="date"
+                    value={formData.purchaseDate || ""}
+                    onChange={(e) =>
+                      setFormData({ ...formData, purchaseDate: e.target.value })
+                    }
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Megjegyzés
+                </label>
+                <textarea
+                  value={formData.notes || ""}
+                  onChange={(e) =>
+                    setFormData({ ...formData, notes: e.target.value })
+                  }
+                  rows="3"
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+            </div>
+
+            <div className="mt-6 flex gap-3">
+              <button
+                onClick={() => setShowInvestmentModal(false)}
+                className="flex-1 px-4 py-3 border border-gray-300 rounded-lg hover:bg-gray-50"
+              >
+                Mégse
+              </button>
+              <button
+                onClick={saveInvestment}
+                className="flex-1 px-4 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+              >
+                Mentés
               </button>
             </div>
           </div>
@@ -15656,8 +17607,8 @@ const toggleShoppingItem = (id, field) => {
             </div>
             <div className="space-y-4">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Esemény neve *
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Esemény címe *
                 </label>
                 <input
                   type="text"
@@ -15665,13 +17616,13 @@ const toggleShoppingItem = (id, field) => {
                   onChange={(e) =>
                     setFormData({ ...formData, title: e.target.value })
                   }
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
-                  placeholder="pl. Családi program"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+                  placeholder="Pl. Orvosi vizsgálat"
                 />
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
+                <label className="block text-sm font-medium text-gray-700 mb-1">
                   Dátum *
                 </label>
                 <input
@@ -15680,31 +17631,66 @@ const toggleShoppingItem = (id, field) => {
                   onChange={(e) =>
                     setFormData({ ...formData, date: e.target.value })
                   }
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg"
                 />
               </div>
 
+              {/* ÚJ RÉSZ - Egész napos checkbox */}
+              <div className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  id="allDay"
+                  checked={formData.allDay !== false}
+                  onChange={(e) =>
+                    setFormData({ ...formData, allDay: e.target.checked })
+                  }
+                  className="w-4 h-4 text-blue-600 rounded"
+                />
+                <label
+                  htmlFor="allDay"
+                  className="text-sm font-medium text-gray-700"
+                >
+                  Egész napos esemény
+                </label>
+              </div>
+
+              {/* ÚJ RÉSZ - Időpont mező */}
+              {!formData.allDay && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Időpont
+                  </label>
+                  <input
+                    type="time"
+                    value={formData.time || "09:00"}
+                    onChange={(e) =>
+                      setFormData({ ...formData, time: e.target.value })
+                    }
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+                  />
+                </div>
+              )}
+
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Kategória
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Típus
                 </label>
                 <select
                   value={formData.type || "egyéb"}
                   onChange={(e) =>
                     setFormData({ ...formData, type: e.target.value })
                   }
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg"
                 >
                   <option value="egyéb">Egyéb</option>
-                  <option value="otthon">Otthon</option>
-                  <option value="család">Család</option>
-                  <option value="munka">Munka</option>
-                  <option value="szabadidő">Szabadidő</option>
+                  <option value="feladat">Feladat</option>
+                  <option value="találkozó">Találkozó</option>
+                  <option value="emlékeztető">Emlékeztető</option>
                 </select>
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
+                <label className="block text-sm font-medium text-gray-700 mb-1">
                   Leírás
                 </label>
                 <textarea
@@ -15712,9 +17698,9 @@ const toggleShoppingItem = (id, field) => {
                   onChange={(e) =>
                     setFormData({ ...formData, description: e.target.value })
                   }
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg"
                   rows="3"
-                  placeholder="Opcionális leírás..."
+                  placeholder="További részletek..."
                 />
               </div>
             </div>
@@ -15791,14 +17777,134 @@ const toggleShoppingItem = (id, field) => {
           </div>
         </div>
       )}
-      {/* Quick KM Modal */}
-      {showKmModal && selectedVehicle && (
+      {showGoogleAccountModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-lg shadow-xl max-w-sm w-full p-6">
-            <div className="flex justify-between items-center mb-4">
+          <div className="bg-white rounded-lg shadow-xl max-w-md w-full p-6">
+            <div className="flex items-center justify-between mb-4">
               <h3 className="text-xl font-bold text-gray-800">
-                Km állás rögzítése
+                Google Fiók hozzáadása
               </h3>
+              <button
+                onClick={() => {
+                  setShowGoogleAccountModal(false);
+                  setGoogleAccountForm({
+                    email: "",
+                    name: "",
+                    service: "calendar",
+                  });
+                }}
+                className="text-gray-400 hover:text-gray-600"
+              >
+                <svg
+                  className="w-6 h-6"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M6 18L18 6M6 6l12 12"
+                  />
+                </svg>
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Email cím *
+                </label>
+                <input
+                  type="email"
+                  value={googleAccountForm.email}
+                  onChange={(e) =>
+                    setGoogleAccountForm({
+                      ...googleAccountForm,
+                      email: e.target.value,
+                    })
+                  }
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                  placeholder="pelda@gmail.com"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Megjelenítendő név (opcionális)
+                </label>
+                <input
+                  type="text"
+                  value={googleAccountForm.name}
+                  onChange={(e) =>
+                    setGoogleAccountForm({
+                      ...googleAccountForm,
+                      name: e.target.value,
+                    })
+                  }
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                  placeholder="Pl. Munka, Személyes, stb."
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Szolgáltatás *
+                </label>
+                <select
+                  value={googleAccountForm.service}
+                  onChange={(e) =>
+                    setGoogleAccountForm({
+                      ...googleAccountForm,
+                      service: e.target.value,
+                    })
+                  }
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                >
+                  <option value="calendar">📅 Google Calendar</option>
+                  <option value="gmail">📧 Gmail</option>
+                </select>
+              </div>
+
+              <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
+                <p className="text-sm text-blue-800">
+                  <strong>🔒 Biztonság:</strong> A Google OAuth-ot használjuk a
+                  biztonságos bejelentkezéshez. Soha nem tároljuk a jelszavadat!
+                </p>
+              </div>
+            </div>
+
+            <div className="flex gap-3 mt-6">
+              <button
+                onClick={() => {
+                  setShowGoogleAccountModal(false);
+                  setGoogleAccountForm({
+                    email: "",
+                    name: "",
+                    service: "calendar",
+                  });
+                }}
+                className="flex-1 px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 font-medium"
+              >
+                Mégse
+              </button>
+              <button
+                onClick={addGoogleCalendarAccount}
+                className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium"
+              >
+                Hozzáadás
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {/* Km Modal */}
+      {showKmModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-lg shadow-xl max-w-md w-full p-6">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-xl font-bold text-gray-800">Km rögzítés</h3>
               <button
                 onClick={() => setShowKmModal(false)}
                 className="text-gray-500 hover:text-gray-700"
@@ -15809,12 +17915,29 @@ const toggleShoppingItem = (id, field) => {
             <div className="space-y-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Jármű: <strong>{selectedVehicle.name}</strong>
+                  Jármű
                 </label>
+                <p className="font-semibold text-gray-800">
+                  {selectedVehicle?.name}
+                </p>
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Aktuális km állás *
+                  Dátum
+                </label>
+                <input
+                  type="date"
+                  value={formData.date || ""}
+                  onChange={(e) =>
+                    setFormData({ ...formData, date: e.target.value })
+                  }
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Jelenlegi km állás:{" "}
+                  {selectedVehicle?.km?.toLocaleString() || 0} km
                 </label>
                 <input
                   type="number"
@@ -15823,21 +17946,30 @@ const toggleShoppingItem = (id, field) => {
                     setFormData({ ...formData, km: e.target.value })
                   }
                   className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
-                  placeholder={`Jelenlegi: ${selectedVehicle.km || 0} km`}
-                  autoFocus
+                  placeholder="Új km állás"
                 />
+                {formData.km &&
+                  parseInt(formData.km) > (selectedVehicle?.km || 0) && (
+                    <p className="text-sm text-green-600 mt-1">
+                      +
+                      {(
+                        parseInt(formData.km) - (selectedVehicle?.km || 0)
+                      ).toLocaleString()}{" "}
+                      km
+                    </p>
+                  )}
               </div>
             </div>
             <div className="mt-6 flex gap-3">
               <button
                 onClick={() => setShowKmModal(false)}
-                className="flex-1 px-4 py-3 border border-gray-300 rounded-lg hover:bg-gray-50"
+                className="flex-1 px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50"
               >
                 Mégse
               </button>
               <button
                 onClick={saveKm}
-                className="flex-1 px-4 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700"
+                className="flex-1 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700"
               >
                 Mentés
               </button>
@@ -15918,6 +18050,785 @@ const toggleShoppingItem = (id, field) => {
               <button
                 onClick={saveQuickService}
                 className="flex-1 px-4 py-3 bg-purple-600 text-white rounded-lg hover:bg-purple-700"
+              >
+                Mentés
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {/* Refuel Modal */}
+      {showRefuelModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-lg shadow-xl max-w-md w-full p-6">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-xl font-bold text-gray-800">
+                Tankolás rögzítés
+              </h3>
+              <button
+                onClick={() => setShowRefuelModal(false)}
+                className="text-gray-500 hover:text-gray-700"
+              >
+                <X size={24} />
+              </button>
+            </div>
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Jármű
+                </label>
+                <p className="font-semibold text-gray-800">
+                  {selectedVehicle?.name}
+                </p>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Dátum
+                </label>
+                <input
+                  type="date"
+                  value={formData.date || ""}
+                  onChange={(e) =>
+                    setFormData({ ...formData, date: e.target.value })
+                  }
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Km állás tankoláskor
+                </label>
+                <input
+                  type="number"
+                  value={formData.km || ""}
+                  onChange={(e) =>
+                    setFormData({ ...formData, km: e.target.value })
+                  }
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Liter *
+                  </label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    value={formData.liters || ""}
+                    onChange={(e) => {
+                      const liters = e.target.value;
+                      const cost = formData.cost;
+                      setFormData({
+                        ...formData,
+                        liters,
+                        pricePerLiter:
+                          cost && liters
+                            ? (parseFloat(cost) / parseFloat(liters)).toFixed(2)
+                            : "",
+                      });
+                    }}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Költség (Ft) *
+                  </label>
+                  <input
+                    type="number"
+                    value={formData.cost || ""}
+                    onChange={(e) => {
+                      const cost = e.target.value;
+                      const liters = formData.liters;
+                      setFormData({
+                        ...formData,
+                        cost,
+                        pricePerLiter:
+                          cost && liters
+                            ? (parseFloat(cost) / parseFloat(liters)).toFixed(2)
+                            : "",
+                      });
+                    }}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Liter ár (számított)
+                </label>
+                <input
+                  type="number"
+                  step="0.01"
+                  value={formData.pricePerLiter || ""}
+                  readOnly
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg bg-gray-100"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Üzemanyag típus
+                </label>
+                <select
+                  value={formData.fuelType || "benzin"}
+                  onChange={(e) =>
+                    setFormData({ ...formData, fuelType: e.target.value })
+                  }
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                >
+                  <option value="benzin">Benzin</option>
+                  <option value="dízel">Dízel</option>
+                  <option value="lpg">LPG</option>
+                  <option value="elektromos">Elektromos</option>
+                  <option value="hibrid">Hibrid</option>
+                </select>
+              </div>
+            </div>
+            <div className="mt-6 flex gap-3">
+              <button
+                onClick={() => setShowRefuelModal(false)}
+                className="flex-1 px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50"
+              >
+                Mégse
+              </button>
+              <button
+                onClick={saveRefuel}
+                className="flex-1 px-4 py-2 bg-orange-600 text-white rounded-lg hover:bg-orange-700"
+              >
+                Mentés
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {/* Stats Modal */}
+      {showStatsModal && selectedVehicle && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50 overflow-y-auto">
+          <div className="bg-white rounded-lg shadow-xl max-w-6xl w-full p-6 my-8 max-h-[90vh] overflow-y-auto">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-xl font-bold text-gray-800">
+                Statisztikák - {selectedVehicle.name}
+              </h3>
+              <button
+                onClick={() => setShowStatsModal(false)}
+                className="text-gray-500 hover:text-gray-700"
+              >
+                <X size={24} />
+              </button>
+            </div>
+
+            {/* Nézet váltó */}
+            <div className="flex gap-2 mb-6">
+              <button
+                onClick={() => setFormData({ ...formData, viewMode: "month" })}
+                className={`px-4 py-2 rounded-lg ${
+                  formData.viewMode === "month"
+                    ? "bg-blue-600 text-white"
+                    : "bg-gray-200 text-gray-700 hover:bg-gray-300"
+                }`}
+              >
+                Havi nézet
+              </button>
+              <button
+                onClick={() => setFormData({ ...formData, viewMode: "year" })}
+                className={`px-4 py-2 rounded-lg ${
+                  formData.viewMode === "year"
+                    ? "bg-blue-600 text-white"
+                    : "bg-gray-200 text-gray-700 hover:bg-gray-300"
+                }`}
+              >
+                Éves áttekintés
+              </button>
+            </div>
+
+            {formData.viewMode === "month" ? (
+              // HAVI NÉZET
+              <>
+                {/* Hónap navigáció */}
+                <div className="flex items-center justify-between mb-6 bg-gray-50 p-4 rounded-lg">
+                  <button
+                    onClick={() => {
+                      let newMonth = formData.currentMonth - 1;
+                      let newYear = formData.currentYear;
+                      if (newMonth < 1) {
+                        newMonth = 12;
+                        newYear--;
+                      }
+                      setFormData({
+                        ...formData,
+                        currentMonth: newMonth,
+                        currentYear: newYear,
+                      });
+                    }}
+                    className="p-2 hover:bg-gray-200 rounded"
+                  >
+                    ←
+                  </button>
+                  <h4 className="text-lg font-bold">
+                    {formData.currentYear}.{" "}
+                    {
+                      [
+                        "Január",
+                        "Február",
+                        "Március",
+                        "Április",
+                        "Május",
+                        "Június",
+                        "Július",
+                        "Augusztus",
+                        "Szeptember",
+                        "Október",
+                        "November",
+                        "December",
+                      ][formData.currentMonth - 1]
+                    }
+                  </h4>
+                  <button
+                    onClick={() => {
+                      let newMonth = formData.currentMonth + 1;
+                      let newYear = formData.currentYear;
+                      if (newMonth > 12) {
+                        newMonth = 1;
+                        newYear++;
+                      }
+                      setFormData({
+                        ...formData,
+                        currentMonth: newMonth,
+                        currentYear: newYear,
+                      });
+                    }}
+                    className="p-2 hover:bg-gray-200 rounded"
+                  >
+                    →
+                  </button>
+                </div>
+
+                {(() => {
+                  const stats = calculateMonthlyStats(
+                    selectedVehicle,
+                    formData.currentYear,
+                    formData.currentMonth
+                  );
+                  return (
+                    <>
+                      {/* Összesítő kártyák */}
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+                        <div className="bg-blue-50 p-4 rounded-lg">
+                          <p className="text-sm text-gray-600 mb-1">
+                            Megtett km
+                          </p>
+                          <p className="text-2xl font-bold text-blue-600">
+                            {stats.totalKm.toLocaleString()}
+                          </p>
+                        </div>
+                        <div className="bg-orange-50 p-4 rounded-lg">
+                          <p className="text-sm text-gray-600 mb-1">
+                            Tankolt liter
+                          </p>
+                          <p className="text-2xl font-bold text-orange-600">
+                            {stats.totalLiters.toFixed(1)} L
+                          </p>
+                        </div>
+                        <div className="bg-green-50 p-4 rounded-lg">
+                          <p className="text-sm text-gray-600 mb-1">
+                            Tankolási költség
+                          </p>
+                          <p className="text-2xl font-bold text-green-600">
+                            {stats.totalRefuelCost.toLocaleString()} Ft
+                          </p>
+                        </div>
+                        <div className="bg-purple-50 p-4 rounded-lg">
+                          <p className="text-sm text-gray-600 mb-1">
+                            Átlag fogyasztás
+                          </p>
+                          <p className="text-2xl font-bold text-purple-600">
+                            {stats.avgConsumption > 0
+                              ? stats.avgConsumption.toFixed(2) + " L/100km"
+                              : "-"}
+                          </p>
+                        </div>
+                      </div>
+
+                      {/* Km történet */}
+                      {stats.kmRecords.length > 0 && (
+                        <div className="mb-6">
+                          <h5 className="font-semibold text-gray-800 mb-3">
+                            Km rögzítések
+                          </h5>
+                          <div className="space-y-2">
+                            {stats.kmRecords.map((record, idx) => (
+                              <div
+                                key={idx}
+                                className="flex justify-between items-center p-3 bg-blue-50 rounded-lg"
+                              >
+                                <span className="text-sm text-gray-600">
+                                  {new Date(record.date).toLocaleDateString(
+                                    "hu-HU"
+                                  )}
+                                </span>
+                                <div className="text-right">
+                                  <span className="font-semibold text-gray-800">
+                                    {record.km.toLocaleString()} km
+                                  </span>
+                                  {record.kmDriven > 0 && (
+                                    <span className="text-xs text-green-600 ml-2">
+                                      +{record.kmDriven.toLocaleString()} km
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Tankolások */}
+                      {stats.refuels.length > 0 && (
+                        <div>
+                          <h5 className="font-semibold text-gray-800 mb-3">
+                            Tankolások
+                          </h5>
+                          <div className="space-y-2">
+                            {stats.refuels.map((refuel, idx) => (
+                              <div
+                                key={idx}
+                                className="p-3 bg-orange-50 rounded-lg"
+                              >
+                                <div className="flex justify-between items-center mb-1">
+                                  <span className="text-sm text-gray-600">
+                                    {new Date(refuel.date).toLocaleDateString(
+                                      "hu-HU"
+                                    )}
+                                  </span>
+                                  <span className="font-semibold text-orange-600">
+                                    {refuel.cost.toLocaleString()} Ft
+                                  </span>
+                                </div>
+                                <div className="text-xs text-gray-600">
+                                  {refuel.liters.toFixed(1)} L •{" "}
+                                  {refuel.pricePerLiter.toFixed(0)} Ft/L •
+                                  {refuel.km.toLocaleString()} km •{" "}
+                                  {refuel.fuelType}
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {stats.kmRecords.length === 0 &&
+                        stats.refuels.length === 0 && (
+                          <div className="text-center text-gray-500 py-8">
+                            Ebben a hónapban még nincs rögzített adat
+                          </div>
+                        )}
+                    </>
+                  );
+                })()}
+              </>
+            ) : (
+              // ÉVES ÁTTEKINTÉS
+              <>
+                {/* Év navigáció */}
+                <div className="flex items-center justify-between mb-6 bg-gray-50 p-4 rounded-lg">
+                  <button
+                    onClick={() =>
+                      setFormData({
+                        ...formData,
+                        currentYear: formData.currentYear - 1,
+                      })
+                    }
+                    className="p-2 hover:bg-gray-200 rounded"
+                  >
+                    ←
+                  </button>
+                  <h4 className="text-lg font-bold">{formData.currentYear}</h4>
+                  <button
+                    onClick={() =>
+                      setFormData({
+                        ...formData,
+                        currentYear: formData.currentYear + 1,
+                      })
+                    }
+                    className="p-2 hover:bg-gray-200 rounded"
+                  >
+                    →
+                  </button>
+                </div>
+
+                {(() => {
+                  const yearStats = calculateYearlyStats(
+                    selectedVehicle,
+                    formData.currentYear
+                  );
+                  return (
+                    <>
+                      {/* Éves összesítő */}
+                      <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-6">
+                        <div className="bg-blue-50 p-4 rounded-lg">
+                          <p className="text-sm text-gray-600 mb-1">
+                            Összes km
+                          </p>
+                          <p className="text-2xl font-bold text-blue-600">
+                            {yearStats.totals.totalKm.toLocaleString()}
+                          </p>
+                        </div>
+                        <div className="bg-orange-50 p-4 rounded-lg">
+                          <p className="text-sm text-gray-600 mb-1">
+                            Tankolt liter
+                          </p>
+                          <p className="text-2xl font-bold text-orange-600">
+                            {yearStats.totals.totalLiters.toFixed(0)} L
+                          </p>
+                        </div>
+                        <div className="bg-green-50 p-4 rounded-lg">
+                          <p className="text-sm text-gray-600 mb-1">
+                            Tankolási költség
+                          </p>
+                          <p className="text-2xl font-bold text-green-600">
+                            {yearStats.totals.totalRefuelCost.toLocaleString()}{" "}
+                            Ft
+                          </p>
+                        </div>
+                        <div className="bg-purple-50 p-4 rounded-lg">
+                          <p className="text-sm text-gray-600 mb-1">
+                            Átlag fogyasztás
+                          </p>
+                          <p className="text-2xl font-bold text-purple-600">
+                            {yearStats.totals.avgConsumption > 0
+                              ? yearStats.totals.avgConsumption.toFixed(2) +
+                                " L/100km"
+                              : "-"}
+                          </p>
+                        </div>
+                        <div className="bg-pink-50 p-4 rounded-lg">
+                          <p className="text-sm text-gray-600 mb-1">
+                            Tankolások száma
+                          </p>
+                          <p className="text-2xl font-bold text-pink-600">
+                            {yearStats.totals.refuelCount}
+                          </p>
+                        </div>
+                      </div>
+
+                      {/* Havi bontás táblázat */}
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-sm">
+                          <thead className="bg-gray-100">
+                            <tr>
+                              <th className="px-4 py-2 text-left">Hónap</th>
+                              <th className="px-4 py-2 text-right">Km</th>
+                              <th className="px-4 py-2 text-right">
+                                Tankolás (db)
+                              </th>
+                              <th className="px-4 py-2 text-right">Liter</th>
+                              <th className="px-4 py-2 text-right">Költség</th>
+                              <th className="px-4 py-2 text-right">Átlag ár</th>
+                              <th className="px-4 py-2 text-right">
+                                Fogyasztás
+                              </th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {[
+                              "Január",
+                              "Február",
+                              "Március",
+                              "Április",
+                              "Május",
+                              "Június",
+                              "Július",
+                              "Augusztus",
+                              "Szeptember",
+                              "Október",
+                              "November",
+                              "December",
+                            ].map((month, idx) => {
+                              const monthStats = yearStats.months[idx];
+                              const hasData =
+                                monthStats.totalKm > 0 ||
+                                monthStats.refuels.length > 0;
+                              return (
+                                <tr
+                                  key={idx}
+                                  className={`border-t ${
+                                    hasData
+                                      ? "bg-white"
+                                      : "bg-gray-50 text-gray-400"
+                                  }`}
+                                >
+                                  <td className="px-4 py-2">{month}</td>
+                                  <td className="px-4 py-2 text-right font-semibold">
+                                    {monthStats.totalKm > 0
+                                      ? monthStats.totalKm.toLocaleString()
+                                      : "-"}
+                                  </td>
+                                  <td className="px-4 py-2 text-right">
+                                    {monthStats.refuels.length > 0
+                                      ? monthStats.refuels.length
+                                      : "-"}
+                                  </td>
+                                  <td className="px-4 py-2 text-right">
+                                    {monthStats.totalLiters > 0
+                                      ? monthStats.totalLiters.toFixed(1)
+                                      : "-"}
+                                  </td>
+                                  <td className="px-4 py-2 text-right font-semibold text-green-600">
+                                    {monthStats.totalRefuelCost > 0
+                                      ? monthStats.totalRefuelCost.toLocaleString() +
+                                        " Ft"
+                                      : "-"}
+                                  </td>
+                                  <td className="px-4 py-2 text-right">
+                                    {monthStats.avgPricePerLiter > 0
+                                      ? monthStats.avgPricePerLiter.toFixed(0) +
+                                        " Ft/L"
+                                      : "-"}
+                                  </td>
+                                  <td className="px-4 py-2 text-right">
+                                    {monthStats.avgConsumption > 0
+                                      ? monthStats.avgConsumption.toFixed(2) +
+                                        " L/100km"
+                                      : "-"}
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                    </>
+                  );
+                })()}
+              </>
+            )}
+          </div>
+        </div>
+      )}
+      {/* Order Modal */}
+      {showOrderModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50 overflow-y-auto">
+          <div className="bg-white rounded-lg shadow-xl max-w-2xl w-full p-6 my-8 max-h-[90vh] overflow-y-auto">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-xl font-bold text-gray-800">
+                {editingItem ? "Rendelés szerkesztése" : "Új rendelés"}
+              </h3>
+              <button
+                onClick={() => setShowOrderModal(false)}
+                className="text-gray-500 hover:text-gray-700"
+              >
+                <X size={24} />
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              {/* Tétel neve */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Tétel megnevezése *
+                </label>
+                <input
+                  type="text"
+                  value={formData.itemName || ""}
+                  onChange={(e) =>
+                    setFormData({ ...formData, itemName: e.target.value })
+                  }
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                  placeholder="pl. iPhone 15 Pro"
+                />
+              </div>
+
+              {/* Webshop és Ár */}
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Webshop neve
+                  </label>
+                  <input
+                    type="text"
+                    value={formData.webshop || ""}
+                    onChange={(e) =>
+                      setFormData({ ...formData, webshop: e.target.value })
+                    }
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                    placeholder="pl. eMAG"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Ár (Ft)
+                  </label>
+                  <input
+                    type="number"
+                    value={formData.price || ""}
+                    onChange={(e) =>
+                      setFormData({ ...formData, price: e.target.value })
+                    }
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                    placeholder="0"
+                  />
+                </div>
+              </div>
+
+              {/* Dátumok */}
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Rendelés dátuma *
+                  </label>
+                  <input
+                    type="date"
+                    value={formData.orderDate || ""}
+                    onChange={(e) =>
+                      setFormData({ ...formData, orderDate: e.target.value })
+                    }
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Várható szállítás
+                  </label>
+                  <input
+                    type="date"
+                    value={formData.expectedDelivery || ""}
+                    onChange={(e) =>
+                      setFormData({
+                        ...formData,
+                        expectedDelivery: e.target.value,
+                      })
+                    }
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+              </div>
+
+              {/* Szállítási cím típusa */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Szállítási mód
+                </label>
+                <select
+                  value={formData.deliveryType || "cím"}
+                  onChange={(e) =>
+                    setFormData({ ...formData, deliveryType: e.target.value })
+                  }
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                >
+                  <option value="cím">Címre szállítás</option>
+                  <option value="csomagpont">Csomagpont</option>
+                  <option value="csomagautomata">Csomagautomata</option>
+                  <option value="postahivatal">Postahivatal</option>
+                  <option value="személyes átvétel">Személyes átvétel</option>
+                </select>
+              </div>
+
+              {/* Szállítási cím */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Szállítási cím / Átvételi hely
+                </label>
+                <textarea
+                  value={formData.deliveryAddress || ""}
+                  onChange={(e) =>
+                    setFormData({
+                      ...formData,
+                      deliveryAddress: e.target.value,
+                    })
+                  }
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                  placeholder="pl. 1234 Budapest, Fő utca 1."
+                  rows="2"
+                />
+              </div>
+
+              {/* Tracking szám */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Csomagkövetési szám
+                </label>
+                <input
+                  type="text"
+                  value={formData.trackingNumber || ""}
+                  onChange={(e) =>
+                    setFormData({ ...formData, trackingNumber: e.target.value })
+                  }
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                  placeholder="pl. MPL123456789"
+                />
+              </div>
+
+              {/* Státusz */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Státusz
+                </label>
+                <select
+                  value={formData.status || "feldolgozás alatt"}
+                  onChange={(e) =>
+                    setFormData({ ...formData, status: e.target.value })
+                  }
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                >
+                  <option value="feldolgozás alatt">
+                    🔄 Feldolgozás alatt
+                  </option>
+                  <option value="szállítás alatt">🚚 Szállítás alatt</option>
+                  <option value="csomagautomatában">
+                    📦 Csomagautomatában
+                  </option>
+                  <option value="kézbesítve">✅ Kézbesítve</option>
+                </select>
+              </div>
+
+              {/* Utánvét */}
+              <div>
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={formData.cashOnDelivery || false}
+                    onChange={(e) =>
+                      setFormData({
+                        ...formData,
+                        cashOnDelivery: e.target.checked,
+                      })
+                    }
+                    className="w-5 h-5 text-orange-600 rounded"
+                  />
+                  <span className="text-sm font-medium text-gray-700">
+                    Utánvétes fizetés
+                  </span>
+                </label>
+              </div>
+
+              {/* Megjegyzések */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Megjegyzések
+                </label>
+                <textarea
+                  value={formData.notes || ""}
+                  onChange={(e) =>
+                    setFormData({ ...formData, notes: e.target.value })
+                  }
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                  placeholder="Egyéb megjegyzések..."
+                  rows="3"
+                />
+              </div>
+            </div>
+
+            <div className="mt-6 flex gap-3">
+              <button
+                onClick={() => setShowOrderModal(false)}
+                className="flex-1 px-4 py-3 border border-gray-300 rounded-lg hover:bg-gray-50"
+              >
+                Mégse
+              </button>
+              <button
+                onClick={saveOrder}
+                className="flex-1 px-4 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
               >
                 Mentés
               </button>
@@ -16541,7 +19452,9 @@ const toggleShoppingItem = (id, field) => {
                 <X size={24} />
               </button>
             </div>
+
             <div className="space-y-4">
+              {/* Számla neve */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
                   Számla neve *
@@ -16557,6 +19470,7 @@ const toggleShoppingItem = (id, field) => {
                 />
               </div>
 
+              {/* Típus */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
                   Típus
@@ -16576,6 +19490,7 @@ const toggleShoppingItem = (id, field) => {
                 </select>
               </div>
 
+              {/* Egyenleg és Valuta */}
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -16609,70 +19524,48 @@ const toggleShoppingItem = (id, field) => {
                     <option value="USD">$ (USD)</option>
                   </select>
                 </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Valuta
-                  </label>
-                  <select
-                    value={formData.currency || "HUF"}
-                    onChange={(e) =>
-                      setFormData({ ...formData, currency: e.target.value })
-                    }
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
-                  >
-                    <option value="HUF">HUF (Ft)</option>
-                    <option value="EUR">EUR (€)</option>
-                    <option value="USD">USD ($)</option>
-                  </select>
-                </div>
-
-                {/* ÚJ RÉSZ KEZDETE */}
-                <div className="col-span-2 border-t pt-4">
-                  <label className="flex items-center gap-3 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={formData.isShared !== false}
-                      onChange={(e) =>
-                        setFormData({
-                          ...formData,
-                          isShared: e.target.checked,
-                        })
-                      }
-                      className="w-5 h-5 text-blue-600 rounded"
-                    />
-                    <div>
-                      <span className="text-sm font-medium text-gray-700">
-                        Megosztott számla
-                      </span>
-                      <p className="text-xs text-gray-500 mt-1">
-                        Ha kikapcsolod, csak te látod ezt a számlát és a hozzá
-                        tartozó tranzakciókat
-                      </p>
-                    </div>
-                  </label>
-
-                  {formData.isShared === false && (
-                    <div className="mt-3 p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
-                      <div className="flex items-start gap-2">
-                        <AlertCircle
-                          size={18}
-                          className="text-yellow-600 mt-0.5"
-                        />
-                        <div className="text-sm text-yellow-800">
-                          <p className="font-semibold">Privát számla</p>
-                          <p className="mt-1">
-                            Ez a számla és az ehhez tartozó tranzakciók csak
-                            neked láthatók. Nem jelennek meg a családi
-                            kimutatásokban.
-                          </p>
-                        </div>
-                      </div>
-                    </div>
-                  )}
-                </div>
-                {/* ÚJ RÉSZ VÉGE */}
               </div>
 
+              {/* ========== MEGOSZTÁS / PRIVÁT OPCIÓ ========== */}
+              <div className="border-t pt-4">
+                <label className="flex items-center gap-3 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={formData.isShared === true}
+                    onChange={(e) =>
+                      setFormData({ ...formData, isShared: e.target.checked })
+                    }
+                    className="w-5 h-5 text-blue-600 rounded"
+                  />
+                  <div>
+                    <span className="text-sm font-medium text-gray-700">
+                      Megosztott számla
+                    </span>
+                    <p className="text-xs text-gray-500 mt-1">
+                      Családtagok is láthatják és használhatják
+                    </p>
+                  </div>
+                </label>
+
+                {formData.isShared === false && (
+                  <div className="mt-3 p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
+                    <div className="flex items-start gap-2">
+                      <AlertCircle
+                        size={18}
+                        className="text-yellow-600 mt-0.5"
+                      />
+                      <div className="text-sm text-yellow-800">
+                        <p className="font-semibold">Privát számla</p>
+                        <p className="mt-1">
+                          Csak te látod ezt a számlát és a tranzakcióit
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Alszámlák */}
               <div className="border-t pt-4">
                 <h4 className="font-semibold text-gray-800 mb-3 text-sm">
                   Alszámlák
@@ -16737,6 +19630,7 @@ const toggleShoppingItem = (id, field) => {
                 </button>
               </div>
             </div>
+
             <div className="mt-6 flex gap-3">
               <button
                 onClick={() => setShowAccountModal(false)}
@@ -17289,8 +20183,6 @@ const toggleShoppingItem = (id, field) => {
           </div>
         </div>
       )}
-
-      {/*//HETI MENÜ MODAL //*/}
       {showWeeklyMenuModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50 overflow-y-auto">
           <div className="bg-white rounded-lg shadow-xl max-w-6xl w-full p-6 my-8 max-h-[90vh] overflow-y-auto">
@@ -17306,7 +20198,6 @@ const toggleShoppingItem = (id, field) => {
               </button>
             </div>
 
-            {/* Hét navigáció */}
             <div className="flex items-center justify-between mb-6 bg-gray-50 p-4 rounded-lg">
               <button
                 onClick={() => setCurrentWeekOffset(currentWeekOffset - 1)}
@@ -17336,7 +20227,6 @@ const toggleShoppingItem = (id, field) => {
               </button>
             </div>
 
-            {/* Napok */}
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-6">
               {[
                 "Hétfő",
@@ -17400,7 +20290,6 @@ const toggleShoppingItem = (id, field) => {
               })}
             </div>
 
-            {/* Akciógombok */}
             <div className="flex gap-3 pt-4 border-t">
               <button
                 onClick={() => setShowWeeklyMenuModal(false)}
@@ -17419,7 +20308,6 @@ const toggleShoppingItem = (id, field) => {
           </div>
         </div>
       )}
-      {/*//OKOSRECEPT KERESŐ MODAL */}
       {showSmartSearchModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50 overflow-y-auto">
           <div className="bg-white rounded-lg shadow-xl max-w-4xl w-full p-6 my-8 max-h-[90vh] overflow-y-auto">
@@ -17436,11 +20324,10 @@ const toggleShoppingItem = (id, field) => {
               </button>
             </div>
 
-            {/* Keresési kritériumok */}
             <div className="space-y-4 mb-6">
               <div className="bg-orange-50 border border-orange-200 rounded-lg p-4">
                 <p className="text-sm text-orange-800 mb-3">
-                  🤖 Add meg, milyen alapanyagaid vannak, és az AI megtalálja a
+                  🤖 Add meg, milyen alapanyagaid vannak, és találd meg a
                   legjobb recepteket számodra!
                 </p>
 
@@ -17549,7 +20436,6 @@ const toggleShoppingItem = (id, field) => {
               </div>
             </div>
 
-            {/* Találatok */}
             {smartSearchResults.length > 0 && (
               <div>
                 <h4 className="font-semibold text-gray-800 mb-3">
@@ -17594,7 +20480,7 @@ const toggleShoppingItem = (id, field) => {
           </div>
         </div>
       )}
-      {/*//Bevásárló lista MODAL */}
+
       {showShoppingListModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50 overflow-y-auto">
           <div className="bg-white rounded-lg shadow-xl max-w-2xl w-full p-6 my-8 max-h-[90vh] overflow-y-auto">
@@ -17693,746 +20579,6 @@ const toggleShoppingItem = (id, field) => {
                 </button>
               </div>
             </div>
-          </div>
-        </div>
-      )}
-      {/* Fueling Modal (Gyors tankolás) */}
-      {showFuelingModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-lg shadow-xl max-w-md w-full p-6">
-            <div className="flex justify-between items-center mb-4">
-              <h3 className="text-xl font-bold text-gray-800">
-                Tankolás - {selectedVehicle?.name}
-              </h3>
-              <button
-                onClick={() => setShowFuelingModal(false)}
-                className="text-gray-500 hover:text-gray-700"
-              >
-                <X size={24} />
-              </button>
-            </div>
-
-            <div className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Dátum
-                </label>
-                <input
-                  type="date"
-                  value={tempFueling.date}
-                  onChange={(e) =>
-                    setTempFueling({ ...tempFueling, date: e.target.value })
-                  }
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg"
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Km állás (opcionális)
-                </label>
-                <input
-                  type="number"
-                  value={tempFueling.km}
-                  onChange={(e) =>
-                    setTempFueling({ ...tempFueling, km: e.target.value })
-                  }
-                  placeholder={`Jelenlegi: ${selectedVehicle?.km || 0} km`}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg"
-                />
-              </div>
-
-              <div className="bg-blue-50 p-4 rounded-lg space-y-3">
-                <p className="text-sm text-gray-700 font-medium">
-                  Adj meg 2 értéket, a 3. automatikusan számolódik:
-                </p>
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Tankolt mennyiség (liter) *
-                  </label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    value={tempFueling.liters}
-                    onChange={(e) => handleFuelingLitersChange(e.target.value)}
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Egységár (Ft/liter)
-                  </label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    value={tempFueling.pricePerLiter}
-                    onChange={(e) =>
-                      handleFuelingPricePerLiterChange(e.target.value)
-                    }
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Fizetett összeg (Ft) *
-                  </label>
-                  <input
-                    type="number"
-                    value={tempFueling.totalPrice}
-                    onChange={(e) =>
-                      handleFuelingTotalPriceChange(e.target.value)
-                    }
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg"
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Benzinkút
-                </label>
-                <input
-                  type="text"
-                  value={tempFueling.station}
-                  onChange={(e) =>
-                    setTempFueling({ ...tempFueling, station: e.target.value })
-                  }
-                  placeholder="pl. MOL, Shell"
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg"
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Megjegyzés
-                </label>
-                <textarea
-                  value={tempFueling.notes}
-                  onChange={(e) =>
-                    setTempFueling({ ...tempFueling, notes: e.target.value })
-                  }
-                  rows="2"
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg"
-                />
-              </div>
-            </div>
-
-            <div className="mt-6 flex gap-3">
-              <button
-                onClick={() => setShowFuelingModal(false)}
-                className="flex-1 px-4 py-3 border border-gray-300 rounded-lg hover:bg-gray-50"
-              >
-                Mégse
-              </button>
-              <button
-                onClick={saveFueling}
-                className="flex-1 px-4 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
-              >
-                Mentés
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-      {/* Edit Tire Modal (Profilmélység szerkesztés) */}
-      {showEditTireModal && selectedTire && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-lg shadow-xl max-w-md w-full p-6">
-            <div className="flex justify-between items-center mb-4">
-              <h3 className="text-xl font-bold text-gray-800">
-                Profilmélység frissítése
-              </h3>
-              <button
-                onClick={() => setShowEditTireModal(false)}
-                className="text-gray-500 hover:text-gray-700"
-              >
-                <X size={24} />
-              </button>
-            </div>
-
-            <div className="space-y-4">
-              <div className="bg-gray-50 p-4 rounded-lg">
-                <p className="text-sm text-gray-600 mb-1">Gumi:</p>
-                <p className="font-semibold text-gray-800">
-                  {selectedTire.position} - {selectedTire.type}
-                </p>
-                <p className="text-sm text-gray-600 mt-1">
-                  {selectedTire.brand} {selectedTire.size}
-                </p>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Új profilmélység (mm) *
-                </label>
-                <input
-                  type="number"
-                  step="0.1"
-                  value={selectedTire.treadDepth || ""}
-                  onChange={(e) =>
-                    setSelectedTire({
-                      ...selectedTire,
-                      treadDepth: e.target.value,
-                    })
-                  }
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg"
-                  placeholder="pl. 5.5"
-                />
-                <p className="text-xs text-gray-500 mt-1">
-                  Minimális: 1.6 mm • Ajánlott csere: 3 mm alatt
-                </p>
-              </div>
-
-              {selectedTire.treadDepth &&
-                parseFloat(selectedTire.treadDepth) <= 1.6 && (
-                  <div className="bg-red-50 border border-red-200 p-3 rounded-lg">
-                    <p className="text-sm text-red-800 font-semibold">
-                      ⚠️ Minimális profilmélység! Azonnali csere szükséges!
-                    </p>
-                  </div>
-                )}
-
-              {selectedTire.treadDepth &&
-                parseFloat(selectedTire.treadDepth) > 1.6 &&
-                parseFloat(selectedTire.treadDepth) <= 3 && (
-                  <div className="bg-yellow-50 border border-yellow-200 p-3 rounded-lg">
-                    <p className="text-sm text-yellow-800">
-                      ⚠️ Alacsony profilmélység. Hamarosan csere ajánlott.
-                    </p>
-                  </div>
-                )}
-            </div>
-
-            <div className="mt-6 flex gap-3">
-              <button
-                onClick={() => setShowEditTireModal(false)}
-                className="flex-1 px-4 py-3 border border-gray-300 rounded-lg hover:bg-gray-50"
-              >
-                Mégse
-              </button>
-              <button
-                onClick={saveEditedTire}
-                className="flex-1 px-4 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
-              >
-                Mentés
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-      {/* Budget Modal */}
-      {showBudgetModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50 overflow-y-auto">
-          <div className="bg-white rounded-lg shadow-xl max-w-2xl w-full p-6 my-8 max-h-[90vh] overflow-y-auto">
-            <div className="flex justify-between items-center mb-4">
-              <h3 className="text-xl font-bold text-gray-800">
-                {editingItem ? "Költségvetés szerkesztése" : "Új költségvetés"}
-              </h3>
-              <button
-                onClick={() => setShowBudgetModal(false)}
-                className="text-gray-500 hover:text-gray-700"
-              >
-                <X size={24} />
-              </button>
-            </div>
-
-            <div className="space-y-6">
-              {/* Típus */}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Időszak típusa
-                </label>
-                <div className="grid grid-cols-2 gap-3">
-                  <button
-                    onClick={() => setFormData({ ...formData, type: "month" })}
-                    className={`p-3 rounded-lg border-2 transition ${
-                      formData.type === "month"
-                        ? "border-blue-600 bg-blue-50"
-                        : "border-gray-300 hover:border-gray-400"
-                    }`}
-                  >
-                    <div className="text-center">
-                      <Calendar size={24} className="mx-auto mb-1" />
-                      <span className="font-semibold">Havi</span>
-                    </div>
-                  </button>
-                  <button
-                    onClick={() => setFormData({ ...formData, type: "year" })}
-                    className={`p-3 rounded-lg border-2 transition ${
-                      formData.type === "year"
-                        ? "border-blue-600 bg-blue-50"
-                        : "border-gray-300 hover:border-gray-400"
-                    }`}
-                  >
-                    <div className="text-center">
-                      <Calendar size={24} className="mx-auto mb-1" />
-                      <span className="font-semibold">Éves</span>
-                    </div>
-                  </button>
-                </div>
-              </div>
-
-              {/* Kezdő dátum */}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Kezdő dátum
-                </label>
-                <input
-                  type="date"
-                  value={formData.startDate || ""}
-                  onChange={(e) =>
-                    setFormData({ ...formData, startDate: e.target.value })
-                  }
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
-                />
-              </div>
-
-              {/* Teljes költségvetés */}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Teljes költségvetés (Ft) *
-                </label>
-                <input
-                  type="number"
-                  value={formData.totalBudget || ""}
-                  onChange={(e) =>
-                    setFormData({ ...formData, totalBudget: e.target.value })
-                  }
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
-                  placeholder="500000"
-                />
-              </div>
-
-              {/* Kategóriánkénti limitek */}
-              <div>
-                <div className="flex justify-between items-center mb-3">
-                  <h4 className="font-semibold text-gray-800">
-                    Kategóriánkénti limitek
-                  </h4>
-                  <button
-                    onClick={addBudgetCategory}
-                    className="text-sm text-blue-600 hover:text-blue-700 flex items-center gap-1"
-                  >
-                    <Plus size={16} /> Kategória hozzáadása
-                  </button>
-                </div>
-
-                {formData.categories && formData.categories.length > 0 ? (
-                  <div className="space-y-2">
-                    {formData.categories.map((cat) => (
-                      <div
-                        key={cat.id}
-                        className="flex items-center justify-between p-3 bg-gray-50 rounded-lg"
-                      >
-                        <div>
-                          <span className="font-medium text-gray-800">
-                            {cat.name}
-                          </span>
-                          <span className="text-sm text-gray-600 ml-3">
-                            {parseFloat(cat.limit).toLocaleString()} Ft
-                          </span>
-                        </div>
-                        <button
-                          onClick={() => removeBudgetCategory(cat.id)}
-                          className="text-red-600 hover:text-red-700"
-                        >
-                          <Trash2 size={16} />
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <p className="text-sm text-gray-500 italic">
-                    Még nem adtál hozzá kategóriát. A kategóriánkénti limitek
-                    segítenek részletesen nyomon követni a költéseket.
-                  </p>
-                )}
-              </div>
-            </div>
-
-            <div className="mt-6 flex gap-3">
-              <button
-                onClick={() => setShowBudgetModal(false)}
-                className="flex-1 px-4 py-3 border border-gray-300 rounded-lg hover:bg-gray-50"
-              >
-                Mégse
-              </button>
-              <button
-                onClick={saveBudget}
-                className="flex-1 px-4 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
-              >
-                Mentés
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-      {/* Import Modal */}
-      {showImportModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50 overflow-y-auto">
-          <div className="bg-white rounded-lg shadow-xl max-w-4xl w-full p-6 my-8 max-h-[90vh] overflow-y-auto">
-            <div className="flex justify-between items-center mb-4">
-              <h3 className="text-xl font-bold text-gray-800">
-                Tranzakciók importálása
-              </h3>
-              <button
-                onClick={() => {
-                  setShowImportModal(false);
-                  setImportStep(1);
-                  setImportedData([]);
-                  setDetectedBank(null);
-                }}
-                className="text-gray-500 hover:text-gray-700"
-              >
-                <X size={24} />
-              </button>
-            </div>
-
-            {/* Léptetők */}
-            <div className="mb-6">
-              <div className="flex items-center justify-between">
-                {[
-                  { step: 1, label: "Fájl feltöltés" },
-                  { step: 2, label: "Előnézet" },
-                  { step: 3, label: "Importálás" },
-                ].map((item, idx) => (
-                  <div key={item.step} className="flex items-center flex-1">
-                    <div
-                      className={`flex items-center justify-center w-8 h-8 rounded-full ${
-                        importStep >= item.step
-                          ? "bg-blue-600 text-white"
-                          : "bg-gray-300 text-gray-600"
-                      }`}
-                    >
-                      {item.step}
-                    </div>
-                    <span
-                      className={`ml-2 text-sm ${
-                        importStep >= item.step
-                          ? "text-gray-800 font-semibold"
-                          : "text-gray-500"
-                      }`}
-                    >
-                      {item.label}
-                    </span>
-                    {idx < 2 && (
-                      <div
-                        className={`flex-1 h-1 mx-4 ${
-                          importStep > item.step ? "bg-blue-600" : "bg-gray-300"
-                        }`}
-                      />
-                    )}
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            {/* 1. LÉPÉS: Fájl feltöltés */}
-            {importStep === 1 && (
-              <div className="space-y-6">
-                <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-                  <h4 className="font-semibold text-blue-900 mb-2">
-                    📊 Támogatott bankok és formátumok
-                  </h4>
-                  <ul className="text-sm text-blue-800 space-y-1">
-                    <li>
-                      • <strong>Revolut</strong> - Account → Statements → Export
-                      → CSV
-                    </li>
-                    <li>
-                      • <strong>OTP Bank</strong> - Lekérdezések →
-                      Tranzakciólista → Export CSV
-                    </li>
-                    <li>
-                      • <strong>Erste Bank</strong> - Transactions → Export →
-                      CSV
-                    </li>
-                    <li>
-                      • <strong>K&H Bank</strong> - Számlatörténet → Export →
-                      CSV
-                    </li>
-                    <li>
-                      • <strong>Bármilyen bank</strong> - CSV formátum (Dátum,
-                      Leírás, Összeg oszlopokkal)
-                    </li>
-                  </ul>
-                </div>
-
-                <div className="border-2 border-dashed border-gray-300 rounded-lg p-8">
-                  <input
-                    type="file"
-                    accept=".csv"
-                    onChange={(e) => {
-                      const file = e.target.files[0];
-                      if (file) {
-                        handleFileUpload(file);
-                      }
-                    }}
-                    className="hidden"
-                    id="import-file"
-                  />
-                  <label
-                    htmlFor="import-file"
-                    className="flex flex-col items-center cursor-pointer"
-                  >
-                    <Upload size={48} className="text-gray-400 mb-3" />
-                    <span className="text-lg font-semibold text-gray-700 mb-1">
-                      Kattints a fájl kiválasztásához
-                    </span>
-                    <span className="text-sm text-gray-500">
-                      CSV fájl (max 10MB)
-                    </span>
-                    <span className="text-xs text-gray-400 mt-2">
-                      Excel fájlokat előbb mentsd el CSV formátumban
-                    </span>
-                  </label>
-                </div>
-
-                <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
-                  <h4 className="font-semibold text-yellow-900 mb-2">
-                    💡 Tippek az importáláshoz
-                  </h4>
-                  <ul className="text-sm text-yellow-800 space-y-1">
-                    <li>
-                      • Exportáld a tranzakciókat a banki alkalmazásból
-                      (általában Beállítások → Export)
-                    </li>
-                    <li>
-                      • A legtöbb bank CSV vagy Excel formátumban exportál
-                    </li>
-                    <li>
-                      • Az importálás automatikusan felismeri a bank formátumát
-                    </li>
-                    <li>• A duplikált tranzakciókat automatikusan kiszűrjük</li>
-                  </ul>
-                </div>
-              </div>
-            )}
-
-            {/* 2. LÉPÉS: Előnézet */}
-            {importStep === 2 && (
-              <div className="space-y-4">
-                <div className="bg-green-50 border border-green-200 rounded-lg p-4">
-                  <div className="flex items-center gap-2 mb-2">
-                    <CheckCircle size={20} className="text-green-600" />
-                    <h4 className="font-semibold text-green-900">
-                      Bank felismerve: {detectedBank?.bank}
-                    </h4>
-                  </div>
-                  <p className="text-sm text-green-800">
-                    {importedData.length} tranzakció található a fájlban
-                  </p>
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Melyik számlára importálod? *
-                  </label>
-                  <select
-                    value={importAccount || ""}
-                    onChange={(e) => setImportAccount(e.target.value)}
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
-                  >
-                    <option value="">Válassz számlát...</option>
-                    {(() => {
-                      const accountsSource = Array.isArray(data?.accounts)
-                        ? data.accounts
-                        : Array.isArray(data?.finances?.accounts)
-                        ? data.finances.accounts
-                        : [];
-
-                      return accountsSource
-                        .filter(
-                          (acc) =>
-                            acc.isShared !== false ||
-                            acc.ownerId === currentUser?.uid
-                        )
-                        .map((account) => (
-                          <option key={account.id} value={account.id}>
-                            {account.name} ({account.balance?.toLocaleString()}{" "}
-                            {account.currency || "HUF"})
-                          </option>
-                        ));
-                    })()}
-                  </select>
-                </div>
-
-                <div>
-                  <h4 className="font-semibold text-gray-800 mb-3">
-                    Tranzakciók előnézete (első 10)
-                  </h4>
-                  <div className="border rounded-lg overflow-hidden">
-                    <div className="overflow-x-auto max-h-96">
-                      <table className="min-w-full divide-y divide-gray-200">
-                        <thead className="bg-gray-50">
-                          <tr>
-                            <th className="px-4 py-2 text-left text-xs font-medium text-gray-500">
-                              Dátum
-                            </th>
-                            <th className="px-4 py-2 text-left text-xs font-medium text-gray-500">
-                              Leírás
-                            </th>
-                            <th className="px-4 py-2 text-left text-xs font-medium text-gray-500">
-                              Kategória
-                            </th>
-                            <th className="px-4 py-2 text-right text-xs font-medium text-gray-500">
-                              Összeg
-                            </th>
-                            <th className="px-4 py-2 text-center text-xs font-medium text-gray-500">
-                              Típus
-                            </th>
-                          </tr>
-                        </thead>
-                        <tbody className="bg-white divide-y divide-gray-200">
-                          {importedData.slice(0, 10).map((row, idx) => {
-                            const parsed = parseImportedTransaction(
-                              row,
-                              detectedBank.mapping
-                            );
-                            return (
-                              <tr key={idx}>
-                                <td className="px-4 py-2 text-sm text-gray-900">
-                                  {parsed.date}
-                                </td>
-                                <td className="px-4 py-2 text-sm text-gray-900 max-w-xs truncate">
-                                  {parsed.description}
-                                </td>
-                                <td className="px-4 py-2 text-sm">
-                                  <span className="px-2 py-1 bg-blue-100 text-blue-800 rounded text-xs">
-                                    {parsed.category}
-                                  </span>
-                                </td>
-                                <td className="px-4 py-2 text-sm text-right font-semibold">
-                                  {parsed.amount.toLocaleString()}{" "}
-                                  {parsed.currency}
-                                </td>
-                                <td className="px-4 py-2 text-center">
-                                  {parsed.type === "income" ? (
-                                    <span className="px-2 py-1 bg-green-100 text-green-800 rounded text-xs">
-                                      Bevétel
-                                    </span>
-                                  ) : (
-                                    <span className="px-2 py-1 bg-red-100 text-red-800 rounded text-xs">
-                                      Kiadás
-                                    </span>
-                                  )}
-                                </td>
-                              </tr>
-                            );
-                          })}
-                        </tbody>
-                      </table>
-                    </div>
-                  </div>
-                  {importedData.length > 10 && (
-                    <p className="text-sm text-gray-500 mt-2 text-center">
-                      ... és még {importedData.length - 10} tranzakció
-                    </p>
-                  )}
-                </div>
-
-                <div className="flex gap-3">
-                  <button
-                    onClick={() => setImportStep(1)}
-                    className="flex-1 px-4 py-3 border border-gray-300 rounded-lg hover:bg-gray-50"
-                  >
-                    Vissza
-                  </button>
-                  <button
-                    onClick={() => setImportStep(3)}
-                    disabled={!importAccount}
-                    className="flex-1 px-4 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed"
-                  >
-                    Tovább az importáláshoz
-                  </button>
-                </div>
-              </div>
-            )}
-
-            {/* 3. LÉPÉS: Importálás */}
-            {importStep === 3 && (
-              <div className="space-y-4">
-                {(() => {
-                  const parsedTransactions = importedData
-                    .map((row) =>
-                      parseImportedTransaction(row, detectedBank.mapping)
-                    )
-                    .filter((tx) => tx.date && tx.amount > 0);
-
-                  const checkedTransactions =
-                    checkDuplicates(parsedTransactions);
-                  const newCount = checkedTransactions.filter(
-                    (tx) => !tx.isDuplicate
-                  ).length;
-                  const dupCount = checkedTransactions.filter(
-                    (tx) => tx.isDuplicate
-                  ).length;
-
-                  return (
-                    <>
-                      <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-                        <h4 className="font-semibold text-blue-900 mb-2">
-                          📊 Import összefoglaló
-                        </h4>
-                        <div className="space-y-1 text-sm text-blue-800">
-                          <p>
-                            • Összes tranzakció: {parsedTransactions.length}
-                          </p>
-                          <p className="text-green-700 font-semibold">
-                            • Új tranzakciók: {newCount}
-                          </p>
-                          {dupCount > 0 && (
-                            <p className="text-yellow-700">
-                              • Duplikált (kihagyva): {dupCount}
-                            </p>
-                          )}
-                        </div>
-                      </div>
-
-                      {dupCount > 0 && (
-                        <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
-                          <div className="flex items-start gap-2">
-                            <AlertCircle
-                              size={20}
-                              className="text-yellow-600 mt-0.5"
-                            />
-                            <div>
-                              <p className="font-semibold text-yellow-900">
-                                Duplikált tranzakciók észlelve
-                              </p>
-                              <p className="text-sm text-yellow-800 mt-1">
-                                {dupCount} tranzakció már szerepel a
-                                rendszerben. Ezeket automatikusan kihagyjuk az
-                                importálásból.
-                              </p>
-                            </div>
-                          </div>
-                        </div>
-                      )}
-
-                      <div className="flex gap-3">
-                        <button
-                          onClick={() => setImportStep(2)}
-                          className="flex-1 px-4 py-3 border border-gray-300 rounded-lg hover:bg-gray-50"
-                        >
-                          Vissza
-                        </button>
-                        <button
-                          onClick={executeImport}
-                          disabled={newCount === 0}
-                          className="flex-1 px-4 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:bg-gray-400 disabled:cursor-not-allowed font-semibold"
-                        >
-                          {newCount} tranzakció importálása
-                        </button>
-                      </div>
-                    </>
-                  );
-                })()}
-              </div>
-            )}
           </div>
         </div>
       )}
