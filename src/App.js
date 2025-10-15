@@ -3157,6 +3157,62 @@ const FamilyOrganizerApp = () => {
     });
   };
 
+  // Kategóriák szerinti havi költések
+const getCategoryExpenses = () => {
+  const currentMonth = selectedMonth.getMonth();
+  const currentYear = selectedMonth.getFullYear();
+  
+  const monthTransactions = (transactions || []).filter(t => {
+    if (t?.type !== 'expense') return false;
+    const tDate = new Date(t.date);
+    return tDate.getMonth() === currentMonth && tDate.getFullYear() === currentYear;
+  });
+
+  const categoryTotals = {};
+  monthTransactions.forEach(t => {
+    const category = t?.category || 'Egyéb';
+    if (!categoryTotals[category]) {
+      categoryTotals[category] = 0;
+    }
+    categoryTotals[category] += parseFloat(t?.amount) || 0;
+  });
+
+  return Object.entries(categoryTotals)
+    .map(([category, amount]) => ({
+      kategória: category,
+      összeg: amount
+    }))
+    .sort((a, b) => b.összeg - a.összeg);
+};
+
+// Havi költések az utolsó 6 hónapra
+const getMonthlyExpenses = () => {
+  const months = [];
+  const today = new Date();
+  
+  for (let i = 5; i >= 0; i--) {
+    const date = new Date(today.getFullYear(), today.getMonth() - i, 1);
+    const monthTransactions = (transactions || []).filter(t => {
+      if (t?.type !== 'expense') return false;
+      const tDate = new Date(t.date);
+      return tDate.getMonth() === date.getMonth() && 
+             tDate.getFullYear() === date.getFullYear();
+    });
+
+    const total = monthTransactions.reduce((sum, t) => sum + (parseFloat(t?.amount) || 0), 0);
+    
+    months.push({
+      hónap: date.toLocaleDateString('hu-HU', { month: 'short', year: '2-digit' }),
+      kiadás: total
+    });
+  }
+  
+  return months;
+};
+
+const categoryData = getCategoryExpenses();
+const monthlyData = getMonthlyExpenses();
+
   // === TRANSACTION KEZELÉS ===
   const openTransactionModal = (type) => {
     setTransactionType(type);
@@ -9245,6 +9301,30 @@ const FamilyOrganizerApp = () => {
       return undefined;
     };
 
+    // Színpaletta a kategóriákhoz
+const categoryColors = {
+  'Élelmiszer': '#10b981',      // zöld
+  'Közlekedés': '#3b82f6',      // kék
+  'Szórakozás': '#8b5cf6',      // lila
+  'Rezsi': '#f59e0b',           // narancssárga
+  'Egészség': '#ef4444',        // piros
+  'Ruházat': '#ec4899',         // rózsaszín
+  'Oktatás': '#06b6d4',         // cyan
+  'Háztartás': '#84cc16',       // lime
+  'Kommunikáció': '#6366f1',    // indigo
+  'Sport': '#14b8a6',           // teal
+  'Egyéb': '#64748b'            // szürke
+};
+
+const defaultColors = [
+  '#3b82f6', '#ef4444', '#10b981', '#f59e0b', '#8b5cf6', 
+  '#ec4899', '#06b6d4', '#84cc16', '#6366f1', '#14b8a6'
+];
+
+const getColorForCategory = (category, index) => {
+  return categoryColors[category] || defaultColors[index % defaultColors.length];
+};
+
     // Validate form — returns { ok, message, normalized }
     function validateTransactionForm(form, { requirePositive = true } = {}) {
       // Try common keys
@@ -9872,6 +9952,141 @@ const FamilyOrganizerApp = () => {
             </div>
           </div>
         </div>
+
+        {/* KIMUTATÁSOK - GRAFIKONOK */}
+<div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+  <div className="flex items-center gap-2 mb-6">
+    <TrendingDown size={24} className="text-red-600" />
+    <div>
+      <h3 className="font-semibold text-gray-800 text-lg">
+        Költések kategóriák szerint
+      </h3>
+      <p className="text-sm text-gray-600">
+        {selectedMonth.toLocaleDateString('hu-HU', { year: 'numeric', month: 'long' })}
+      </p>
+    </div>
+  </div>
+  
+  {categoryData.length === 0 ? (
+    <div className="text-center py-12 text-gray-500">
+      <TrendingDown size={48} className="mx-auto mb-3 text-gray-400" />
+      <p>Nincs kiadás ebben a hónapban</p>
+    </div>
+  ) : (
+    <>
+      <ResponsiveContainer width="100%" height={350}>
+        <BarChart data={categoryData} margin={{ top: 20, right: 30, left: 20, bottom: 60 }}>
+          <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+          <XAxis 
+            dataKey="kategória" 
+            angle={-45}
+            textAnchor="end"
+            height={100}
+            tick={{ fill: '#666', fontSize: 12 }}
+          />
+          <YAxis 
+            tickFormatter={(value) => `${(value / 1000).toFixed(0)}K Ft`}
+            tick={{ fill: '#666', fontSize: 12 }}
+          />
+          <Tooltip 
+            formatter={(value) => `${value.toLocaleString()} Ft`}
+            contentStyle={{ backgroundColor: 'white', border: '1px solid #ccc', borderRadius: '8px' }}
+          />
+          <Bar 
+            dataKey="összeg" 
+            radius={[8, 8, 0, 0]}
+            maxBarSize={80}
+          >
+            {categoryData.map((entry, index) => (
+              <Cell key={`cell-${index}`} fill={getColorForCategory(entry.kategória, index)} />
+            ))}
+          </Bar>
+      </ResponsiveContainer>
+
+      {/* Színes kategória jelmagyarázat */}
+      <div className="mt-4 flex flex-wrap gap-3 justify-center">
+        {categoryData.map((item, index) => (
+          <div key={item.kategória} className="flex items-center gap-2">
+            <div 
+              className="w-4 h-4 rounded"
+              style={{ backgroundColor: getColorForCategory(item.kategória, index) }}
+            />
+            <span className="text-sm text-gray-700">{item.kategória}</span>
+          </div>
+        ))}
+      </div>
+      
+      <div className="mt-6 p-4 bg-red-50 rounded-lg">
+        <p className="text-sm text-gray-700">
+          <span className="font-semibold">Összesen:</span>{' '}
+          <span className="text-red-600 font-bold text-lg">
+            {categoryData.reduce((sum, item) => sum + item.összeg, 0).toLocaleString()} Ft
+          </span>
+        </p>
+      </div>
+    </>
+  )}
+</div>
+
+{/* Havi költések trendje */}
+<div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+  <div className="flex items-center gap-2 mb-6">
+    <Calendar size={24} className="text-blue-600" />
+    <div>
+      <h3 className="font-semibold text-gray-800 text-lg">
+        Havi költések alakulása
+      </h3>
+      <p className="text-sm text-gray-600">
+        Utolsó 6 hónap összehasonlítása
+      </p>
+    </div>
+  </div>
+
+  <ResponsiveContainer width="100%" height={350}>
+    <BarChart data={monthlyData} margin={{ top: 20, right: 30, left: 20, bottom: 40 }}>
+      <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+      <XAxis 
+        dataKey="hónap"
+        tick={{ fill: '#666', fontSize: 12 }}
+      />
+      <YAxis 
+        tickFormatter={(value) => `${(value / 1000).toFixed(0)}K Ft`}
+        tick={{ fill: '#666', fontSize: 12 }}
+      />
+      <Tooltip 
+        formatter={(value) => `${value.toLocaleString()} Ft`}
+        contentStyle={{ backgroundColor: 'white', border: '1px solid #ccc', borderRadius: '8px' }}
+      />
+      <Bar 
+        dataKey="kiadás" 
+        fill="#3b82f6" 
+        radius={[8, 8, 0, 0]}
+        maxBarSize={80}
+      />
+    </BarChart>
+  </ResponsiveContainer>
+
+  <div className="mt-6 grid grid-cols-3 gap-4">
+    <div className="p-4 bg-blue-50 rounded-lg">
+      <p className="text-xs text-gray-600 mb-1">Átlagos havi kiadás</p>
+      <p className="text-xl font-bold text-blue-600">
+        {Math.round(monthlyData.reduce((sum, m) => sum + m.kiadás, 0) / monthlyData.length).toLocaleString()} Ft
+      </p>
+    </div>
+    <div className="p-4 bg-green-50 rounded-lg">
+      <p className="text-xs text-gray-600 mb-1">Legkisebb</p>
+      <p className="text-xl font-bold text-green-600">
+        {Math.min(...monthlyData.map(m => m.kiadás)).toLocaleString()} Ft
+      </p>
+    </div>
+    <div className="p-4 bg-red-50 rounded-lg">
+      <p className="text-xs text-gray-600 mb-1">Legnagyobb</p>
+      <p className="text-xl font-bold text-red-600">
+        {Math.max(...monthlyData.map(m => m.kiadás)).toLocaleString()} Ft
+      </p>
+    </div>
+  </div>
+</div>
 
         {/* Költségvetés (Budget) */}
         {(() => {
