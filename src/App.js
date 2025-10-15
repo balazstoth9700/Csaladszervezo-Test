@@ -312,6 +312,7 @@ const FamilyOrganizerApp = () => {
   const [showBudgetModal, setShowBudgetModal] = useState(false);
   const [showImportModal, setShowImportModal] = useState(false);
   const [transactionType, setTransactionType] = useState("expense");
+  const [transactions, setTransactions] = useState([]);
   const [financeTimeFilter, setFinanceTimeFilter] = useState("month");
   const [selectedMonth, setSelectedMonth] = useState(new Date());
   const [selectedAccounts, setSelectedAccounts] = useState([]);
