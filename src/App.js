@@ -9993,14 +9993,15 @@ const getColorForCategory = (category, index) => {
             contentStyle={{ backgroundColor: 'white', border: '1px solid #ccc', borderRadius: '8px' }}
           />
           <Bar 
-            dataKey="összeg" 
-            radius={[8, 8, 0, 0]}
-            maxBarSize={80}
-          >
-            {categoryData.map((entry, index) => (
-              <Cell key={`cell-${index}`} fill={getColorForCategory(entry.kategória, index)} />
-            ))}
-          </Bar>
+          dataKey="összeg" 
+          radius={[8, 8, 0, 0]}
+          maxBarSize={80}
+        >
+          {categoryData.map((entry, index) => (
+            <Cell key={`cell-${index}`} fill={getColorForCategory(entry.kategória, index)} />
+          ))}
+        </Bar>
+          </BarChart>
       </ResponsiveContainer>
 
       {/* Színes kategória jelmagyarázat */}
