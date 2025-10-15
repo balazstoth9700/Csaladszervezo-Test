@@ -3598,83 +3598,146 @@ const monthlyData = getMonthlyExpenses();
 
   // BANK FORMÁTUM DETEKTÁLÁS
   const detectBankFormat = (headers) => {
-    const headersLower = headers.map((h) => h.toLowerCase().trim());
+    console.log("🔍 Detektált headerek:", headers);
 
-    // Revolut
+    const headerLower = headers.map((h) => h.toLowerCase().trim());
+
+    // 1. MAGYAR REVOLUT / WISE FORMÁTUM
+    // Fejléc: Típus, Termék, Kezdés dátuma, Teljesítés dátuma, Leírás, Összeg, Díj, Pénznem, State, Egyenleg
     if (
-      headersLower.includes("type") &&
-      headersLower.includes("product") &&
-      headersLower.includes("started date")
+      headerLower.includes("típus") &&
+      headerLower.includes("teljesítés dátuma") &&
+      headerLower.includes("összeg") &&
+      headerLower.includes("leírás")
     ) {
+      console.log("✅ Magyar banki formátum felismerve");
       return {
-        bank: "Revolut",
+        name: "Magyar Bank (Revolut/Wise stílus)",
         mapping: {
-          date: "Started Date",
-          description: "Description",
-          amount: "Amount",
-          currency: "Currency",
-          category: "Category",
+          date: headers.find((h) =>
+            h.toLowerCase().includes("teljesítés dátuma")
+          ),
+          amount: headers.find((h) => h.toLowerCase() === "összeg"),
+          description: headers.find((h) => h.toLowerCase() === "leírás"),
+          currency: headers.find((h) => h.toLowerCase() === "pénznem"),
+          type: headers.find((h) => h.toLowerCase() === "típus"),
         },
       };
     }
 
-    // OTP Bank
+    // 2. OTP BANK FORMÁTUM
     if (
-      headersLower.includes("könyvelés dátuma") ||
-      headersLower.includes("érték dátuma")
+      headerLower.includes("könyvelés dátuma") &&
+      headerLower.includes("bejövő/kimenő") &&
+      headerLower.includes("összeg") &&
+      headerLower.includes("partner neve")
     ) {
+      console.log("✅ OTP Bank formátum felismerve");
       return {
-        bank: "OTP Bank",
+        name: "OTP Bank",
         mapping: {
-          date: "Könyvelés dátuma",
-          description: "Tranzakció leírása",
-          amount: "Összeg",
-          currency: "Deviza",
+          date: headers.find((h) =>
+            h.toLowerCase().includes("könyvelés dátuma")
+          ),
+          amount: headers.find((h) => h.toLowerCase() === "összeg"),
+          direction: headers.find((h) => h.toLowerCase() === "bejövő/kimenő"),
+          description: headers.find((h) => h.toLowerCase() === "partner neve"),
+          comment: headers.find((h) => h.toLowerCase() === "közlemény"),
+          category: headers.find(
+            (h) => h.toLowerCase() === "költési kategória"
+          ),
+          currency: headers.find((h) => h.toLowerCase() === "pénznem"),
+          type: headers.find((h) => h.toLowerCase() === "típus"),
         },
       };
     }
 
-    // Erste Bank
+    // 3. K&H BANK FORMÁTUM
     if (
-      headersLower.includes("buchungsdatum") ||
-      headersLower.includes("booking date")
+      headerLower.includes("dátum") &&
+      headerLower.includes("terhelés") &&
+      headerLower.includes("jóváírás")
     ) {
+      console.log("✅ K&H Bank formátum felismerve");
       return {
-        bank: "Erste Bank",
+        name: "K&H Bank",
         mapping: {
-          date: "Booking date",
-          description: "Details",
-          amount: "Amount",
-          currency: "Currency",
+          date: headers.find((h) => h.toLowerCase() === "dátum"),
+          debit: headers.find((h) => h.toLowerCase() === "terhelés"),
+          credit: headers.find((h) => h.toLowerCase() === "jóváírás"),
+          description: headers.find((h) =>
+            h.toLowerCase().includes("közlemény")
+          ),
+          currency: "HUF",
         },
       };
     }
 
-    // K&H Bank
+    // 4. ERSTE BANK FORMÁTUM
     if (
-      headersLower.includes("tranzakció dátuma") &&
-      headersLower.includes("jogcím")
+      headerLower.includes("elszámolás dátuma") &&
+      headerLower.includes("összeg") &&
+      headerLower.includes("partner neve")
     ) {
+      console.log("✅ Erste Bank formátum felismerve");
       return {
-        bank: "K&H Bank",
+        name: "Erste Bank",
         mapping: {
-          date: "Tranzakció dátuma",
-          description: "Jogcím",
-          amount: "Összeg",
-          currency: "Pénznem",
+          date: headers.find((h) =>
+            h.toLowerCase().includes("elszámolás dátuma")
+          ),
+          amount: headers.find((h) => h.toLowerCase() === "összeg"),
+          description: headers.find(
+            (h) =>
+              h.toLowerCase().includes("partner neve") ||
+              h.toLowerCase().includes("közlemény")
+          ),
+          currency: "HUF",
         },
       };
     }
 
-    // Általános CSV
-    return {
-      bank: "Általános",
-      mapping: {
-        date: headers[0],
-        description: headers[1],
-        amount: headers[2],
-      },
-    };
+    // 5. GENERIKUS FORMÁTUM (fallback)
+    console.log("⚠️ Ismeretlen formátum, próbálom kitalálni...");
+
+    const dateField = headers.find(
+      (h) =>
+        h.toLowerCase().includes("dát") ||
+        h.toLowerCase().includes("date") ||
+        h.toLowerCase().includes("időpont")
+    );
+
+    const amountField = headers.find(
+      (h) =>
+        h.toLowerCase().includes("összeg") ||
+        h.toLowerCase().includes("amount") ||
+        h.toLowerCase().includes("érték")
+    );
+
+    const descriptionField = headers.find(
+      (h) =>
+        h.toLowerCase().includes("leír") ||
+        h.toLowerCase().includes("közlemény") ||
+        h.toLowerCase().includes("description") ||
+        h.toLowerCase().includes("megjegyzés") ||
+        h.toLowerCase().includes("partner")
+    );
+
+    if (dateField && amountField) {
+      console.log("✅ Generikus formátum felismerve");
+      return {
+        name: "Generikus",
+        mapping: {
+          date: dateField,
+          amount: amountField,
+          description: descriptionField || amountField,
+          currency: "HUF",
+        },
+      };
+    }
+
+    console.error("❌ Nem sikerült felismerni a formátumot!");
+    return null;
   };
 
   // CSV FÁJL FELTÖLTÉS ÉS PARSING
@@ -3772,49 +3835,161 @@ const monthlyData = getMonthlyExpenses();
     }
   };
 
+  // BANKI KATEGÓRIÁK LEKÉPEZÉSE
+  const mapBankCategory = (bankCategory) => {
+    const cat = bankCategory.toLowerCase().trim();
+
+    // OTP kategóriák -> saját kategóriák
+    const categoryMap = {
+      "számlák, rezsi": "Lakhatás",
+      rezsi: "Lakhatás",
+      vendéglátás: "Étterem",
+      szórakozás: "Szórakozás",
+      bevásárlás: "Bevásárlás",
+      élelmiszerbolt: "Élelmiszer",
+      élelmiszer: "Élelmiszer",
+      "szállás, utazás": "Utazás",
+      utazás: "Utazás",
+      közlekedés: "Közlekedés",
+      egészség: "Egészség",
+      sport: "Sport",
+      oktatás: "Oktatás",
+      egyéb: "Egyéb",
+    };
+
+    // Ellenőrizzük, van-e egyezés
+    for (const [key, value] of Object.entries(categoryMap)) {
+      if (cat.includes(key)) {
+        return value;
+      }
+    }
+
+    // Ha nincs egyezés, visszaadjuk az eredetit
+    return bankCategory || "Egyéb";
+  };
+
   // TRANZAKCIÓ KONVERTÁLÁSA
   const parseImportedTransaction = (row, mapping) => {
-    // Dátum parsing
+    console.log("📝 Parsing row:", row);
+    console.log("🗺️ Használt mapping:", mapping);
+
+    // 1. DÁTUM PARSING
     let date = row[mapping.date];
     if (date) {
       if (typeof date === "string") {
-        if (!isNaN(date) && date > 40000) {
-          // Excel serial date
+        // Timestamp formátum: "2024-12-31 14:13:20" -> "2024-12-31"
+        if (date.includes(" ")) {
+          date = date.split(" ")[0];
+        }
+
+        // Excel serial date kezelés
+        if (!isNaN(date) && parseFloat(date) > 40000) {
           const excelEpoch = new Date(1900, 0, 1);
-          date = new Date(excelEpoch.getTime() + (date - 2) * 86400000);
+          const parsedDate = new Date(
+            excelEpoch.getTime() + (parseFloat(date) - 2) * 86400000
+          );
+          date = parsedDate.toISOString().split("T")[0];
         } else {
-          date = new Date(date);
+          // Normál dátum parsing
+          const parsedDate = new Date(date);
+          if (!isNaN(parsedDate)) {
+            date = parsedDate.toISOString().split("T")[0];
+          }
         }
       }
-      date =
-        date instanceof Date && !isNaN(date)
-          ? date.toISOString().split("T")[0]
-          : null;
     }
 
-    // Összeg parsing
-    let amount = row[mapping.amount];
-    if (typeof amount === "string") {
-      amount = amount.replace(/[^\d.,-]/g, "").replace(",", ".");
+    if (!date) {
+      console.warn("⚠️ Érvénytelen dátum:", row[mapping.date]);
     }
-    amount = parseFloat(amount) || 0;
 
-    // Típus meghatározása
-    const type = amount >= 0 ? "income" : "expense";
-    amount = Math.abs(amount);
+    // 2. ÖSSZEG PARSING
+    let amount = 0;
+    let type = "expense"; // alapértelmezett
 
-    const description = row[mapping.description] || "";
-    const category = autoCategorize(description, type);
+    // OTP Bank: külön irány mező van
+    if (mapping.direction) {
+      const direction = String(row[mapping.direction]).toLowerCase();
+      type = direction.includes("bejövő") ? "income" : "expense";
 
-    return {
+      // OTP formátum: "-13,500.0" -> vessző = ezreselválasztó!
+      let amountStr = String(row[mapping.amount] || "0");
+      // Eltávolítjuk az idézőjeleket
+      amountStr = amountStr.replace(/"/g, "");
+      // Eltávolítjuk a vesszőket (ezreselválasztók)
+      amountStr = amountStr.replace(/,/g, "");
+      // Most már csak szám és pont maradt
+      amount = Math.abs(parseFloat(amountStr) || 0);
+
+      console.log(
+        `📊 OTP parsing: ${row[mapping.amount]} -> ${amount} (${type})`
+      );
+    }
+    // K&H: külön debit/credit mezők
+    else if (mapping.debit && mapping.credit) {
+      const debit = parseFloat(
+        String(row[mapping.debit] || "0")
+          .replace(/[^\d.,-]/g, "")
+          .replace(",", ".")
+      );
+      const credit = parseFloat(
+        String(row[mapping.credit] || "0")
+          .replace(/[^\d.,-]/g, "")
+          .replace(",", ".")
+      );
+      amount = Math.abs(credit - debit);
+      type = credit - debit >= 0 ? "income" : "expense";
+    }
+    // Normál összeg mező (Revolut, Wise, stb.)
+    else {
+      amount = row[mapping.amount];
+      if (typeof amount === "string") {
+        amount = amount.replace(/[^\d.,-]/g, "").replace(",", ".");
+      }
+      amount = parseFloat(amount) || 0;
+      type = amount >= 0 ? "income" : "expense";
+      amount = Math.abs(amount);
+    }
+
+    // 4. LEÍRÁS
+    let description = "";
+
+    // OTP: Partner neve + Típus kombinációja
+    if (mapping.type && row[mapping.type]) {
+      const typeName = row[mapping.type];
+      const partnerName = row[mapping.description] || "";
+      description = partnerName || typeName;
+    } else {
+      description =
+        row[mapping.description] || row[mapping.type] || "Tranzakció";
+    }
+
+    // 5. KATEGORIZÁLÁS
+    let category;
+
+    // Ha a bank már kategorizálta (OTP: "Költési kategória")
+    if (mapping.category && row[mapping.category]) {
+      category = mapBankCategory(row[mapping.category]);
+    } else {
+      // Automatikus kategorizálás a leírás alapján
+      category = autoCategorize(description, type);
+    }
+
+    // 6. DEVIZANEM
+    const currency = row[mapping.currency] || "HUF";
+
+    const result = {
       date,
       amount,
       type,
       description,
       category,
-      currency: row[mapping.currency] || "HUF",
+      currency,
       original: row,
     };
+
+    console.log("✅ Parsed transaction:", result);
+    return result;
   };
 
   // AUTOMATIKUS KATEGORIZÁLÁS
@@ -3822,85 +3997,147 @@ const monthlyData = getMonthlyExpenses();
     const desc = description.toLowerCase();
 
     if (type === "expense") {
+      // Élelmiszer
       if (
         desc.includes("lidl") ||
         desc.includes("tesco") ||
         desc.includes("aldi") ||
         desc.includes("spar") ||
-        desc.includes("cba")
+        desc.includes("cba") ||
+        desc.includes("penny") ||
+        desc.includes("auchan") ||
+        desc.includes("metro")
       ) {
-        return "Étel";
+        return "Élelmiszer";
       }
+
+      // Étterem/Gyorsétterem
+      if (
+        desc.includes("mcdonald") ||
+        desc.includes("burger") ||
+        desc.includes("kfc") ||
+        desc.includes("pizza") ||
+        desc.includes("eatrend") ||
+        desc.includes("wolt") ||
+        desc.includes("foodpanda") ||
+        desc.includes("deszka") ||
+        desc.includes("étterem") ||
+        desc.includes("restaurant")
+      ) {
+        return "Étterem";
+      }
+
+      // Közlekedés
       if (
         desc.includes("mol") ||
         desc.includes("shell") ||
         desc.includes("omv") ||
-        desc.includes("benzin")
+        desc.includes("benzin") ||
+        desc.includes("bkk") ||
+        desc.includes("mav") ||
+        desc.includes("volán") ||
+        desc.includes("bolt") ||
+        desc.includes("lime") ||
+        desc.includes("parking")
       ) {
         return "Közlekedés";
       }
+
+      // Egészség
       if (
         desc.includes("gym") ||
         desc.includes("fitnesz") ||
         desc.includes("orvos") ||
-        desc.includes("patika")
+        desc.includes("patika") ||
+        desc.includes("gyógyszertár")
       ) {
         return "Egészség";
       }
+
+      // Szórakozás
       if (
         desc.includes("netflix") ||
         desc.includes("spotify") ||
         desc.includes("hbo") ||
         desc.includes("cinema") ||
-        desc.includes("mozi")
+        desc.includes("mozi") ||
+        desc.includes("múzeum") ||
+        desc.includes("muzeum") ||
+        desc.includes("hellopay") ||
+        desc.includes("steam") ||
+        desc.includes("playstation")
       ) {
         return "Szórakozás";
       }
+
+      // Lakhatás/Rezsi
       if (
         desc.includes("lakbér") ||
         desc.includes("rezsi") ||
         desc.includes("áram") ||
         desc.includes("gáz") ||
-        desc.includes("víz")
+        desc.includes("víz") ||
+        desc.includes("fűtés") ||
+        desc.includes("mvm") ||
+        desc.includes("energiak") ||
+        desc.includes("időszakos költségek") ||
+        desc.includes("havi zárlati díj")
       ) {
         return "Lakhatás";
       }
+
+      // Ruházat
       if (
         desc.includes("zara") ||
         desc.includes("h&m") ||
-        desc.includes("ruha")
+        desc.includes("reserved") ||
+        desc.includes("ruha") ||
+        desc.includes("cipő")
       ) {
         return "Ruházat";
       }
+
+      // Online vásárlás
+      if (
+        desc.includes("aliexpress") ||
+        desc.includes("amazon") ||
+        desc.includes("ebay") ||
+        desc.includes("emag")
+      ) {
+        return "Bevásárlás";
+      }
+
+      // Utazás
+      if (
+        desc.includes("bud.hu") ||
+        desc.includes("wizz") ||
+        desc.includes("ryanair") ||
+        desc.includes("booking") ||
+        desc.includes("airbnb")
+      ) {
+        return "Utazás";
+      }
+
       return "Egyéb kiadás";
     } else {
+      // Bevételek
       if (desc.includes("fizetés") || desc.includes("bér")) {
         return "Fizetés";
       }
       if (desc.includes("prémium") || desc.includes("bónusz")) {
         return "Prémium";
       }
+      if (desc.includes("átutalás")) {
+        return "Átutalás";
+      }
+      if (desc.includes("kamat")) {
+        return "Kamat";
+      }
       return "Egyéb bevétel";
     }
   };
 
-  // DUPLIKÁCIÓ ELLENŐRZÉS
-  const checkDuplicates = (newTransactions) => {
-    const existingTransactions =
-      data.transactions || data.finances?.transactions || [];
-
-    return newTransactions.map((newTx) => {
-      const isDuplicate = existingTransactions.some(
-        (existing) =>
-          existing.date === newTx.date &&
-          Math.abs(existing.amount - newTx.amount) < 0.01 &&
-          existing.description === newTx.description
-      );
-      return { ...newTx, isDuplicate };
-    });
-  };
-
-  // IMPORT VÉGREHAJTÁSA
+  // IMPORT VÉGREHAJTÁSA - TELJES JAVÍTOTT VERZIÓ
   const executeImport = async () => {
     if (!importAccount) {
       alert("Válassz ki egy számlát!");
@@ -3922,12 +4159,36 @@ const monthlyData = getMonthlyExpenses();
       return;
     }
 
+    console.log("🔄 Import indítása...");
+    console.log("📁 Importált sorok száma:", importedData.length);
+    console.log("🗺️ Használt mapping:", detectedBank.mapping);
+
+    // 1. Parse tranzakciók
     const parsedTransactions = importedData
       .map((row) => parseImportedTransaction(row, detectedBank.mapping))
       .filter((tx) => tx.date && tx.amount > 0);
 
+    console.log("✅ Parse-olt tranzakciók:", parsedTransactions.length);
+
+    // ✅ JAVÍTÁS: Ellenőrizzük, hogy sikerült-e parse-olni bármit
+    if (parsedTransactions.length === 0) {
+      alert(
+        "❌ Nem sikerült érvényes tranzakciókat beolvasni!\n\n" +
+          "Lehetséges okok:\n" +
+          "- Hibás dátum formátum\n" +
+          "- Hiányzó vagy hibás összegek\n" +
+          "- Üres sorok\n\n" +
+          "Ellenőrizd a CSV fájl tartalmát és formátumát!"
+      );
+      return;
+    }
+
+    // 2. Duplikáció ellenőrzés
     const checkedTransactions = checkDuplicates(parsedTransactions);
 
+    console.log("🔍 Duplikáció ellenőrzés kész:", checkedTransactions.length);
+
+    // 3. Csak az új tranzakciók
     const newTransactions = checkedTransactions
       .filter((tx) => !tx.isDuplicate)
       .map((tx) => ({
@@ -3945,11 +4206,24 @@ const monthlyData = getMonthlyExpenses();
         imported: true,
       }));
 
+    console.log("🆕 Új tranzakciók száma:", newTransactions.length);
+
+    // ✅ JAVÍTÁS: Pontos hibaüzenet
+    const duplicateCount = checkedTransactions.length - newTransactions.length;
+
     if (newTransactions.length === 0) {
-      alert("Minden tranzakció már szerepel a rendszerben!");
+      alert(
+        `⚠️ Minden tranzakció már szerepel a rendszerben!\n\n` +
+          `📊 Részletek:\n` +
+          `- Beolvasott sorok: ${importedData.length}\n` +
+          `- Érvényes tranzakciók: ${parsedTransactions.length}\n` +
+          `- Duplikált tranzakciók: ${duplicateCount}\n` +
+          `- Új tranzakciók: 0`
+      );
       return;
     }
 
+    // 4. Mentés
     const existingTransactions =
       data.transactions || data.finances?.transactions || [];
     const useFinancesStructure = Array.isArray(data?.finances?.transactions);
@@ -3973,11 +4247,16 @@ const monthlyData = getMonthlyExpenses();
     setData(newData);
     await saveUserData(newData);
 
+    console.log("💾 Adatok mentve!");
+
+    // ✅ JAVÍTÁS: Részletesebb visszajelzés
     alert(
-      `✅ ${newTransactions.length} tranzakció sikeresen importálva!\n\n` +
-        `${
-          checkedTransactions.length - newTransactions.length
-        } duplikált tranzakciót kihagytunk.`
+      `✅ Import sikeres!\n\n` +
+        `📊 Statisztika:\n` +
+        `- Beolvasott sorok: ${importedData.length}\n` +
+        `- Érvényes tranzakciók: ${parsedTransactions.length}\n` +
+        `- Új tranzakciók: ${newTransactions.length}\n` +
+        `- Duplikált (kihagyott): ${duplicateCount}`
     );
 
     // Reset
@@ -3986,6 +4265,36 @@ const monthlyData = getMonthlyExpenses();
     setImportedData([]);
     setDetectedBank(null);
     setImportAccount(null);
+  };
+
+  // ✅ BÓNUSZ: Javított duplikáció ellenőrzés részletesebb logolással
+  const checkDuplicates = (newTransactions) => {
+    const existingTransactions =
+      data.transactions || data.finances?.transactions || [];
+
+    console.log("🔍 Duplikáció ellenőrzés:", {
+      existing: existingTransactions.length,
+      new: newTransactions.length,
+    });
+
+    return newTransactions.map((newTx) => {
+      const isDuplicate = existingTransactions.some(
+        (existing) =>
+          existing.date === newTx.date &&
+          Math.abs(existing.amount - newTx.amount) < 0.01 &&
+          existing.description === newTx.description
+      );
+
+      if (isDuplicate) {
+        console.log("⚠️ Duplikált tranzakció:", {
+          date: newTx.date,
+          amount: newTx.amount,
+          description: newTx.description,
+        });
+      }
+
+      return { ...newTx, isDuplicate };
+    });
   };
 
   // ==================== LOAN (HITEL) FÜGGVÉNYEK ====================
