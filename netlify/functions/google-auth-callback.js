@@ -1,36 +1,172 @@
-const { google } = require("googleapis");
-const admin = require("firebase-admin");
+const { google } = require('googleapis');
+const admin = require('firebase-admin');
 
 // Firebase Admin inicializálás
 if (!admin.apps.length) {
-  admin.initializeApp({
-    credential: admin.credential.cert({
-      projectId: process.env.FIREBASE_PROJECT_ID,
-      clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
-      privateKey: process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, "\n"),
-    }),
-  });
+  try {
+    admin.initializeApp({
+      credential: admin.credential.cert({
+        projectId: process.env.FIREBASE_PROJECT_ID,
+        clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
+        privateKey: process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, '\n'),
+      }),
+    });
+  } catch (error) {
+    console.error('Firebase init error:', error);
+  }
 }
 
-exports.handler = async (event, context) => {
-  try {
-    const { code, state } = event.queryStringParameters;
-    const { email, service, userId } = JSON.parse(state);
+const db = admin.firestore();
 
+exports.handler = async (event, context) => {
+  const headers = {
+    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Headers': 'Content-Type',
+    'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+  };
+
+  if (event.httpMethod === 'OPTIONS') {
+    return { statusCode: 200, headers, body: '' };
+  }
+
+  try {
+    // DEBUG: Logoljuk az összes bejövő adatot
+    console.log('📥 Event httpMethod:', event.httpMethod);
+    console.log('📥 Event queryStringParameters:', JSON.stringify(event.queryStringParameters));
+    console.log('📥 Event headers:', JSON.stringify(event.headers));
+    console.log('📥 Event path:', event.path);
+
+    // Query paraméterek biztonságos kiolvasása
+    const queryParams = event.queryStringParameters || {};
+    const { code, state, error: oauthError } = queryParams;
+
+    console.log('🔍 Code:', code ? 'Present' : 'Missing');
+    console.log('🔍 State:', state ? state : 'Missing');
+    console.log('🔍 OAuth Error:', oauthError);
+
+    // Ha a felhasználó elutasította
+    if (oauthError) {
+      console.error('❌ OAuth error:', oauthError);
+      return {
+        statusCode: 200,
+        headers: {
+          ...headers,
+          'Content-Type': 'text/html',
+        },
+        body: `
+          <!DOCTYPE html>
+          <html>
+          <head>
+            <meta charset="UTF-8">
+            <title>Hitelesítés megszakítva</title>
+            <style>
+              body { 
+                font-family: Arial, sans-serif; 
+                display: flex; 
+                justify-content: center; 
+                align-items: center; 
+                height: 100vh; 
+                margin: 0;
+                background: #f7fafc;
+              }
+              .container { 
+                text-align: center; 
+                padding: 40px;
+                background: white;
+                border-radius: 12px;
+                box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+                max-width: 400px;
+              }
+              h1 { color: #e53e3e; margin-bottom: 20px; }
+              p { color: #4a5568; margin-bottom: 30px; }
+              button {
+                background: #3182ce;
+                color: white;
+                border: none;
+                padding: 12px 24px;
+                border-radius: 6px;
+                cursor: pointer;
+                font-size: 16px;
+              }
+              button:hover { background: #2c5aa0; }
+            </style>
+          </head>
+          <body>
+            <div class="container">
+              <h1>❌ Hitelesítés megszakítva</h1>
+              <p>A Google bejelentkezés megszakadt. Bezárhatod ezt az ablakot.</p>
+              <button onclick="window.close()">Ablak bezárása</button>
+            </div>
+            <script>
+              setTimeout(() => window.close(), 3000);
+            </script>
+          </body>
+          </html>
+        `,
+      };
+    }
+
+    // Paraméterek ellenőrzése
+    if (!code) {
+      throw new Error('Hiányzó authorization code');
+    }
+
+    if (!state) {
+      throw new Error('Hiányzó state paraméter - a Google nem küldte vissza');
+    }
+
+    // State dekódolás BIZTONSÁGOSAN
+    let parsedState;
+    try {
+      parsedState = JSON.parse(state);
+      console.log('✅ State parsed:', parsedState);
+    } catch (parseError) {
+      console.error('❌ State parse error:', parseError);
+      throw new Error(`Nem sikerült dekódolni a state paramétert: ${state}`);
+    }
+
+    const { email, service, userId } = parsedState;
+
+    if (!email || !service || !userId) {
+      throw new Error(`Hiányzó adatok a state-ben: email=${email}, service=${service}, userId=${userId}`);
+    }
+
+    console.log('✅ Callback fogadva:', { email, service, userId });
+
+    // Environment variables ellenőrzése
+    if (!process.env.GOOGLE_CLIENT_ID || !process.env.GOOGLE_CLIENT_SECRET) {
+      throw new Error('Hiányzó Google OAuth credentials environment variables');
+    }
+
+    // OAuth2 kliens
     const oauth2Client = new google.auth.OAuth2(
       process.env.GOOGLE_CLIENT_ID,
       process.env.GOOGLE_CLIENT_SECRET,
       process.env.GOOGLE_REDIRECT_URI
     );
 
-    const { tokens } = await oauth2Client.getToken(code);
+    console.log('🔐 OAuth client created');
 
-    // Token mentése Firestore-ba
-    await admin
-      .firestore()
-      .collection("users")
+    // Token csere
+    const { tokens } = await oauth2Client.getToken(code);
+    oauth2Client.setCredentials(tokens);
+
+    console.log('🔑 Tokens megszerzve:', {
+      hasAccessToken: !!tokens.access_token,
+      hasRefreshToken: !!tokens.refresh_token,
+      expiryDate: tokens.expiry_date
+    });
+
+    // Firebase ellenőrzés
+    if (!process.env.FIREBASE_PROJECT_ID) {
+      throw new Error('Hiányzó Firebase credentials');
+    }
+
+    // Tokens mentése Firestore-ba
+    await db
+      .collection('users')
       .doc(userId)
-      .collection("googleAccounts")
+      .collection('googleAccounts')
       .doc(email)
       .set({
         email,
@@ -38,174 +174,143 @@ exports.handler = async (event, context) => {
         accessToken: tokens.access_token,
         refreshToken: tokens.refresh_token,
         expiryDate: tokens.expiry_date,
-        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        connected: true,
         syncEnabled: true,
+        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        lastSync: null,
       });
 
-    // Sikeres HTML oldal
+    console.log('💾 Tokens elmentve Firestore-ba:', email);
+
+    // Sikeres válasz HTML
     return {
       statusCode: 200,
-      headers: { "Content-Type": "text/html" },
+      headers: {
+        ...headers,
+        'Content-Type': 'text/html',
+      },
       body: `
         <!DOCTYPE html>
         <html>
-          <head>
-            <title>Sikeres bejelentkezés</title>
-            <meta charset="UTF-8">
-            <style>
-              * { margin: 0; padding: 0; box-sizing: border-box; }
-              body {
-                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-                display: flex;
-                justify-content: center;
-                align-items: center;
-                height: 100vh;
-                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-              }
-              .container {
-                background: white;
-                padding: 48px;
-                border-radius: 16px;
-                text-align: center;
-                box-shadow: 0 20px 60px rgba(0,0,0,0.3);
-                max-width: 400px;
-                animation: slideIn 0.5s ease-out;
-              }
-              @keyframes slideIn {
-                from { transform: translateY(-30px); opacity: 0; }
-                to { transform: translateY(0); opacity: 1; }
-              }
-              .success-icon {
-                font-size: 72px;
-                margin-bottom: 24px;
-                animation: bounce 1s ease;
-              }
-              @keyframes bounce {
-                0%, 100% { transform: scale(1); }
-                50% { transform: scale(1.2); }
-              }
-              h1 {
-                color: #1a202c;
-                margin-bottom: 12px;
-                font-size: 24px;
-              }
-              p {
-                color: #4a5568;
-                margin-bottom: 24px;
-                line-height: 1.6;
-              }
-              .email {
-                color: #667eea;
-                font-weight: 600;
-              }
-              .close-btn {
-                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-                color: white;
-                border: none;
-                padding: 14px 32px;
-                border-radius: 8px;
-                cursor: pointer;
-                font-size: 16px;
-                font-weight: 600;
-                transition: transform 0.2s;
-              }
-              .close-btn:hover {
-                transform: translateY(-2px);
-                box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
-              }
-              .countdown {
-                color: #718096;
-                font-size: 14px;
-                margin-top: 16px;
-              }
-            </style>
-          </head>
-          <body>
-            <div class="container">
-              <div class="success-icon">✅</div>
-              <h1>Sikeres bejelentkezés!</h1>
-              <p>
-                A <span class="email">${email}</span> fiók sikeresen hozzáadva
-                a ${
-                  service === "calendar" ? "Google Calendar" : "Gmail"
-                } szolgáltatáshoz.
-              </p>
-              <button class="close-btn" onclick="window.close()">
-                Ablak bezárása
-              </button>
-              <p class="countdown">
-                Az ablak automatikusan bezáródik <span id="timer">3</span> másodperc múlva...
-              </p>
-            </div>
-            <script>
-              let seconds = 3;
-              const timer = document.getElementById('timer');
-              
-              const countdown = setInterval(() => {
-                seconds--;
-                timer.textContent = seconds;
-                
-                if (seconds <= 0) {
-                  clearInterval(countdown);
-                  window.close();
-                }
-              }, 1000);
-            </script>
-          </body>
+        <head>
+          <meta charset="UTF-8">
+          <title>Sikeres hitelesítés</title>
+          <style>
+            body { 
+              font-family: Arial, sans-serif; 
+              display: flex; 
+              justify-content: center; 
+              align-items: center; 
+              height: 100vh; 
+              margin: 0;
+              background: #f7fafc;
+            }
+            .container { 
+              text-align: center; 
+              padding: 40px;
+              background: white;
+              border-radius: 12px;
+              box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+              max-width: 400px;
+            }
+            h1 { color: #38a169; margin-bottom: 20px; }
+            p { color: #4a5568; margin-bottom: 30px; }
+            .spinner {
+              border: 3px solid #e2e8f0;
+              border-top: 3px solid #3182ce;
+              border-radius: 50%;
+              width: 40px;
+              height: 40px;
+              animation: spin 1s linear infinite;
+              margin: 20px auto;
+            }
+            @keyframes spin {
+              0% { transform: rotate(0deg); }
+              100% { transform: rotate(360deg); }
+            }
+          </style>
+        </head>
+        <body>
+          <div class="container">
+            <h1>✅ Sikeres hitelesítés!</h1>
+            <p>A Google fiók (${email}) sikeresen hozzáadva. Ez az ablak hamarosan bezáródik...</p>
+            <div class="spinner"></div>
+          </div>
+          <script>
+            setTimeout(() => {
+              window.close();
+            }, 2000);
+          </script>
+        </body>
         </html>
       `,
     };
   } catch (error) {
-    console.error("Error in callback:", error);
+    console.error('❌ Callback error:', error);
+    console.error('Stack trace:', error.stack);
+    
     return {
       statusCode: 500,
-      headers: { "Content-Type": "text/html" },
+      headers: {
+        ...headers,
+        'Content-Type': 'text/html',
+      },
       body: `
         <!DOCTYPE html>
         <html>
-          <head>
-            <title>Hiba</title>
-            <meta charset="UTF-8">
-            <style>
-              * { margin: 0; padding: 0; box-sizing: border-box; }
-              body {
-                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-                display: flex;
-                justify-content: center;
-                align-items: center;
-                height: 100vh;
-                background: linear-gradient(135deg, #f56565 0%, #c53030 100%);
-              }
-              .container {
-                background: white;
-                padding: 48px;
-                border-radius: 16px;
-                text-align: center;
-                max-width: 400px;
-              }
-              .error-icon { font-size: 72px; margin-bottom: 24px; }
-              h1 { color: #e53e3e; margin-bottom: 12px; }
-              p { color: #4a5568; margin-bottom: 24px; }
-              .close-btn {
-                background: #e53e3e;
-                color: white;
-                border: none;
-                padding: 14px 32px;
-                border-radius: 8px;
-                cursor: pointer;
-                font-size: 16px;
-                font-weight: 600;
-              }
-            </style>
-          </head>
-          <body>
-            <div class="container">
-              <div class="error-icon">❌</div>
-              <h1>Hiba történt</h1>
-              <p>${error.message}</p>
-              <button class="close-btn" onclick="window.close()">Bezárás</button>
-            </div>
-          </body>
+        <head>
+          <meta charset="UTF-8">
+          <title>Hiba történt</title>
+          <style>
+            body { 
+              font-family: Arial, sans-serif; 
+              display: flex; 
+              justify-content: center; 
+              align-items: center; 
+              height: 100vh; 
+              margin: 0;
+              background: #f7fafc;
+            }
+            .container { 
+              text-align: center; 
+              padding: 40px;
+              background: white;
+              border-radius: 12px;
+              box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+              max-width: 500px;
+            }
+            h1 { color: #e53e3e; margin-bottom: 20px; }
+            p { color: #4a5568; margin-bottom: 20px; }
+            .error { 
+              background: #fed7d7; 
+              color: #c53030; 
+              padding: 12px; 
+              border-radius: 6px;
+              font-size: 14px;
+              margin-top: 20px;
+              word-break: break-word;
+            }
+            button {
+              background: #3182ce;
+              color: white;
+              border: none;
+              padding: 12px 24px;
+              border-radius: 6px;
+              cursor: pointer;
+              font-size: 16px;
+              margin-top: 20px;
+            }
+            button:hover { background: #2c5aa0; }
+          </style>
+        </head>
+        <body>
+          <div class="container">
+            <h1>❌ Hiba történt</h1>
+            <p>Nem sikerült hozzáadni a Google fiókot.</p>
+            <div class="error">${error.message}</div>
+            <button onclick="window.close()">Ablak bezárása</button>
+          </div>
+        </body>
         </html>
       `,
     };
