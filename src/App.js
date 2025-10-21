@@ -58,6 +58,8 @@ import {
   Wallet,
   ChevronLeft,
   ChevronRight,
+  ChevronDown,
+  ChevronUp,
   TrendingDown,
   ArrowLeft,
   ArrowRight,
@@ -328,6 +330,7 @@ const FamilyOrganizerApp = () => {
   const [showDepositModal, setShowDepositModal] = useState(false);
   const [selectedGoal, setSelectedGoal] = useState(null);
   const [depositAmount, setDepositAmount] = useState("");
+  const [showAllTransactions, setShowAllTransactions] = useState(false);
 
   //Rendelések statek
   const [showOrderModal, setShowOrderModal] = useState(false);
@@ -1660,19 +1663,49 @@ const FamilyOrganizerApp = () => {
     return `${formatDate(weekStart)} - ${formatDate(weekEnd)}`;
   };
 
-  // Recept importálás URL-ből (valódi web scraping)
   const importRecipeFromUrl = async () => {
     if (!recipeImportUrl.trim()) return;
 
     setImportingRecipe(true);
 
     try {
-      const response = await fetch(
-        `https://api.allorigins.win/raw?url=${encodeURIComponent(
-          recipeImportUrl
-        )}`
-      );
-      const html = await response.text();
+      // Többféle CORS proxy próbálása
+      const proxies = [
+        (url) =>
+          `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`,
+        (url) => `https://corsproxy.io/?${encodeURIComponent(url)}`,
+        (url) =>
+          `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(url)}`,
+      ];
+
+      let html = null;
+      let lastError = null;
+
+      // Próbáljuk meg különböző proxy-kon keresztül
+      for (const proxyFn of proxies) {
+        try {
+          const response = await fetch(proxyFn(recipeImportUrl), {
+            headers: {
+              Accept:
+                "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            },
+          });
+
+          if (response.ok) {
+            html = await response.text();
+            break;
+          }
+        } catch (err) {
+          lastError = err;
+          continue;
+        }
+      }
+
+      if (!html) {
+        throw new Error(
+          "Nem sikerült letölteni az oldalt egyik proxy-val sem. CORS hiba."
+        );
+      }
 
       const parser = new DOMParser();
       const doc = parser.parseFromString(html, "text/html");
@@ -1682,113 +1715,235 @@ const FamilyOrganizerApp = () => {
       let instructions = [];
       let prepTime = 30;
       let servings = 4;
+      let recipeCategory = "főétel";
 
-      // Név keresése
-      const titleSelectors = [
-        "h1",
-        ".recipe-title",
-        '[itemprop="name"]',
-        ".entry-title",
-        "h1.title",
-      ];
-      for (const selector of titleSelectors) {
-        const element = doc.querySelector(selector);
-        if (element && element.textContent.trim()) {
-          recipeName = element.textContent.trim();
-          break;
-        }
-      }
+      // 1. PRÓBÁLKOZÁS: JSON-LD schema.org formátum (a legjobb módszer)
+      const jsonLdScripts = doc.querySelectorAll(
+        'script[type="application/ld+json"]'
+      );
+      let jsonLdFound = false;
 
-      // Hozzávalók keresése
-      const ingredientSelectors = [
-        ".recipe-ingredients li",
-        '[itemprop="recipeIngredient"]',
-        ".ingredients li",
-        ".ingredient-list li",
-        "ul.ingredients li",
-      ];
+      for (const script of jsonLdScripts) {
+        try {
+          const jsonData = JSON.parse(script.textContent);
+          const recipe =
+            jsonData["@type"] === "Recipe"
+              ? jsonData
+              : jsonData["@graph"] &&
+                jsonData["@graph"].find((item) => item["@type"] === "Recipe");
 
-      for (const selector of ingredientSelectors) {
-        const elements = doc.querySelectorAll(selector);
-        if (elements.length > 0) {
-          elements.forEach((el) => {
-            const text = el.textContent.trim();
-            if (text) {
-              const match = text.match(/^([\d\.,\s\/]+)\s*(\w+)?\s*(.+)$/);
-              if (match) {
-                ingredients.push({
-                  name: match[3] || text,
-                  amount: match[1]?.trim() || "1",
-                  unit: match[2] || "db",
-                });
-              } else {
-                ingredients.push({
-                  name: text,
-                  amount: "1",
-                  unit: "db",
-                });
+          if (recipe) {
+            jsonLdFound = true;
+
+            // Név
+            if (recipe.name) {
+              recipeName = recipe.name;
+            }
+
+            // Hozzávalók
+            if (
+              recipe.recipeIngredient &&
+              Array.isArray(recipe.recipeIngredient)
+            ) {
+              ingredients = recipe.recipeIngredient.map((ing) => {
+                const parsed = parseIngredient(ing);
+                return parsed;
+              });
+            }
+
+            // Utasítások
+            if (recipe.recipeInstructions) {
+              if (Array.isArray(recipe.recipeInstructions)) {
+                instructions = recipe.recipeInstructions
+                  .map((inst) => {
+                    if (typeof inst === "string") return inst;
+                    if (inst.text) return inst.text;
+                    if (inst["@type"] === "HowToStep" && inst.text)
+                      return inst.text;
+                    return "";
+                  })
+                  .filter(Boolean);
+              } else if (typeof recipe.recipeInstructions === "string") {
+                instructions = [recipe.recipeInstructions];
               }
             }
-          });
-          if (ingredients.length > 0) break;
-        }
-      }
 
-      // Elkészítés lépései
-      const instructionSelectors = [
-        ".recipe-instructions li",
-        '[itemprop="recipeInstructions"] li',
-        ".instructions li",
-        ".method li",
-        ".steps li",
-        '[itemprop="recipeInstructions"] p',
-        ".recipe-method ol li",
-      ];
-
-      for (const selector of instructionSelectors) {
-        const elements = doc.querySelectorAll(selector);
-        if (elements.length > 0) {
-          elements.forEach((el) => {
-            const text = el.textContent.trim();
-            if (text) {
-              instructions.push(text);
+            // Idő (ISO 8601 formátum: PT30M)
+            if (recipe.totalTime || recipe.cookTime || recipe.prepTime) {
+              const timeStr =
+                recipe.totalTime || recipe.cookTime || recipe.prepTime;
+              const minutes = parseISODuration(timeStr);
+              if (minutes > 0) prepTime = minutes;
             }
-          });
-          if (instructions.length > 0) break;
+
+            // Adagok
+            if (recipe.recipeYield) {
+              const yieldMatch = String(recipe.recipeYield).match(/(\d+)/);
+              if (yieldMatch) servings = parseInt(yieldMatch[1]);
+            }
+
+            // Kategória
+            if (recipe.recipeCategory) {
+              recipeCategory = mapCategory(recipe.recipeCategory);
+            }
+
+            break;
+          }
+        } catch (err) {
+          continue;
         }
       }
 
-      // Idő keresése
-      const timeElement =
-        doc.querySelector('[itemprop="totalTime"]') ||
-        doc.querySelector('[itemprop="cookTime"]') ||
-        doc.querySelector(".recipe-time");
-      if (timeElement) {
-        const timeMatch = timeElement.textContent.match(/(\d+)/);
-        if (timeMatch) {
-          prepTime = parseInt(timeMatch[1]);
+      // 2. PRÓBÁLKOZÁS: HTML parsing (ha JSON-LD nem található)
+      if (!jsonLdFound || !recipeName) {
+        // Név keresése
+        const titleSelectors = [
+          'h1[class*="recipe"]',
+          'h1[class*="title"]',
+          '[itemprop="name"]',
+          "h1.entry-title",
+          "h1.post-title",
+          "h1",
+          ".recipe-title",
+        ];
+
+        for (const selector of titleSelectors) {
+          const element = doc.querySelector(selector);
+          if (
+            element &&
+            element.textContent.trim() &&
+            element.textContent.length < 200
+          ) {
+            recipeName = element.textContent.trim();
+            break;
+          }
+        }
+
+        // Hozzávalók keresése
+        if (ingredients.length === 0) {
+          const ingredientSelectors = [
+            ".recipe-ingredients li",
+            ".wprm-recipe-ingredient",
+            '[itemprop="recipeIngredient"]',
+            ".ingredients li",
+            ".ingredient-list li",
+            "ul.ingredients li",
+            ".ingredient",
+            '[class*="ingredient"] li',
+          ];
+
+          for (const selector of ingredientSelectors) {
+            const elements = doc.querySelectorAll(selector);
+            if (elements.length > 0) {
+              elements.forEach((el) => {
+                const text = el.textContent.trim();
+                if (text && text.length > 2 && text.length < 200) {
+                  ingredients.push(parseIngredient(text));
+                }
+              });
+              if (ingredients.length > 0) break;
+            }
+          }
+        }
+
+        // Elkészítés lépései
+        if (instructions.length === 0) {
+          const instructionSelectors = [
+            ".recipe-instructions li",
+            ".wprm-recipe-instruction-text",
+            '[itemprop="recipeInstructions"] li',
+            '[itemprop="recipeInstructions"] p',
+            ".instructions li",
+            ".method li",
+            ".steps li",
+            ".recipe-method ol li",
+            '[class*="instruction"] li',
+            '[class*="step"]',
+          ];
+
+          for (const selector of instructionSelectors) {
+            const elements = doc.querySelectorAll(selector);
+            if (elements.length > 0) {
+              elements.forEach((el) => {
+                const text = el.textContent.trim();
+                if (text && text.length > 10 && text.length < 1000) {
+                  instructions.push(text);
+                }
+              });
+              if (instructions.length > 0) break;
+            }
+          }
+        }
+
+        // Idő keresése
+        const timeSelectors = [
+          '[itemprop="totalTime"]',
+          '[itemprop="cookTime"]',
+          '[itemprop="prepTime"]',
+          ".recipe-time",
+          ".cook-time",
+          ".prep-time",
+          '[class*="time"]',
+        ];
+
+        for (const selector of timeSelectors) {
+          const timeElement = doc.querySelector(selector);
+          if (timeElement) {
+            const timeText = timeElement.textContent;
+            const timeMatch = timeText.match(
+              /(\d+)\s*(perc|min|minute|óra|hour|h)/i
+            );
+            if (timeMatch) {
+              let time = parseInt(timeMatch[1]);
+              if (
+                timeMatch[2].toLowerCase().includes("óra") ||
+                timeMatch[2].toLowerCase().includes("hour") ||
+                timeMatch[2].toLowerCase() === "h"
+              ) {
+                time *= 60;
+              }
+              prepTime = time;
+              break;
+            }
+          }
+        }
+
+        // Adagok száma
+        const servingsSelectors = [
+          '[itemprop="recipeYield"]',
+          ".recipe-servings",
+          '[class*="serving"]',
+          '[class*="yield"]',
+        ];
+
+        for (const selector of servingsSelectors) {
+          const servingsElement = doc.querySelector(selector);
+          if (servingsElement) {
+            const servingsMatch = servingsElement.textContent.match(/(\d+)/);
+            if (servingsMatch) {
+              servings = parseInt(servingsMatch[1]);
+              break;
+            }
+          }
         }
       }
 
-      // Adagok száma
-      const servingsElement =
-        doc.querySelector('[itemprop="recipeYield"]') ||
-        doc.querySelector(".recipe-servings");
-      if (servingsElement) {
-        const servingsMatch = servingsElement.textContent.match(/(\d+)/);
-        if (servingsMatch) {
-          servings = parseInt(servingsMatch[1]);
-        }
+      // Ellenőrzés: van-e valami értelmes adat?
+      if (
+        !recipeName &&
+        ingredients.length === 0 &&
+        instructions.length === 0
+      ) {
+        throw new Error(
+          "Nem sikerült kinyerni a recept adatokat az oldalról. Az oldal formátuma nem támogatott."
+        );
       }
 
-      if (!recipeName && ingredients.length === 0) {
-        throw new Error("Nem sikerült kinyerni a recept adatokat");
-      }
-
+      // Recept objektum létrehozása
       const importedRecipe = {
         id: Date.now(),
         name: recipeName || "Importált recept",
-        category: "főétel",
+        category: recipeCategory,
         prepTime: prepTime,
         servings: servings,
         difficulty: "közepes",
@@ -1798,13 +1953,16 @@ const FamilyOrganizerApp = () => {
             ? ingredients
             : [{ name: "hozzávaló", amount: "1", unit: "db" }],
         instructions:
-          instructions.length > 0 ? instructions : ["Importált recept lépései"],
+          instructions.length > 0
+            ? instructions
+            : ["Kérlek add meg az elkészítés lépéseit."],
         allergens: [],
         favorite: false,
         source: recipeImportUrl,
         importedAt: new Date().toISOString(),
       };
 
+      // Mentés
       const newData = { ...data };
       if (!newData.recipes) newData.recipes = [];
       newData.recipes.push(importedRecipe);
@@ -1813,18 +1971,130 @@ const FamilyOrganizerApp = () => {
 
       setRecipeImportUrl("");
       setShowRecipeImportModal(false);
+
+      const foundInfo = [];
+      if (recipeName) foundInfo.push("név");
+      if (ingredients.length > 0)
+        foundInfo.push(`${ingredients.length} hozzávaló`);
+      if (instructions.length > 0)
+        foundInfo.push(`${instructions.length} lépés`);
+
       alert(
-        "Recept sikeresen importálva! 🎉\n\nEllenőrizd és módosítsd az adatokat, ha szükséges."
+        `✅ Recept sikeresen importálva!\n\n` +
+          `Megtalált adatok: ${foundInfo.join(", ")}\n\n` +
+          `Kérlek ellenőrizd és módosítsd az adatokat, ha szükséges.`
       );
     } catch (error) {
       console.error("Import hiba:", error);
-      alert(
-        "Hiba történt az importálás során.\n\nLehetséges okok:\n- Az oldal nem támogatja a külső hozzáférést (CORS)\n- A recept formátuma nem ismerhető fel\n\nPróbáld meg manuálisan hozzáadni a receptet!"
-      );
+
+      let errorMessage = "❌ Hiba történt az importálás során.\n\n";
+
+      if (error.message.includes("CORS")) {
+        errorMessage +=
+          "🔒 Az oldal nem engedélyezi a külső hozzáférést (CORS védelem).\n\n" +
+          "Megoldások:\n" +
+          "• Próbáld meg egy másik recept oldalról\n" +
+          "• Másold ki manuálisan a receptet\n" +
+          "• Használj népszerű recept oldalakat (pl. Nosalty, Street Kitchen)";
+      } else if (error.message.includes("nem támogatott")) {
+        errorMessage +=
+          "📄 A recept formátuma nem ismerhető fel.\n\n" +
+          "Próbáld meg:\n" +
+          "• Egy másik URL-ről\n" +
+          "• Olyan oldalról, ahol strukturált recept van\n" +
+          "• Manuális hozzáadás";
+      } else {
+        errorMessage +=
+          "🤔 Ismeretlen hiba történt.\n\n" +
+          "Próbáld újra, vagy add meg manuálisan a receptet!";
+      }
+
+      alert(errorMessage);
     } finally {
       setImportingRecipe(false);
     }
   };
+
+  // Segédfüggvények
+
+  // ISO 8601 időtartam parsing (PT30M -> 30 perc)
+  function parseISODuration(duration) {
+    if (!duration) return 0;
+    const match = duration.match(/PT(?:(\d+)H)?(?:(\d+)M)?/);
+    if (!match) return 0;
+    const hours = parseInt(match[1]) || 0;
+    const minutes = parseInt(match[2]) || 0;
+    return hours * 60 + minutes;
+  }
+
+  // Hozzávaló szöveg elemzése
+  function parseIngredient(text) {
+    // Példák: "2 db tojás", "200 g liszt", "1 csipet só"
+
+    // Tisztítás
+    text = text.replace(/^[-•]\s*/, "").trim();
+
+    // Mennyiség + egység + névPattern
+    const patterns = [
+      // "2 db tojás", "200 g liszt"
+      /^([\d\.,\/\s]+)\s*(db|g|dkg|kg|ml|dl|l|ek|ek\.|tk|tk\.|csipet|csepp|gerezd|szem|csomag|doboz|marék|púpozott|evőkanál|teáskanál)?\s*(.+)$/i,
+      // "1/2 csésze tej"
+      /^([\d\/]+)\s+(csésze|csésze|pohár)\s+(.+)$/i,
+    ];
+
+    for (const pattern of patterns) {
+      const match = text.match(pattern);
+      if (match) {
+        return {
+          name: match[3].trim(),
+          amount: match[1].trim().replace(",", "."),
+          unit: match[2] ? match[2].toLowerCase().replace(".", "") : "db",
+        };
+      }
+    }
+
+    // Ha nem illeszkedik pattern, akkor az egész a név
+    return {
+      name: text,
+      amount: "1",
+      unit: "db",
+    };
+  }
+
+  // Kategória leképezés
+  function mapCategory(category) {
+    const cat = category.toLowerCase();
+
+    if (
+      cat.includes("desszert") ||
+      cat.includes("dessert") ||
+      cat.includes("sütemény")
+    ) {
+      return "desszert";
+    }
+    if (cat.includes("leves") || cat.includes("soup")) {
+      return "leves";
+    }
+    if (
+      cat.includes("előétel") ||
+      cat.includes("appetizer") ||
+      cat.includes("starter")
+    ) {
+      return "előétel";
+    }
+    if (cat.includes("saláta") || cat.includes("salad")) {
+      return "saláta";
+    }
+    if (
+      cat.includes("ital") ||
+      cat.includes("drink") ||
+      cat.includes("beverage")
+    ) {
+      return "ital";
+    }
+
+    return "főétel";
+  }
 
   // Recept törlése
   const deleteRecipe = (recipeId) => {
@@ -3125,94 +3395,105 @@ const FamilyOrganizerApp = () => {
     setSelectedAccounts([]);
   };
 
-  const filterTransactionsByMonthAndAccounts = (transactions) => {
-    return (transactions || []).filter((t) => {
-      if (!t) return false;
+  const filterTransactionsByMonthAndAccounts = (transactionsSource) => {
+    return (transactionsSource || []).filter((t) => {
+      if (!t || !t.date) return false;
 
-      // Privát tranzakciók szűrése
-      if (t.isShared === false && t.ownerId !== currentUser?.uid) {
-        return false;
+      const tDate = new Date(t.date);
+      const isInSelectedMonth =
+        tDate.getMonth() === selectedMonth.getMonth() &&
+        tDate.getFullYear() === selectedMonth.getFullYear();
+
+      // Tranzakció accountId normalizálása (több property név támogatása)
+      const transactionAccountId =
+        t.accountId || t.account_id || t.account || t.selectedAccount;
+
+      // Ha nincs számla kiválasztva, mutasd mind
+      if (selectedAccounts.length === 0) {
+        return isInSelectedMonth;
       }
 
-      // Hónap szűrés
-      const transDate = new Date(t.date);
-      const selectedYear = selectedMonth.getFullYear();
-      const selectedMonthNum = selectedMonth.getMonth();
+      // Ellenőrizd mind string, mind number formában
+      const matchesAccountFilter =
+        selectedAccounts.length === 0 ||
+        selectedAccounts.some((selectedId) => {
+          const tAccountId =
+            t.accountId || t.account_id || t.account || t.selectedAccount;
+          return (
+            String(selectedId) === String(tAccountId) ||
+            selectedId === tAccountId
+          );
+        });
 
-      if (
-        transDate.getFullYear() !== selectedYear ||
-        transDate.getMonth() !== selectedMonthNum
-      ) {
-        return false;
-      }
-
-      // Számla szűrés (ha van kiválasztva konkrét számla)
-      if (
-        selectedAccounts.length > 0 &&
-        !selectedAccounts.includes(t.account)
-      ) {
-        return false;
-      }
-
-      return true;
+      return isInSelectedMonth && matchesAccountFilter;
     });
   };
 
   // Kategóriák szerinti havi költések
-const getCategoryExpenses = () => {
-  const currentMonth = selectedMonth.getMonth();
-  const currentYear = selectedMonth.getFullYear();
-  
-  const monthTransactions = (transactions || []).filter(t => {
-    if (t?.type !== 'expense') return false;
-    const tDate = new Date(t.date);
-    return tDate.getMonth() === currentMonth && tDate.getFullYear() === currentYear;
-  });
+  const getCategoryExpenses = () => {
+    const currentMonth = selectedMonth.getMonth();
+    const currentYear = selectedMonth.getFullYear();
 
-  const categoryTotals = {};
-  monthTransactions.forEach(t => {
-    const category = t?.category || 'Egyéb';
-    if (!categoryTotals[category]) {
-      categoryTotals[category] = 0;
-    }
-    categoryTotals[category] += parseFloat(t?.amount) || 0;
-  });
-
-  return Object.entries(categoryTotals)
-    .map(([category, amount]) => ({
-      kategória: category,
-      összeg: amount
-    }))
-    .sort((a, b) => b.összeg - a.összeg);
-};
-
-// Havi költések az utolsó 6 hónapra
-const getMonthlyExpenses = () => {
-  const months = [];
-  const today = new Date();
-  
-  for (let i = 5; i >= 0; i--) {
-    const date = new Date(today.getFullYear(), today.getMonth() - i, 1);
-    const monthTransactions = (transactions || []).filter(t => {
-      if (t?.type !== 'expense') return false;
+    const monthTransactions = (transactions || []).filter((t) => {
+      if (t?.type !== "expense") return false;
       const tDate = new Date(t.date);
-      return tDate.getMonth() === date.getMonth() && 
-             tDate.getFullYear() === date.getFullYear();
+      return (
+        tDate.getMonth() === currentMonth && tDate.getFullYear() === currentYear
+      );
     });
 
-    const total = monthTransactions.reduce((sum, t) => sum + (parseFloat(t?.amount) || 0), 0);
-    
-    months.push({
-      hónap: date.toLocaleDateString('hu-HU', { month: 'short', year: '2-digit' }),
-      kiadás: total
+    const categoryTotals = {};
+    monthTransactions.forEach((t) => {
+      const category = t?.category || "Egyéb";
+      if (!categoryTotals[category]) {
+        categoryTotals[category] = 0;
+      }
+      categoryTotals[category] += parseFloat(t?.amount) || 0;
     });
-  }
-  
-  return months;
-};
 
-const categoryData = getCategoryExpenses();
-const monthlyData = getMonthlyExpenses();
+    return Object.entries(categoryTotals)
+      .map(([category, amount]) => ({
+        kategória: category,
+        összeg: amount,
+      }))
+      .sort((a, b) => b.összeg - a.összeg);
+  };
+
+  // Havi költések az utolsó 6 hónapra
+  const getMonthlyExpenses = () => {
+    const months = [];
+    const today = new Date();
+
+    for (let i = 5; i >= 0; i--) {
+      const date = new Date(today.getFullYear(), today.getMonth() - i, 1);
+      const monthTransactions = (transactions || []).filter((t) => {
+        if (t?.type !== "expense") return false;
+        const tDate = new Date(t.date);
+        return (
+          tDate.getMonth() === date.getMonth() &&
+          tDate.getFullYear() === date.getFullYear()
+        );
+      });
+
+      const total = monthTransactions.reduce(
+        (sum, t) => sum + (parseFloat(t?.amount) || 0),
+        0
+      );
+
+      months.push({
+        hónap: date.toLocaleDateString("hu-HU", {
+          month: "short",
+          year: "2-digit",
+        }),
+        kiadás: total,
+      });
+    }
+
+    return months;
+  };
+
+  const categoryData = getCategoryExpenses();
+  const monthlyData = getMonthlyExpenses();
 
   // === TRANSACTION KEZELÉS ===
   const openTransactionModal = (type) => {
@@ -5597,7 +5878,18 @@ const monthlyData = getMonthlyExpenses();
           `userId=${currentUser.uid}`
       );
 
+      // Válasz ellenőrzése
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || `HTTP hiba: ${response.status}`);
+      }
+
       const data = await response.json();
+
+      // AuthUrl ellenőrzése
+      if (!data.authUrl) {
+        throw new Error("Nem kaptam auth URL-t a szervertől");
+      }
 
       // OAuth ablak megnyitása
       const width = 500;
@@ -5611,33 +5903,61 @@ const monthlyData = getMonthlyExpenses();
         `width=${width},height=${height},left=${left},top=${top}`
       );
 
+      // Popup blokkolás ellenőrzése
+      if (!authWindow || authWindow.closed) {
+        alert(
+          "⚠️ A böngésző blokkolta a popup ablakot! Kérlek engedélyezd a popup-okat és próbáld újra."
+        );
+        return;
+      }
+
       // Figyelés az ablak bezárására
       const checkWindow = setInterval(async () => {
-        if (authWindow.closed) {
-          clearInterval(checkWindow);
+        try {
+          if (authWindow.closed) {
+            clearInterval(checkWindow);
 
-          // Fiókok újratöltése
-          const accountsResponse = await fetch(
-            `${NETLIFY_FUNCTIONS_URL}/.netlify/functions/get-google-accounts`,
-            {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ userId: currentUser.uid }),
+            // Várakozás a backend feldolgozásra
+            await new Promise((resolve) => setTimeout(resolve, 1000));
+
+            // Fiókok újratöltése
+            const accountsResponse = await fetch(
+              `${NETLIFY_FUNCTIONS_URL}/.netlify/functions/get-google-accounts`,
+              {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ userId: currentUser.uid }),
+              }
+            );
+
+            if (!accountsResponse.ok) {
+              throw new Error("Nem sikerült betölteni a fiókokat");
             }
-          );
 
-          const accountsData = await accountsResponse.json();
-          if (accountsData.success) {
-            setGoogleCalendarAccounts(accountsData.accounts);
-            setShowGoogleAccountModal(false);
-            setGoogleAccountForm({ email: "", name: "", service: "calendar" });
-            alert("✅ Fiók sikeresen hozzáadva!");
+            const accountsData = await accountsResponse.json();
+            if (accountsData.success) {
+              setGoogleCalendarAccounts(accountsData.accounts);
+              setShowGoogleAccountModal(false);
+              setGoogleAccountForm({
+                email: "",
+                name: "",
+                service: "calendar",
+              });
+              alert("✅ Fiók sikeresen hozzáadva!");
+            } else {
+              alert(
+                "⚠️ A fiók hozzáadása megtörtént, de nem sikerült frissíteni a listát. Frissítsd az oldalt!"
+              );
+            }
           }
+        } catch (error) {
+          console.error("Error in checkWindow:", error);
+          clearInterval(checkWindow);
         }
       }, 500);
     } catch (error) {
       console.error("Error adding account:", error);
-      alert("Hiba történt a fiók hozzáadása során!");
+      alert(`❌ Hiba történt a fiók hozzáadása során!\n\n${error.message}`);
     }
   };
 
@@ -5696,6 +6016,33 @@ const monthlyData = getMonthlyExpenses();
     } catch (error) {
       console.error("Error syncing calendar:", error);
       throw error;
+    }
+  };
+
+  // Egy fiók szinkronizálása
+  const syncSingleAccount = async (account) => {
+    try {
+      const eventCount = await syncGoogleCalendar(account.email);
+
+      // LastSync frissítése
+      const updatedAccounts = googleCalendarAccounts.map((acc) =>
+        acc.email === account.email
+          ? { ...acc, lastSync: new Date().toISOString() }
+          : acc
+      );
+
+      setGoogleCalendarAccounts(updatedAccounts);
+
+      const newSettings = {
+        ...settings,
+        googleCalendarAccounts: updatedAccounts,
+      };
+      await updateSettings(newSettings);
+
+      return eventCount;
+    } catch (error) {
+      console.error(`Error syncing ${account.email}:`, error);
+      throw new Error(error.message || "Szinkronizálási hiba");
     }
   };
 
@@ -5806,9 +6153,11 @@ const monthlyData = getMonthlyExpenses();
   };
 
   // Szinkronizáció be/kikapcsolása
-  const toggleAccountSync = async (accountId) => {
+  const toggleAccountSync = async (accountEmail) => {
     const updatedAccounts = googleCalendarAccounts.map((acc) =>
-      acc.id === accountId ? { ...acc, syncEnabled: !acc.syncEnabled } : acc
+      acc.email === accountEmail
+        ? { ...acc, syncEnabled: !acc.syncEnabled }
+        : acc
     );
 
     setGoogleCalendarAccounts(updatedAccounts);
@@ -5817,7 +6166,15 @@ const monthlyData = getMonthlyExpenses();
       ...settings,
       googleCalendarAccounts: updatedAccounts,
     };
-    await updateSettings(newSettings);
+
+    try {
+      await updateSettings(newSettings);
+    } catch (error) {
+      console.error("Error updating sync settings:", error);
+      alert("Nem sikerült menteni a beállítást!");
+      // Visszaállítás hiba esetén
+      setGoogleCalendarAccounts(googleCalendarAccounts);
+    }
   };
 
   const getCalendarEvents = (startDate, endDate) => {
@@ -5988,7 +6345,9 @@ const monthlyData = getMonthlyExpenses();
 
   const getWeekNumber = (date) => {
     const start = new Date(date);
-    start.setDate(start.getDate() - start.getDay());
+    const day = start.getDay();
+    const diff = day === 0 ? 6 : day - 1; // vasárnap esetén 6, egyébként day-1
+    start.setDate(start.getDate() - diff);
     return `${start.getFullYear()}-W${Math.ceil(
       (start.getTime() - new Date(start.getFullYear(), 0, 1).getTime()) /
         (7 * 24 * 60 * 60 * 1000)
@@ -9612,28 +9971,38 @@ const monthlyData = getMonthlyExpenses();
     };
 
     // Színpaletta a kategóriákhoz
-const categoryColors = {
-  'Élelmiszer': '#10b981',      // zöld
-  'Közlekedés': '#3b82f6',      // kék
-  'Szórakozás': '#8b5cf6',      // lila
-  'Rezsi': '#f59e0b',           // narancssárga
-  'Egészség': '#ef4444',        // piros
-  'Ruházat': '#ec4899',         // rózsaszín
-  'Oktatás': '#06b6d4',         // cyan
-  'Háztartás': '#84cc16',       // lime
-  'Kommunikáció': '#6366f1',    // indigo
-  'Sport': '#14b8a6',           // teal
-  'Egyéb': '#64748b'            // szürke
-};
+    const categoryColors = {
+      Élelmiszer: "#10b981", // zöld
+      Közlekedés: "#3b82f6", // kék
+      Szórakozás: "#8b5cf6", // lila
+      Rezsi: "#f59e0b", // narancssárga
+      Egészség: "#ef4444", // piros
+      Ruházat: "#ec4899", // rózsaszín
+      Oktatás: "#06b6d4", // cyan
+      Háztartás: "#84cc16", // lime
+      Kommunikáció: "#6366f1", // indigo
+      Sport: "#14b8a6", // teal
+      Egyéb: "#64748b", // szürke
+    };
 
-const defaultColors = [
-  '#3b82f6', '#ef4444', '#10b981', '#f59e0b', '#8b5cf6', 
-  '#ec4899', '#06b6d4', '#84cc16', '#6366f1', '#14b8a6'
-];
+    const defaultColors = [
+      "#3b82f6",
+      "#ef4444",
+      "#10b981",
+      "#f59e0b",
+      "#8b5cf6",
+      "#ec4899",
+      "#06b6d4",
+      "#84cc16",
+      "#6366f1",
+      "#14b8a6",
+    ];
 
-const getColorForCategory = (category, index) => {
-  return categoryColors[category] || defaultColors[index % defaultColors.length];
-};
+    const getColorForCategory = (category, index) => {
+      return (
+        categoryColors[category] || defaultColors[index % defaultColors.length]
+      );
+    };
 
     // Validate form — returns { ok, message, normalized }
     function validateTransactionForm(form, { requirePositive = true } = {}) {
@@ -9757,6 +10126,111 @@ const getColorForCategory = (category, index) => {
         isShared: a?.isShared,
         keys: a ? Object.keys(a) : [],
       }));
+
+    // Tranzakciók szűrése hónap és számlák szerint
+    const filterTransactionsByMonthAndAccounts = (transactionsSource) => {
+      return (transactionsSource || []).filter((t) => {
+        if (!t || !t.date) return false;
+
+        const tDate = new Date(t.date);
+        const isInSelectedMonth =
+          tDate.getMonth() === selectedMonth.getMonth() &&
+          tDate.getFullYear() === selectedMonth.getFullYear();
+
+        const matchesAccountFilter =
+          selectedAccounts.length === 0 ||
+          selectedAccounts.some((selectedId) => {
+            const tAccountId =
+              t.accountId || t.account_id || t.account || t.selectedAccount;
+            return (
+              String(selectedId) === String(tAccountId) ||
+              selectedId === tAccountId
+            );
+          });
+
+        return isInSelectedMonth && matchesAccountFilter;
+      });
+    };
+
+    // Kategóriánkénti kiadások az aktuális hónapra
+    const categoryData = (() => {
+      const transactionsSource = Array.isArray(data?.transactions)
+        ? data.transactions
+        : Array.isArray(data?.finances?.transactions)
+        ? data.finances.transactions
+        : [];
+
+      const filtered = filterTransactionsByMonthAndAccounts(transactionsSource);
+      const expenses = filtered.filter((t) => t.type === "expense");
+
+      const categoryMap = {};
+      expenses.forEach((t) => {
+        const cat = t.category || "Egyéb";
+        if (!categoryMap[cat]) {
+          categoryMap[cat] = 0;
+        }
+        categoryMap[cat] += parseFloat(t.amount) || 0;
+      });
+
+      return Object.entries(categoryMap)
+        .map(([kategória, összeg]) => ({ kategória, összeg }))
+        .sort((a, b) => b.összeg - a.összeg);
+    })();
+
+    // Havi költések trendje (utolsó 6 hónap)
+    const monthlyData = (() => {
+      const transactionsSource = Array.isArray(data?.transactions)
+        ? data.transactions
+        : Array.isArray(data?.finances?.transactions)
+        ? data.finances.transactions
+        : [];
+
+      const monthlyMap = {};
+      const today = new Date();
+
+      // Utolsó 6 hónap inicializálása
+      for (let i = 5; i >= 0; i--) {
+        const date = new Date(today.getFullYear(), today.getMonth() - i, 1);
+        const key = `${date.getFullYear()}-${String(
+          date.getMonth() + 1
+        ).padStart(2, "0")}`;
+        const monthName = date.toLocaleDateString("hu-HU", {
+          year: "numeric",
+          month: "short",
+        });
+        monthlyMap[key] = { hónap: monthName, kiadás: 0 };
+      }
+
+      // Tranzakciók összesítése
+      transactionsSource.forEach((t) => {
+        if (!t || !t.date || t.type !== "expense") return;
+
+        const tDate = new Date(t.date);
+        const key = `${tDate.getFullYear()}-${String(
+          tDate.getMonth() + 1
+        ).padStart(2, "0")}`;
+
+        if (monthlyMap[key]) {
+          // Számlaszűrő alkalmazása
+          const matchesAccountFilter =
+            selectedAccounts.length === 0 ||
+            selectedAccounts.some((selectedId) => {
+              const tAccountId =
+                t.accountId || t.account_id || t.account || t.selectedAccount;
+              return (
+                String(selectedId) === String(tAccountId) ||
+                selectedId === tAccountId
+              );
+            });
+
+          if (matchesAccountFilter) {
+            monthlyMap[key].kiadás += parseFloat(t.amount) || 0;
+          }
+        }
+      });
+
+      return Object.values(monthlyMap);
+    })();
 
     // --- Full JSX (uses local safe arrays) ---
     return (
@@ -9972,13 +10446,15 @@ const getColorForCategory = (category, index) => {
               ? data.finances.accounts
               : [];
 
-            const visibleAccounts = accountsSource.filter(
-              (acc) =>
-                acc &&
-                acc.id &&
-                (acc.name || acc.displayName) &&
-                (acc.isShared === true || acc.ownerId === currentUser?.uid) // ✅ Egyértelmű true összehasonlítás
-            );
+            const visibleAccounts = accountsSource.filter((acc) => {
+              if (!acc || !acc.id || !(acc.name || acc.displayName))
+                return false;
+
+              // Ha isShared undefined vagy true, akkor megosztott
+              const isShared =
+                typeof acc.isShared === "undefined" ? true : !!acc.isShared;
+              return isShared || acc.ownerId === currentUser?.uid;
+            });
 
             if (visibleAccounts.length === 0) return null;
 
@@ -10029,8 +10505,9 @@ const getColorForCategory = (category, index) => {
 
                 {selectedAccounts.length > 0 && (
                   <p className="text-xs text-gray-500 mt-2">
-                    {visibleAccounts.length - selectedAccounts.length} számla
-                    kiválasztva
+                    {selectedAccounts.length === 0
+                      ? `Minden számla kiválasztva (${visibleAccounts.length} db)`
+                      : `${selectedAccounts.length} számla kiválasztva`}
                   </p>
                 )}
               </div>
@@ -10163,100 +10640,135 @@ const getColorForCategory = (category, index) => {
                     );
                   }
 
-                  return filteredTransactions
-                    .sort((a, b) => new Date(b.date) - new Date(a.date))
-                    .map((transaction) => (
-                      <div
-                        key={transaction.id}
-                        className="flex items-center justify-between p-3 bg-gray-50 rounded-lg hover:bg-gray-100"
-                      >
-                        <div className="flex items-center gap-3 flex-1">
-                          <div
-                            className={`w-10 h-10 rounded-full flex items-center justify-center ${
-                              transaction?.type === "income"
-                                ? "bg-green-100"
-                                : "bg-red-100"
-                            }`}
-                          >
-                            {transaction?.type === "income" ? (
-                              <TrendingUp
-                                size={20}
-                                className="text-green-600"
-                              />
-                            ) : (
-                              <TrendingDown
-                                size={20}
-                                className="text-red-600"
-                              />
-                            )}
-                          </div>
-                          <div className="flex-1">
-                            <div className="flex items-center gap-2">
-                              <p className="font-medium text-gray-800">
-                                {transaction?.category}
-                              </p>
-                              {transaction?.isShared === false && (
-                                <span className="text-xs bg-yellow-100 text-yellow-800 px-2 py-0.5 rounded-full">
-                                  Privát
-                                </span>
-                              )}
-                            </div>
-                            <p className="text-sm text-gray-600">
-                              {transaction?.description || "Nincs leírás"}
-                            </p>
-                            <p className="text-xs text-gray-500">
-                              {transaction?.date
-                                ? new Date(transaction.date).toLocaleDateString(
-                                    "hu-HU"
-                                  )
-                                : ""}{" "}
-                              • {transaction?.accountName}
-                            </p>
-                          </div>
-                          <div className="text-right">
-                            <p
-                              className={`font-bold ${
+                  const sortedTransactions = filteredTransactions.sort(
+                    (a, b) => new Date(b.date) - new Date(a.date)
+                  );
+                  const displayedTransactions = showAllTransactions
+                    ? sortedTransactions
+                    : sortedTransactions.slice(0, 5);
+
+                  return (
+                    <>
+                      {displayedTransactions.map((transaction) => (
+                        <div
+                          key={transaction.id}
+                          className="flex items-center justify-between p-3 bg-gray-50 rounded-lg hover:bg-gray-100"
+                        >
+                          <div className="flex items-center gap-3 flex-1">
+                            <div
+                              className={`w-10 h-10 rounded-full flex items-center justify-center ${
                                 transaction?.type === "income"
-                                  ? "text-green-600"
-                                  : "text-red-600"
+                                  ? "bg-green-100"
+                                  : "bg-red-100"
                               }`}
                             >
-                              {transaction?.type === "income" ? "+" : "-"}
-                              {(
-                                parseFloat(transaction?.amount) || 0
-                              ).toLocaleString()}{" "}
-                              Ft
-                            </p>
+                              {transaction?.type === "income" ? (
+                                <TrendingUp
+                                  size={20}
+                                  className="text-green-600"
+                                />
+                              ) : (
+                                <TrendingDown
+                                  size={20}
+                                  className="text-red-600"
+                                />
+                              )}
+                            </div>
+                            <div className="flex-1">
+                              <div className="flex items-center gap-2">
+                                <p className="font-medium text-gray-800">
+                                  {transaction?.category}
+                                </p>
+                                {transaction?.isShared === false && (
+                                  <span className="text-xs bg-yellow-100 text-yellow-800 px-2 py-0.5 rounded-full">
+                                    Privát
+                                  </span>
+                                )}
+                              </div>
+                              <p className="text-sm text-gray-600">
+                                {transaction?.description || "Nincs leírás"}
+                              </p>
+                              <p className="text-xs text-gray-500">
+                                {transaction?.date
+                                  ? new Date(
+                                      transaction.date
+                                    ).toLocaleDateString("hu-HU")
+                                  : ""}{" "}
+                                • {transaction?.accountName}
+                              </p>
+                            </div>
+                            <div className="text-right">
+                              <p
+                                className={`font-bold ${
+                                  transaction?.type === "income"
+                                    ? "text-green-600"
+                                    : "text-red-600"
+                                }`}
+                              >
+                                {transaction?.type === "income" ? "+" : "-"}
+                                {(
+                                  parseFloat(transaction?.amount) || 0
+                                ).toLocaleString()}{" "}
+                                Ft
+                              </p>
+                            </div>
+                          </div>
+                          <div className="flex gap-1 ml-3">
+                            <button
+                              onClick={() => {
+                                setEditingItem(transaction);
+                                setTransactionType(
+                                  transaction?.type || "expense"
+                                );
+                                setFormData(transaction);
+                                setShowTransactionModal(true);
+                              }}
+                              className="text-blue-600 hover:text-blue-700"
+                            >
+                              <Edit2 size={16} />
+                            </button>
+                            <button
+                              onClick={() =>
+                                setShowDeleteConfirm({
+                                  type: "transaction",
+                                  id: transaction.id,
+                                })
+                              }
+                              className="text-red-600 hover:text-red-700"
+                            >
+                              <Trash2 size={16} />
+                            </button>
                           </div>
                         </div>
-                        <div className="flex gap-1 ml-3">
-                          <button
-                            onClick={() => {
-                              setEditingItem(transaction);
-                              setTransactionType(
-                                transaction?.type || "expense"
-                              );
-                              setFormData(transaction);
-                              setShowTransactionModal(true);
-                            }}
-                            className="text-blue-600 hover:text-blue-700"
-                          >
-                            <Edit2 size={16} />
-                          </button>
+                      ))}
+
+                      {/* Mutass többet/kevesebbet gomb */}
+                      {sortedTransactions.length > 5 && (
+                        <div className="mt-4 text-center">
                           <button
                             onClick={() =>
-                              setShowDeleteConfirm({
-                                type: "transaction",
-                                id: transaction.id,
-                              })
+                              setShowAllTransactions(!showAllTransactions)
                             }
-                            className="text-red-600 hover:text-red-700"
+                            className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition flex items-center gap-2 mx-auto"
                           >
-                            <Trash2 size={16} />
+                            {showAllTransactions ? (
+                              <>
+                                <ChevronUp size={18} />
+                                <span>Kevesebb mutatása (5)</span>
+                              </>
+                            ) : (
+                              <>
+                                <ChevronDown size={18} />
+                                <span>
+                                  Összes mutatása ({sortedTransactions.length})
+                                </span>
+                              </>
+                            )}
                           </button>
                         </div>
-                      </div>
-                    ));
+                      )}
+                    </>
+                  );
                 })()}
               </div>
             </div>
@@ -10264,140 +10776,171 @@ const getColorForCategory = (category, index) => {
         </div>
 
         {/* KIMUTATÁSOK - GRAFIKONOK */}
-<div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
-  <div className="flex items-center gap-2 mb-6">
-    <TrendingDown size={24} className="text-red-600" />
-    <div>
-      <h3 className="font-semibold text-gray-800 text-lg">
-        Költések kategóriák szerint
-      </h3>
-      <p className="text-sm text-gray-600">
-        {selectedMonth.toLocaleDateString('hu-HU', { year: 'numeric', month: 'long' })}
-      </p>
-    </div>
-  </div>
-  
-  {categoryData.length === 0 ? (
-    <div className="text-center py-12 text-gray-500">
-      <TrendingDown size={48} className="mx-auto mb-3 text-gray-400" />
-      <p>Nincs kiadás ebben a hónapban</p>
-    </div>
-  ) : (
-    <>
-      <ResponsiveContainer width="100%" height={350}>
-        <BarChart data={categoryData} margin={{ top: 20, right: 30, left: 20, bottom: 60 }}>
-          <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-          <XAxis 
-            dataKey="kategória" 
-            angle={-45}
-            textAnchor="end"
-            height={100}
-            tick={{ fill: '#666', fontSize: 12 }}
-          />
-          <YAxis 
-            tickFormatter={(value) => `${(value / 1000).toFixed(0)}K Ft`}
-            tick={{ fill: '#666', fontSize: 12 }}
-          />
-          <Tooltip 
-            formatter={(value) => `${value.toLocaleString()} Ft`}
-            contentStyle={{ backgroundColor: 'white', border: '1px solid #ccc', borderRadius: '8px' }}
-          />
-          <Bar 
-          dataKey="összeg" 
-          radius={[8, 8, 0, 0]}
-          maxBarSize={80}
-        >
-          {categoryData.map((entry, index) => (
-            <Cell key={`cell-${index}`} fill={getColorForCategory(entry.kategória, index)} />
-          ))}
-        </Bar>
-          </BarChart>
-      </ResponsiveContainer>
-
-      {/* Színes kategória jelmagyarázat */}
-      <div className="mt-4 flex flex-wrap gap-3 justify-center">
-        {categoryData.map((item, index) => (
-          <div key={item.kategória} className="flex items-center gap-2">
-            <div 
-              className="w-4 h-4 rounded"
-              style={{ backgroundColor: getColorForCategory(item.kategória, index) }}
-            />
-            <span className="text-sm text-gray-700">{item.kategória}</span>
+        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+          <div className="flex items-center gap-2 mb-6">
+            <TrendingDown size={24} className="text-red-600" />
+            <div>
+              <h3 className="font-semibold text-gray-800 text-lg">
+                Költések kategóriák szerint
+              </h3>
+              <p className="text-sm text-gray-600">
+                {selectedMonth.toLocaleDateString("hu-HU", {
+                  year: "numeric",
+                  month: "long",
+                })}
+              </p>
+            </div>
           </div>
-        ))}
-      </div>
-      
-      <div className="mt-6 p-4 bg-red-50 rounded-lg">
-        <p className="text-sm text-gray-700">
-          <span className="font-semibold">Összesen:</span>{' '}
-          <span className="text-red-600 font-bold text-lg">
-            {categoryData.reduce((sum, item) => sum + item.összeg, 0).toLocaleString()} Ft
-          </span>
-        </p>
-      </div>
-    </>
-  )}
-</div>
 
-{/* Havi költések trendje */}
-<div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
-  <div className="flex items-center gap-2 mb-6">
-    <Calendar size={24} className="text-blue-600" />
-    <div>
-      <h3 className="font-semibold text-gray-800 text-lg">
-        Havi költések alakulása
-      </h3>
-      <p className="text-sm text-gray-600">
-        Utolsó 6 hónap összehasonlítása
-      </p>
-    </div>
-  </div>
+          {categoryData.length === 0 ? (
+            <div className="text-center py-12 text-gray-500">
+              <TrendingDown size={48} className="mx-auto mb-3 text-gray-400" />
+              <p>Nincs kiadás ebben a hónapban</p>
+            </div>
+          ) : (
+            <>
+              <ResponsiveContainer width="100%" height={350}>
+                <BarChart
+                  data={categoryData}
+                  margin={{ top: 20, right: 30, left: 20, bottom: 60 }}
+                >
+                  <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+                  <XAxis
+                    dataKey="kategória"
+                    angle={-45}
+                    textAnchor="end"
+                    height={100}
+                    tick={{ fill: "#666", fontSize: 12 }}
+                  />
+                  <YAxis
+                    tickFormatter={(value) =>
+                      `${(value / 1000).toFixed(0)}K Ft`
+                    }
+                    tick={{ fill: "#666", fontSize: 12 }}
+                  />
+                  <Tooltip
+                    formatter={(value) => `${value.toLocaleString()} Ft`}
+                    contentStyle={{
+                      backgroundColor: "white",
+                      border: "1px solid #ccc",
+                      borderRadius: "8px",
+                    }}
+                  />
+                  <Bar dataKey="összeg" radius={[8, 8, 0, 0]} maxBarSize={80}>
+                    {categoryData.map((entry, index) => (
+                      <Cell
+                        key={`cell-${index}`}
+                        fill={getColorForCategory(entry.kategória, index)}
+                      />
+                    ))}
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
 
-  <ResponsiveContainer width="100%" height={350}>
-    <BarChart data={monthlyData} margin={{ top: 20, right: 30, left: 20, bottom: 40 }}>
-      <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-      <XAxis 
-        dataKey="hónap"
-        tick={{ fill: '#666', fontSize: 12 }}
-      />
-      <YAxis 
-        tickFormatter={(value) => `${(value / 1000).toFixed(0)}K Ft`}
-        tick={{ fill: '#666', fontSize: 12 }}
-      />
-      <Tooltip 
-        formatter={(value) => `${value.toLocaleString()} Ft`}
-        contentStyle={{ backgroundColor: 'white', border: '1px solid #ccc', borderRadius: '8px' }}
-      />
-      <Bar 
-        dataKey="kiadás" 
-        fill="#3b82f6" 
-        radius={[8, 8, 0, 0]}
-        maxBarSize={80}
-      />
-    </BarChart>
-  </ResponsiveContainer>
+              {/* Színes kategória jelmagyarázat */}
+              <div className="mt-4 flex flex-wrap gap-3 justify-center">
+                {categoryData.map((item, index) => (
+                  <div key={item.kategória} className="flex items-center gap-2">
+                    <div
+                      className="w-4 h-4 rounded"
+                      style={{
+                        backgroundColor: getColorForCategory(
+                          item.kategória,
+                          index
+                        ),
+                      }}
+                    />
+                    <span className="text-sm text-gray-700">
+                      {item.kategória}
+                    </span>
+                  </div>
+                ))}
+              </div>
 
-  <div className="mt-6 grid grid-cols-3 gap-4">
-    <div className="p-4 bg-blue-50 rounded-lg">
-      <p className="text-xs text-gray-600 mb-1">Átlagos havi kiadás</p>
-      <p className="text-xl font-bold text-blue-600">
-        {Math.round(monthlyData.reduce((sum, m) => sum + m.kiadás, 0) / monthlyData.length).toLocaleString()} Ft
-      </p>
-    </div>
-    <div className="p-4 bg-green-50 rounded-lg">
-      <p className="text-xs text-gray-600 mb-1">Legkisebb</p>
-      <p className="text-xl font-bold text-green-600">
-        {Math.min(...monthlyData.map(m => m.kiadás)).toLocaleString()} Ft
-      </p>
-    </div>
-    <div className="p-4 bg-red-50 rounded-lg">
-      <p className="text-xs text-gray-600 mb-1">Legnagyobb</p>
-      <p className="text-xl font-bold text-red-600">
-        {Math.max(...monthlyData.map(m => m.kiadás)).toLocaleString()} Ft
-      </p>
-    </div>
-  </div>
-</div>
+              <div className="mt-6 p-4 bg-red-50 rounded-lg">
+                <p className="text-sm text-gray-700">
+                  <span className="font-semibold">Összesen:</span>{" "}
+                  <span className="text-red-600 font-bold text-lg">
+                    {categoryData
+                      .reduce((sum, item) => sum + item.összeg, 0)
+                      .toLocaleString()}{" "}
+                    Ft
+                  </span>
+                </p>
+              </div>
+            </>
+          )}
+        </div>
+
+        {/* Havi költések trendje */}
+        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+          <div className="flex items-center gap-2 mb-6">
+            <Calendar size={24} className="text-blue-600" />
+            <div>
+              <h3 className="font-semibold text-gray-800 text-lg">
+                Havi költések alakulása
+              </h3>
+              <p className="text-sm text-gray-600">
+                Utolsó 6 hónap összehasonlítása
+              </p>
+            </div>
+          </div>
+
+          <ResponsiveContainer width="100%" height={350}>
+            <BarChart
+              data={monthlyData}
+              margin={{ top: 20, right: 30, left: 20, bottom: 40 }}
+            >
+              <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+              <XAxis dataKey="hónap" tick={{ fill: "#666", fontSize: 12 }} />
+              <YAxis
+                tickFormatter={(value) => `${(value / 1000).toFixed(0)}K Ft`}
+                tick={{ fill: "#666", fontSize: 12 }}
+              />
+              <Tooltip
+                formatter={(value) => `${value.toLocaleString()} Ft`}
+                contentStyle={{
+                  backgroundColor: "white",
+                  border: "1px solid #ccc",
+                  borderRadius: "8px",
+                }}
+              />
+              <Bar
+                dataKey="kiadás"
+                fill="#3b82f6"
+                radius={[8, 8, 0, 0]}
+                maxBarSize={80}
+              />
+            </BarChart>
+          </ResponsiveContainer>
+
+          <div className="mt-6 grid grid-cols-3 gap-4">
+            <div className="p-4 bg-blue-50 rounded-lg">
+              <p className="text-xs text-gray-600 mb-1">Átlagos havi kiadás</p>
+              <p className="text-xl font-bold text-blue-600">
+                {Math.round(
+                  monthlyData.reduce((sum, m) => sum + m.kiadás, 0) /
+                    monthlyData.length
+                ).toLocaleString()}{" "}
+                Ft
+              </p>
+            </div>
+            <div className="p-4 bg-green-50 rounded-lg">
+              <p className="text-xs text-gray-600 mb-1">Legkisebb</p>
+              <p className="text-xl font-bold text-green-600">
+                {Math.min(...monthlyData.map((m) => m.kiadás)).toLocaleString()}{" "}
+                Ft
+              </p>
+            </div>
+            <div className="p-4 bg-red-50 rounded-lg">
+              <p className="text-xs text-gray-600 mb-1">Legnagyobb</p>
+              <p className="text-xl font-bold text-red-600">
+                {Math.max(...monthlyData.map((m) => m.kiadás)).toLocaleString()}{" "}
+                Ft
+              </p>
+            </div>
+          </div>
+        </div>
 
         {/* Költségvetés (Budget) */}
         {(() => {
@@ -11628,7 +12171,21 @@ const getColorForCategory = (category, index) => {
             <h2 className="text-2xl font-bold text-gray-800">Naptár</h2>
             <div className="flex gap-2">
               <button
-                onClick={syncGoogleCalendar}
+                onClick={async (e) => {
+                  e.preventDefault();
+                  if (!googleCalendarEmail) {
+                    alert(
+                      "Először add meg a Google Calendar email címedet a Beállításokban!"
+                    );
+                    return;
+                  }
+                  try {
+                    const count = await syncGoogleCalendar(googleCalendarEmail);
+                    alert(`Sikeresen szinkronizálva ${count} esemény!`);
+                  } catch (error) {
+                    alert("Hiba történt a szinkronizálás során");
+                  }
+                }}
                 className={`px-4 py-2 ${
                   googleCalendarEnabled ? "bg-green-600" : "bg-gray-400"
                 } text-white rounded-lg hover:opacity-90 font-medium flex items-center gap-2`}
@@ -11890,7 +12447,7 @@ const getColorForCategory = (category, index) => {
                   >
                     <div className="text-center mb-3">
                       <div className="text-xs font-medium text-gray-600 uppercase">
-                        {dayNames[day.getDay()]}
+                        {dayNames[(day.getDay() + 6) % 7]}
                       </div>
                       <div
                         className={`text-2xl font-bold ${
@@ -12499,7 +13056,7 @@ const getColorForCategory = (category, index) => {
         </div>
       </div>
 
-      {/* Gmail Konfiguráció Info */}
+      {/* Gmail Konfiguráció Info 
       <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
         <div className="flex items-center gap-3 mb-4">
           <Mail size={24} className="text-purple-600" />
@@ -12553,6 +13110,7 @@ const getColorForCategory = (category, index) => {
           </div>
         </div>
       </div>
+      */}
 
       <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
         <h3 className="font-semibold text-gray-800 mb-4">Modulok kezelése</h3>
