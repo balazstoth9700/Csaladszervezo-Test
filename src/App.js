@@ -246,12 +246,6 @@ const FamilyOrganizerApp = () => {
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(null);
   const [showWeeklyNoteModal, setShowWeeklyNoteModal] = useState(false); // ÚJ
 
-  const [showKmModal, setShowKmModal] = useState(false);
-  const [showQuickServiceModal, setShowQuickServiceModal] = useState(false);
-  const [showQuickMeterModal, setShowQuickMeterModal] = useState(false);
-  const [showQuickMaintenanceModal, setShowQuickMaintenanceModal] =
-    useState(false);
-  const [selectedVehicle, setSelectedVehicle] = useState(null);
   const [selectedHome, setSelectedHome] = useState(null);
   const [showDateRangeModal, setShowDateRangeModal] = useState(false);
   const [customDateRange, setCustomDateRange] = useState({
@@ -344,9 +338,17 @@ const FamilyOrganizerApp = () => {
   const [chatMessages, setChatMessages] = useState([]);
 
   // Jármű temp statek
+  const [showKmModal, setShowKmModal] = useState(false);
+  const [showQuickServiceModal, setShowQuickServiceModal] = useState(false);
+  const [showQuickMeterModal, setShowQuickMeterModal] = useState(false);
+  const [showQuickMaintenanceModal, setShowQuickMaintenanceModal] =
+    useState(false);
+  const [selectedVehicle, setSelectedVehicle] = useState(null);
   const [showRefuelModal, setShowRefuelModal] = useState(false);
   const [showStatsModal, setShowStatsModal] = useState(false);
-
+  const [editingFueling, setEditingFueling] = useState(null);
+  const [editingFuelingIndex, setEditingFuelingIndex] = useState(null);
+  const [isSaving, setIsSaving] = useState(false);
   const [tempTire, setTempTire] = useState({
     type: "négyévszakos",
     size: "",
@@ -983,17 +985,22 @@ const FamilyOrganizerApp = () => {
   };
 
   const loadUserData = async (userId) => {
+    console.log("🚀 loadUserData indítása, userId:", userId);
+
     try {
       const userDocRef = doc(db, "users", userId);
 
-      // Felhasználó saját adatai (beállítások)
       const unsubscribeUser = onSnapshot(userDocRef, async (docSnap) => {
+        console.log("👤 User snapshot meghívva");
+
         if (docSnap.exists()) {
           const userData = docSnap.data();
+          console.log("📄 userData:", userData);
 
-          // MIGRÁCIÓ - Hiányzó mezők pótlása
           const defaultData = getDefaultData();
+          console.log("🎯 defaultData vehicles:", defaultData.vehicles.length);
 
+          // Settings migráció...
           if (!userData.settings?.mobileBottomNav) {
             userData.settings = {
               ...defaultData.settings,
@@ -1007,14 +1014,71 @@ const FamilyOrganizerApp = () => {
               defaultData.settings.customCategories;
           }
 
-          // Családi adatok migráció
           if (userData.familyId) {
+            console.log("👨‍👩‍👧 familyId található:", userData.familyId);
+
             const familyDocRef = doc(db, "families", userData.familyId);
             onSnapshot(familyDocRef, async (familyDoc) => {
-              if (familyDoc.exists()) {
-                const familyData = familyDoc.data();
+              console.log("👪 Family snapshot meghívva");
 
-                // Hiányzó finances mezők
+              if (familyDoc.exists()) {
+                let familyData = familyDoc.data();
+
+                console.log("📥 FIREBASE-BŐL BETÖLTÖTT ADAT:");
+                console.log(
+                  "  - vehicles count:",
+                  familyData.vehicles?.length || 0
+                );
+                familyData.vehicles?.forEach((v, idx) => {
+                  console.log(`  - Vehicle ${idx}:`, {
+                    name: v.name,
+                    fuelings: v.fuelings?.length || 0,
+                    refuels: v.refuels?.length || 0,
+                    hasFuelingsArray: Array.isArray(v.fuelings),
+                    hasRefuelsArray: Array.isArray(v.refuels),
+                  });
+                });
+
+                // MIGRÁCIÓ ELLENŐRZÉS
+                const needsMigration = familyData.vehicles?.some(
+                  (v) => v.refuels && v.refuels.length > 0
+                );
+
+                console.log("🔍 Migráció szükséges?", needsMigration);
+
+                if (needsMigration) {
+                  console.log("🔄 MIGRÁCIÓ INDÍTÁSA...");
+                  const beforeMigration = JSON.parse(
+                    JSON.stringify(familyData.vehicles)
+                  );
+
+                  familyData = migrateRefuelsToFuelings(familyData);
+
+                  console.log("📤 MIGRÁCIÓ UTÁN:");
+                  familyData.vehicles?.forEach((v, idx) => {
+                    console.log(`  - Vehicle ${idx}:`, {
+                      name: v.name,
+                      fuelings: v.fuelings?.length || 0,
+                      refuels: v.refuels?.length || 0,
+                    });
+                  });
+
+                  try {
+                    const familyDataToSave = { ...familyData };
+                    delete familyDataToSave.settings;
+                    delete familyDataToSave.familyId;
+
+                    console.log("💾 Migrált adat mentése Firebase-be...");
+                    await setDoc(familyDocRef, familyDataToSave, {
+                      merge: true,
+                    });
+                    console.log("✅ Migráció mentve!");
+                  } catch (error) {
+                    console.error("❌ Migráció mentési hiba:", error);
+                  }
+                }
+
+                // Többi migráció...
                 if (!familyData.finances?.accounts) {
                   familyData.finances = {
                     ...familyData.finances,
@@ -1022,7 +1086,6 @@ const FamilyOrganizerApp = () => {
                   };
                 }
 
-                // Családtagok bővítése
                 if (familyData.familyMembers) {
                   familyData.familyMembers = familyData.familyMembers.map(
                     (member) => ({
@@ -1033,7 +1096,6 @@ const FamilyOrganizerApp = () => {
                   );
                 }
 
-                // Gyerekek bővítése
                 if (familyData.children) {
                   familyData.children = familyData.children.map((child) => ({
                     ...child,
@@ -1042,18 +1104,43 @@ const FamilyOrganizerApp = () => {
                   }));
                 }
 
-                setData({
+                // STATE BEÁLLÍTÁSA
+                const finalData = {
                   ...defaultData,
                   ...familyData,
                   familyId: userData.familyId,
                   settings: userData.settings,
+                };
+
+                console.log("🎨 STATE BEÁLLÍTÁSA:");
+                console.log(
+                  "  - defaultData.vehicles:",
+                  defaultData.vehicles.length
+                );
+                console.log(
+                  "  - familyData.vehicles:",
+                  familyData.vehicles?.length || 0
+                );
+                console.log(
+                  "  - finalData.vehicles:",
+                  finalData.vehicles?.length || 0
+                );
+                finalData.vehicles?.forEach((v, idx) => {
+                  console.log(`  - finalData Vehicle ${idx}:`, {
+                    name: v.name,
+                    fuelings: v.fuelings?.length || 0,
+                    refuels: v.refuels?.length || 0,
+                  });
                 });
+
+                setData(finalData);
+                console.log("✅ setData meghívva!");
               }
               setLoading(false);
             });
           }
         } else {
-          // Új felhasználó
+          console.log("🆕 Új felhasználó - default adatok");
           const defaultData = getDefaultData();
           const familyId = await createOrJoinFamily(userId);
           if (familyId) {
@@ -1063,7 +1150,6 @@ const FamilyOrganizerApp = () => {
               settings: defaultData.settings,
             });
 
-            // Családi dokumentum létrehozása
             const familyDocRef = doc(db, "families", familyId);
             const familyDefaultData = { ...defaultData };
             delete familyDefaultData.settings;
@@ -1076,22 +1162,40 @@ const FamilyOrganizerApp = () => {
 
       return () => unsubscribeUser();
     } catch (error) {
-      console.error("Adatok betöltési hiba:", error);
+      console.error("❌ Adatok betöltési hiba:", error);
       setLoading(false);
     }
   };
 
   const saveUserData = async (newData) => {
-    if (!currentUser || !data.familyId) return;
+    console.log("💾 saveUserData MEGHÍVVA!");
+    console.log("📍 Hívási stack:", new Error().stack);
+
+    if (!currentUser || !newData.familyId) {
+      console.log("⚠️ Mentés megszakítva - nincs user vagy familyId");
+      return;
+    }
+
     try {
-      // Családi adatok mentése (megosztott)
-      const familyDocRef = doc(db, "families", data.familyId);
+      const familyDocRef = doc(db, "families", newData.familyId);
       const familyData = { ...newData };
-      delete familyData.settings; // A beállítások felhasználónként külön
+      delete familyData.settings;
       delete familyData.familyId;
+
+      console.log("📤 MENTENDŐ ADAT:");
+      console.log("  - vehicles count:", familyData.vehicles?.length || 0);
+      familyData.vehicles?.forEach((v, idx) => {
+        console.log(`  - Vehicle ${idx}:`, {
+          name: v.name,
+          fuelings: v.fuelings?.length || 0,
+          refuels: v.refuels?.length || 0,
+        });
+      });
+
       await setDoc(familyDocRef, familyData, { merge: true });
 
-      // Saját beállítások mentése
+      console.log("✅ Firebase mentés sikeres!");
+
       if (newData.settings) {
         const userDocRef = doc(db, "users", currentUser.uid);
         await setDoc(
@@ -1101,7 +1205,7 @@ const FamilyOrganizerApp = () => {
         );
       }
     } catch (error) {
-      console.error("Mentési hiba:", error);
+      console.error("❌ Mentési hiba:", error);
       alert("Hiba történt az adatok mentése során!");
     }
   };
@@ -1163,6 +1267,23 @@ const FamilyOrganizerApp = () => {
   };
 
   const generateRecurringTasks = async () => {
+    if (!data.familyId) {
+      console.log("⏸️ Nincs familyId - várunk...");
+      return;
+    }
+
+    if (loading) {
+      console.log("⏸️ Loading állapot - várunk...");
+      return;
+    }
+
+    if (!data.vehicles || data.vehicles.length === 0) {
+      console.log("⏸️ Még nincs vehicle adat - várunk...");
+      return;
+    }
+
+    console.log("✅ generateRecurringTasks futtatása biztonságos!");
+
     const today = new Date();
     const recurringTasks = data.tasks.filter(
       (t) => t.recurring && t.recurring.enabled
@@ -1364,6 +1485,186 @@ const FamilyOrganizerApp = () => {
 
     setData(newData);
     await saveUserData(newData);
+  };
+
+  const openEditFuelingModal = (vehicle, fueling, fuelingIndex) => {
+    setSelectedVehicle(vehicle);
+    setEditingFueling({ ...fueling });
+    setEditingFuelingIndex(fuelingIndex);
+  };
+
+  const saveRefuel = async () => {
+    if (!formData.liters || !formData.cost) {
+      alert("Liter és költség megadása kötelező!");
+      return;
+    }
+
+    setIsSaving(true); // ✅ Konzisztens a többi függvénnyel
+
+    try {
+      const updatedVehicle = {
+        ...selectedVehicle,
+        fuelings: [
+          ...(selectedVehicle.fuelings || []), //
+          {
+            date: formData.date,
+            liters: parseFloat(formData.liters),
+            cost: parseFloat(formData.cost),
+            pricePerLiter: formData.pricePerLiter
+              ? parseFloat(formData.pricePerLiter)
+              : parseFloat(formData.cost) / parseFloat(formData.liters),
+            km: parseInt(formData.km) || selectedVehicle.km || 0,
+            fuelType: formData.fuelType || "benzin",
+            id: Date.now(),
+          },
+        ],
+      };
+
+      const newData = {
+        ...data,
+        vehicles: data.vehicles.map((v) =>
+          v.id === selectedVehicle.id ? updatedVehicle : v
+        ),
+      };
+
+      setData(newData);
+      await saveUserData(newData);
+
+      setShowRefuelModal(false);
+      setFormData({});
+      setSelectedVehicle(null);
+
+      console.log("✅ Tankolás sikeresen mentve!"); // ✅ Konzisztens hibakezeléssel
+    } catch (error) {
+      console.error("❌ Hiba a tankolás mentésekor:", error);
+      alert("Hiba történt a mentés során. Próbáld újra!");
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const openRefuelModal = (vehicle) => {
+    setSelectedVehicle(vehicle);
+    setFormData({
+      date: new Date().toISOString().split("T")[0],
+      liters: "",
+      cost: "",
+      pricePerLiter: "",
+      km: vehicle.km || 0,
+      fuelType: "benzin",
+    });
+    setShowRefuelModal(true);
+  };
+
+  //Tankolás törlése
+  const deleteFueling = async (vehicleId, fuelingIndex) => {
+    setIsSaving(true);
+
+    try {
+      const updatedData = {
+        ...data,
+        vehicles: data.vehicles.map((v) => {
+          if (v.id === vehicleId) {
+            return {
+              ...v,
+              fuelings: (v.fuelings || []).filter(
+                (_, idx) => idx !== fuelingIndex
+              ),
+            };
+          }
+          return v;
+        }),
+      };
+
+      // Lokális állapot frissítése
+      setData(updatedData);
+
+      // Firebase mentés
+      await saveUserData(updatedData);
+
+      // Modal bezárása
+      setShowDeleteConfirm(null);
+
+      // Ha a stats modal nyitva van, frissítjük a selectedVehicle-t
+      if (selectedVehicle && selectedVehicle.id === vehicleId) {
+        const updatedVehicle = updatedData.vehicles.find(
+          (v) => v.id === vehicleId
+        );
+        setSelectedVehicle(updatedVehicle);
+      }
+
+      console.log("✅ Tankolás sikeresen törölve!");
+    } catch (error) {
+      console.error("❌ Hiba a tankolás törlésekor:", error);
+      alert("Hiba történt a törlés során. Próbáld újra!");
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  // 4. TANKOLÁS MÓDOSÍTÁSA
+  const saveEditedFueling = async () => {
+    if (!editingFueling || !selectedVehicle || editingFuelingIndex === null)
+      return;
+
+    // Validálás
+    if (
+      !editingFueling.date ||
+      !editingFueling.km ||
+      !editingFueling.liters ||
+      !editingFueling.cost
+    ) {
+      alert("Kérlek töltsd ki a kötelező mezőket!");
+      return;
+    }
+
+    setIsSaving(true);
+
+    try {
+      // Frissített adatok létrehozása
+      const updatedData = {
+        ...data,
+        vehicles: data.vehicles.map((v) => {
+          if (v.id === selectedVehicle.id) {
+            const newfuelings = [...(v.fuelings || [])]; //
+            newfuelings[editingFuelingIndex] = {
+              ...editingFueling,
+              km: parseInt(editingFueling.km),
+              liters: parseFloat(editingFueling.liters),
+              cost: parseInt(editingFueling.cost),
+            };
+            return {
+              ...v,
+              fuelings: newfuelings, // ← fuelings!
+            };
+          }
+          return v;
+        }),
+      };
+
+      // Lokális állapot frissítése (optimistic update)
+      setData(updatedData);
+
+      // Firebase mentés a meglévő saveUserData függvénnyel
+      await saveUserData(updatedData);
+
+      // Modal bezárása
+      setEditingFueling(null);
+      setEditingFuelingIndex(null);
+
+      // selectedVehicle frissítése
+      const updatedVehicle = updatedData.vehicles.find(
+        (v) => v.id === selectedVehicle.id
+      );
+      setSelectedVehicle(updatedVehicle);
+
+      console.log("✅ Tankolás sikeresen frissítve!");
+    } catch (error) {
+      console.error("❌ Hiba a tankolás frissítésekor:", error);
+      alert("Hiba történt a mentés során. Próbáld újra!");
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   const toggleHealthAppointment = async (appointmentId) => {
@@ -2233,7 +2534,7 @@ const FamilyOrganizerApp = () => {
     setShowShoppingListModal(true);
   };
 
-  // Bevásárlólista elem toggle
+  /* Bevásárlólista elem toggle
   const toggleShoppingItem = (id, field) => {
     setWeekShoppingList((prev) =>
       prev.map((item) =>
@@ -2241,6 +2542,7 @@ const FamilyOrganizerApp = () => {
       )
     );
   };
+  */
 
   // Bevásárlólistába küldés
   const addToMainShoppingList = () => {
@@ -5054,57 +5356,6 @@ const FamilyOrganizerApp = () => {
     setSelectedVehicle(null);
   };
 
-  const openRefuelModal = (vehicle) => {
-    setSelectedVehicle(vehicle);
-    setFormData({
-      date: new Date().toISOString().split("T")[0],
-      liters: "",
-      cost: "",
-      pricePerLiter: "",
-      km: vehicle.km || 0,
-      fuelType: "benzin",
-    });
-    setShowRefuelModal(true);
-  };
-
-  const saveRefuel = async () => {
-    if (!formData.liters || !formData.cost) {
-      alert("Liter és költség megadása kötelező!");
-      return;
-    }
-
-    const updatedVehicle = {
-      ...selectedVehicle,
-      refuels: [
-        ...(selectedVehicle.refuels || []),
-        {
-          date: formData.date,
-          liters: parseFloat(formData.liters),
-          cost: parseFloat(formData.cost),
-          pricePerLiter: formData.pricePerLiter
-            ? parseFloat(formData.pricePerLiter)
-            : parseFloat(formData.cost) / parseFloat(formData.liters),
-          km: parseInt(formData.km) || selectedVehicle.km || 0,
-          fuelType: formData.fuelType || "benzin",
-          id: Date.now(),
-        },
-      ],
-    };
-
-    const newData = {
-      ...data,
-      vehicles: data.vehicles.map((v) =>
-        v.id === selectedVehicle.id ? updatedVehicle : v
-      ),
-    };
-
-    setData(newData);
-    await saveUserData(newData);
-    setShowRefuelModal(false);
-    setFormData({});
-    setSelectedVehicle(null);
-  };
-
   const openStatsModal = (vehicle) => {
     setSelectedVehicle(vehicle);
     const today = new Date();
@@ -5118,14 +5369,14 @@ const FamilyOrganizerApp = () => {
 
   const calculateMonthlyStats = (vehicle, year, month) => {
     const kmHistory = vehicle.kmHistory || [];
-    const refuels = vehicle.refuels || [];
+    const fuelings = vehicle.fuelings || [];
 
     const monthData = {
       kmRecords: kmHistory.filter((k) => {
         const date = new Date(k.date);
         return date.getFullYear() === year && date.getMonth() + 1 === month;
       }),
-      refuels: refuels.filter((r) => {
+      fuelings: fuelings.filter((r) => {
         const date = new Date(r.date);
         return date.getFullYear() === year && date.getMonth() + 1 === month;
       }),
@@ -5135,11 +5386,14 @@ const FamilyOrganizerApp = () => {
       (sum, k) => sum + (k.kmDriven || 0),
       0
     );
-    const totalRefuelCost = monthData.refuels.reduce(
+    const totalRefuelCost = monthData.fuelings.reduce(
       (sum, r) => sum + r.cost,
       0
     );
-    const totalLiters = monthData.refuels.reduce((sum, r) => sum + r.liters, 0);
+    const totalLiters = monthData.fuelings.reduce(
+      (sum, r) => sum + r.liters,
+      0
+    );
     const avgPricePerLiter =
       totalLiters > 0 ? totalRefuelCost / totalLiters : 0;
     const avgConsumption =
@@ -5165,7 +5419,7 @@ const FamilyOrganizerApp = () => {
       totalKm: months.reduce((sum, m) => sum + m.totalKm, 0),
       totalRefuelCost: months.reduce((sum, m) => sum + m.totalRefuelCost, 0),
       totalLiters: months.reduce((sum, m) => sum + m.totalLiters, 0),
-      refuelCount: months.reduce((sum, m) => sum + m.refuels.length, 0),
+      refuelCount: months.reduce((sum, m) => sum + m.fuelings.length, 0),
     };
 
     totals.avgPricePerLiter =
@@ -5642,6 +5896,15 @@ const FamilyOrganizerApp = () => {
     setShowShoppingItemModal(false);
     setFormData({});
     setEditingItem(null);
+  };
+
+  const toggleShoppingItem = (itemId) => {
+    setData({
+      ...data,
+      shoppingList: (data.shoppingList || []).map((item) =>
+        item.id === itemId ? { ...item, checked: !item.checked } : item
+      ),
+    });
   };
 
   const deleteShoppingItem = async (itemId) => {
@@ -19324,10 +19587,250 @@ const FamilyOrganizerApp = () => {
               >
                 Éves áttekintés
               </button>
+              <button
+                onClick={() => setFormData({ ...formData, viewMode: "all" })}
+                className={`px-4 py-2 rounded-lg ${
+                  formData.viewMode === "all"
+                    ? "bg-blue-600 text-white"
+                    : "bg-gray-200 text-gray-700 hover:bg-gray-300"
+                }`}
+              >
+                Összes tankolás
+              </button>
             </div>
 
-            {formData.viewMode === "month" ? (
-              // HAVI NÉZET
+            {formData.viewMode === "all" ? (
+              // ====== ÖSSZES TANKOLÁS NÉZET ======
+              <>
+                {(() => {
+                  const allfuelings = (selectedVehicle.fuelings || []) // ← fuelings!
+                    .map((fueling, index) => ({
+                      ...fueling,
+                      originalIndex: index,
+                    }))
+                    .sort((a, b) => new Date(b.date) - new Date(a.date));
+
+                  const totalLiters = allfuelings.reduce(
+                    (sum, f) => sum + (f.liters || 0),
+                    0
+                  );
+                  const totalCost = allfuelings.reduce(
+                    (sum, f) => sum + (f.cost || 0),
+                    0
+                  );
+                  const avgPricePerLiter =
+                    totalLiters > 0 ? totalCost / totalLiters : 0;
+
+                  return (
+                    <>
+                      {/* Összesítő panel */}
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+                        <div className="bg-blue-50 p-4 rounded-lg">
+                          <p className="text-sm text-gray-600 mb-1">
+                            Összes tankolás
+                          </p>
+                          <p className="text-2xl font-bold text-blue-600">
+                            {allfuelings.length}
+                          </p>
+                        </div>
+                        <div className="bg-orange-50 p-4 rounded-lg">
+                          <p className="text-sm text-gray-600 mb-1">
+                            Összes liter
+                          </p>
+                          <p className="text-2xl font-bold text-orange-600">
+                            {totalLiters.toFixed(1)} L
+                          </p>
+                        </div>
+                        <div className="bg-green-50 p-4 rounded-lg">
+                          <p className="text-sm text-gray-600 mb-1">
+                            Összes költség
+                          </p>
+                          <p className="text-2xl font-bold text-green-600">
+                            {totalCost.toLocaleString()} Ft
+                          </p>
+                        </div>
+                        <div className="bg-purple-50 p-4 rounded-lg">
+                          <p className="text-sm text-gray-600 mb-1">
+                            Átlag ár/liter
+                          </p>
+                          <p className="text-2xl font-bold text-purple-600">
+                            {avgPricePerLiter.toFixed(0)} Ft
+                          </p>
+                        </div>
+                      </div>
+
+                      {/* Tankolások listája */}
+                      <div>
+                        <h5 className="font-semibold text-gray-800 mb-3 flex items-center gap-2">
+                          <DollarSign size={20} className="text-orange-600" />
+                          Összes tankolás ({allfuelings.length})
+                        </h5>
+
+                        {allfuelings.length === 0 ? (
+                          <div className="text-center text-gray-500 py-8">
+                            Még nincs rögzített tankolás
+                          </div>
+                        ) : (
+                          <div className="space-y-3">
+                            {allfuelings.map((fueling, idx) => {
+                              // Fogyasztás számítás
+                              const nextFueling =
+                                idx < allfuelings.length - 1
+                                  ? allfuelings[idx + 1]
+                                  : null;
+                              const kmDriven = nextFueling
+                                ? fueling.km - nextFueling.km
+                                : 0;
+                              const consumption =
+                                kmDriven > 0 && fueling.liters > 0
+                                  ? (fueling.liters / kmDriven) * 100
+                                  : 0;
+
+                              return (
+                                <div
+                                  key={fueling.originalIndex}
+                                  className="bg-white border-2 border-gray-200 rounded-lg p-4 hover:shadow-lg transition-all"
+                                >
+                                  <div className="flex justify-between items-start">
+                                    <div className="flex-1">
+                                      {/* Fejléc */}
+                                      <div className="flex items-center gap-3 mb-3">
+                                        <span className="text-sm font-semibold text-gray-700">
+                                          {new Date(
+                                            fueling.date
+                                          ).toLocaleDateString("hu-HU", {
+                                            year: "numeric",
+                                            month: "long",
+                                            day: "numeric",
+                                          })}
+                                        </span>
+                                        {fueling.fullTank && (
+                                          <span className="px-2 py-1 bg-green-100 text-green-700 text-xs rounded-full font-medium">
+                                            ⛽ Tele tank
+                                          </span>
+                                        )}
+                                      </div>
+
+                                      {/* Adatok */}
+                                      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm mb-3">
+                                        <div>
+                                          <span className="text-gray-600">
+                                            Km állás:
+                                          </span>
+                                          <span className="ml-2 font-semibold text-gray-800">
+                                            {fueling.km?.toLocaleString()} km
+                                          </span>
+                                        </div>
+                                        <div>
+                                          <span className="text-gray-600">
+                                            Mennyiség:
+                                          </span>
+                                          <span className="ml-2 font-semibold text-gray-800">
+                                            {fueling.liters?.toFixed(1)} L
+                                          </span>
+                                        </div>
+                                        <div>
+                                          <span className="text-gray-600">
+                                            Költség:
+                                          </span>
+                                          <span className="ml-2 font-semibold text-blue-600">
+                                            {fueling.cost?.toLocaleString()} Ft
+                                          </span>
+                                        </div>
+                                        <div>
+                                          <span className="text-gray-600">
+                                            Ár/liter:
+                                          </span>
+                                          <span className="ml-2 font-semibold text-gray-800">
+                                            {fueling.cost && fueling.liters
+                                              ? (
+                                                  fueling.cost / fueling.liters
+                                                ).toFixed(0)
+                                              : 0}{" "}
+                                            Ft/L
+                                          </span>
+                                        </div>
+                                      </div>
+
+                                      {/* Üzemanyag típus és fogyasztás */}
+                                      <div className="flex gap-4 text-xs text-gray-600">
+                                        {fueling.fuelType && (
+                                          <span className="px-2 py-1 bg-gray-100 rounded">
+                                            {fueling.fuelType}
+                                          </span>
+                                        )}
+                                        {consumption > 0 && (
+                                          <span className="text-green-600 font-semibold">
+                                            Fogyasztás: {consumption.toFixed(2)}{" "}
+                                            L/100km (
+                                            {(100 / consumption).toFixed(2)}{" "}
+                                            km/L)
+                                          </span>
+                                        )}
+                                      </div>
+
+                                      {/* Megjegyzés */}
+                                      {fueling.note && (
+                                        <div className="mt-2 pt-2 border-t border-gray-100">
+                                          <span className="text-xs text-gray-600">
+                                            Megjegyzés:{" "}
+                                          </span>
+                                          <span className="text-xs text-gray-700">
+                                            {fueling.note}
+                                          </span>
+                                        </div>
+                                      )}
+                                    </div>
+
+                                    {/* Műveletek */}
+                                    <div className="flex gap-2 ml-4">
+                                      <button
+                                        onClick={() =>
+                                          openEditFuelingModal(
+                                            selectedVehicle,
+                                            fueling,
+                                            fueling.originalIndex
+                                          )
+                                        }
+                                        disabled={isSaving}
+                                        className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors disabled:opacity-50"
+                                        title="Szerkesztés"
+                                      >
+                                        <Edit2 size={18} />
+                                      </button>
+                                      <button
+                                        onClick={() =>
+                                          setShowDeleteConfirm({
+                                            type: "fueling",
+                                            vehicleId: selectedVehicle.id,
+                                            fuelingIndex: fueling.originalIndex,
+                                            name: `${new Date(
+                                              fueling.date
+                                            ).toLocaleDateString("hu-HU")} - ${
+                                              fueling.liters
+                                            }L`,
+                                          })
+                                        }
+                                        disabled={isSaving}
+                                        className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors disabled:opacity-50"
+                                        title="Törlés"
+                                      >
+                                        <Trash2 size={18} />
+                                      </button>
+                                    </div>
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
+                    </>
+                  );
+                })()}
+              </>
+            ) : formData.viewMode === "month" ? (
+              // ====== HAVI NÉZET (MEGLÉVŐ KÓDDAL) ======
               <>
                 {/* Hónap navigáció */}
                 <div className="flex items-center justify-between mb-6 bg-gray-50 p-4 rounded-lg">
@@ -19467,42 +19970,89 @@ const FamilyOrganizerApp = () => {
                         </div>
                       )}
 
-                      {/* Tankolások */}
-                      {stats.refuels.length > 0 && (
+                      {/* Tankolások - JAVÍTOTT SZERKESZTÉSSEL */}
+                      {stats.fuelings.length > 0 && (
                         <div>
                           <h5 className="font-semibold text-gray-800 mb-3">
-                            Tankolások
+                            Tankolások ({stats.fuelings.length})
                           </h5>
                           <div className="space-y-2">
-                            {stats.refuels.map((refuel, idx) => (
-                              <div
-                                key={idx}
-                                className="p-3 bg-orange-50 rounded-lg"
-                              >
-                                <div className="flex justify-between items-center mb-1">
-                                  <span className="text-sm text-gray-600">
-                                    {new Date(refuel.date).toLocaleDateString(
-                                      "hu-HU"
-                                    )}
-                                  </span>
-                                  <span className="font-semibold text-orange-600">
-                                    {refuel.cost.toLocaleString()} Ft
-                                  </span>
+                            {stats.fuelings.map((refuel, idx) => {
+                              // Megkeressük az eredeti indexet
+                              const originalIndex = (
+                                selectedVehicle.fuelings || []
+                              ).findIndex(
+                                (r) =>
+                                  r.date === refuel.date &&
+                                  r.km === refuel.km &&
+                                  r.liters === refuel.liters
+                              );
+
+                              return (
+                                <div
+                                  key={idx}
+                                  className="p-3 bg-orange-50 rounded-lg"
+                                >
+                                  <div className="flex justify-between items-center mb-1">
+                                    <span className="text-sm text-gray-600">
+                                      {new Date(refuel.date).toLocaleDateString(
+                                        "hu-HU"
+                                      )}
+                                    </span>
+                                    <div className="flex items-center gap-2">
+                                      <span className="font-semibold text-orange-600">
+                                        {refuel.cost.toLocaleString()} Ft
+                                      </span>
+                                      <button
+                                        onClick={() =>
+                                          openEditFuelingModal(
+                                            selectedVehicle,
+                                            refuel,
+                                            originalIndex
+                                          )
+                                        }
+                                        disabled={isSaving}
+                                        className="p-1 text-blue-600 hover:bg-blue-100 rounded disabled:opacity-50"
+                                        title="Szerkesztés"
+                                      >
+                                        <Edit2 size={14} />
+                                      </button>
+                                      <button
+                                        onClick={() =>
+                                          setShowDeleteConfirm({
+                                            type: "refuel",
+                                            vehicleId: selectedVehicle.id,
+                                            refuelIndex: originalIndex,
+                                            name: `${new Date(
+                                              refuel.date
+                                            ).toLocaleDateString("hu-HU")} - ${
+                                              refuel.liters
+                                            }L`,
+                                          })
+                                        }
+                                        disabled={isSaving}
+                                        className="p-1 text-red-600 hover:bg-red-100 rounded disabled:opacity-50"
+                                        title="Törlés"
+                                      >
+                                        <Trash2 size={14} />
+                                      </button>
+                                    </div>
+                                  </div>
+                                  <div className="text-xs text-gray-600">
+                                    {refuel.liters.toFixed(1)} L •{" "}
+                                    {refuel.pricePerLiter?.toFixed(0)} Ft/L •{" "}
+                                    {refuel.km.toLocaleString()} km •{" "}
+                                    {refuel.fuelType}
+                                  </div>
                                 </div>
-                                <div className="text-xs text-gray-600">
-                                  {refuel.liters.toFixed(1)} L •{" "}
-                                  {refuel.pricePerLiter.toFixed(0)} Ft/L •
-                                  {refuel.km.toLocaleString()} km •{" "}
-                                  {refuel.fuelType}
-                                </div>
-                              </div>
-                            ))}
+                              );
+                            })}
                           </div>
                         </div>
                       )}
 
                       {stats.kmRecords.length === 0 &&
-                        stats.refuels.length === 0 && (
+                        stats.fuelings.length === 0 && (
                           <div className="text-center text-gray-500 py-8">
                             Ebben a hónapban még nincs rögzített adat
                           </div>
@@ -19512,7 +20062,7 @@ const FamilyOrganizerApp = () => {
                 })()}
               </>
             ) : (
-              // ÉVES ÁTTEKINTÉS
+              // ====== ÉVES ÁTTEKINTÉS (MEGLÉVŐ KÓDDAL) ======
               <>
                 {/* Év navigáció */}
                 <div className="flex items-center justify-between mb-6 bg-gray-50 p-4 rounded-lg">
@@ -19632,7 +20182,7 @@ const FamilyOrganizerApp = () => {
                               const monthStats = yearStats.months[idx];
                               const hasData =
                                 monthStats.totalKm > 0 ||
-                                monthStats.refuels.length > 0;
+                                monthStats.fuelings.length > 0;
                               return (
                                 <tr
                                   key={idx}
@@ -19649,8 +20199,8 @@ const FamilyOrganizerApp = () => {
                                       : "-"}
                                   </td>
                                   <td className="px-4 py-2 text-right">
-                                    {monthStats.refuels.length > 0
-                                      ? monthStats.refuels.length
+                                    {monthStats.fuelings.length > 0
+                                      ? monthStats.fuelings.length
                                       : "-"}
                                   </td>
                                   <td className="px-4 py-2 text-right">
@@ -19690,6 +20240,207 @@ const FamilyOrganizerApp = () => {
           </div>
         </div>
       )}
+
+      {/* Edit Refuel Modal */}
+      {editingFueling && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-lg shadow-xl max-w-md w-full p-6">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-xl font-bold text-gray-800">
+                Tankolás szerkesztése
+              </h3>
+              <button
+                onClick={() => {
+                  if (!isSaving) {
+                    setEditingFueling(null);
+                    setEditingFuelingIndex(null);
+                  }
+                }}
+                disabled={isSaving}
+                className="text-gray-500 hover:text-gray-700 disabled:opacity-50"
+              >
+                <X size={24} />
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Jármű
+                </label>
+                <p className="font-semibold text-gray-800">
+                  {selectedVehicle?.name}
+                </p>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Dátum *
+                </label>
+                <input
+                  type="date"
+                  value={editingFueling.date || ""}
+                  onChange={(e) =>
+                    setEditingFueling({
+                      ...editingFueling,
+                      date: e.target.value,
+                    })
+                  }
+                  disabled={isSaving}
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 disabled:bg-gray-100"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Km állás tankoláskor *
+                </label>
+                <input
+                  type="number"
+                  value={editingFueling.km || ""}
+                  onChange={(e) =>
+                    setEditingFueling({ ...editingFueling, km: e.target.value })
+                  }
+                  disabled={isSaving}
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 disabled:bg-gray-100"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Liter *
+                  </label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    value={editingFueling.liters || ""}
+                    onChange={(e) =>
+                      setEditingFueling({
+                        ...editingFueling,
+                        liters: e.target.value,
+                      })
+                    }
+                    disabled={isSaving}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 disabled:bg-gray-100"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Költség (Ft) *
+                  </label>
+                  <input
+                    type="number"
+                    value={editingFueling.cost || ""}
+                    onChange={(e) =>
+                      setEditingFueling({
+                        ...editingFueling,
+                        cost: e.target.value,
+                      })
+                    }
+                    disabled={isSaving}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 disabled:bg-gray-100"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Üzemanyag típus
+                </label>
+                <select
+                  value={editingFueling.fuelType || "benzin"}
+                  onChange={(e) =>
+                    setEditingFueling({
+                      ...editingFueling,
+                      fuelType: e.target.value,
+                    })
+                  }
+                  disabled={isSaving}
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 disabled:bg-gray-100"
+                >
+                  <option value="benzin">Benzin</option>
+                  <option value="dízel">Dízel</option>
+                  <option value="lpg">LPG</option>
+                  <option value="elektromos">Elektromos</option>
+                  <option value="hibrid">Hibrid</option>
+                </select>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  id="editFullTank"
+                  checked={editingFueling.fullTank || false}
+                  onChange={(e) =>
+                    setEditingFueling({
+                      ...editingFueling,
+                      fullTank: e.target.checked,
+                    })
+                  }
+                  disabled={isSaving}
+                  className="w-4 h-4 text-orange-600 border-gray-300 rounded focus:ring-orange-500 disabled:opacity-50"
+                />
+                <label
+                  htmlFor="editFullTank"
+                  className="text-sm font-medium text-gray-700"
+                >
+                  Teletankolás
+                </label>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Megjegyzés
+                </label>
+                <textarea
+                  value={editingFueling.note || ""}
+                  onChange={(e) =>
+                    setEditingFueling({
+                      ...editingFueling,
+                      note: e.target.value,
+                    })
+                  }
+                  disabled={isSaving}
+                  rows={2}
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 disabled:bg-gray-100"
+                  placeholder="pl. Shell kút, highway..."
+                />
+              </div>
+            </div>
+
+            <div className="mt-6 flex gap-3">
+              <button
+                onClick={() => {
+                  if (!isSaving) {
+                    setEditingFueling(null);
+                    setEditingFuelingIndex(null);
+                  }
+                }}
+                disabled={isSaving}
+                className="flex-1 px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                Mégse
+              </button>
+              <button
+                onClick={saveEditedFueling}
+                disabled={isSaving}
+                className="flex-1 px-4 py-2 bg-orange-600 text-white rounded-lg hover:bg-orange-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+              >
+                {isSaving ? (
+                  <>
+                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                    Mentés...
+                  </>
+                ) : (
+                  "Mentés"
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Order Modal */}
       {showOrderModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50 overflow-y-auto">
@@ -21692,6 +22443,11 @@ const FamilyOrganizerApp = () => {
                     deleteHome(showDeleteConfirm.id);
                   else if (showDeleteConfirm.type === "vehicle")
                     deleteVehicle(showDeleteConfirm.id);
+                  else if (showDeleteConfirm.type === "fueling")
+                    deleteFueling(
+                      showDeleteConfirm.vehicleId,
+                      showDeleteConfirm.fuelingIndex
+                    );
                   else if (showDeleteConfirm.type === "health")
                     deleteHealthAppointment(showDeleteConfirm.id);
                   else if (showDeleteConfirm.type === "child")
