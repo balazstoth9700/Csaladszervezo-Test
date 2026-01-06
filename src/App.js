@@ -6994,19 +6994,12 @@ const FamilyOrganizerApp = () => {
     });
 
     data.familyMembers.forEach((member) => {
-      const familyNameDayDate = resolveNameDay(
-        member.nameDay,
-        startDate.getFullYear()
-      );
-      if (
-        familyNameDayDate &&
-        familyNameDayDate >= startDate &&
-        familyNameDayDate <= endDate
-      ) {
+      const nameDayDate = resolveNameDay(member.nameDay, startDate.getFullYear());
+      if (nameDayDate && nameDayDate >= startDate && nameDayDate <= endDate) {
         events.push({
           id: `nameday-${member.id}`,
           title: `${member.name} névnapja`,
-          date: familyNameDayDate,
+          date: nameDayDate,
           type: "névnap",
           color: "bg-yellow-500",
           icon: Gift,
@@ -7035,19 +7028,12 @@ const FamilyOrganizerApp = () => {
         }
       }
 
-      const extendedNameDayDate = resolveNameDay(
-        member.nameDay,
-        startDate.getFullYear()
-      );
-      if (
-        extendedNameDayDate &&
-        extendedNameDayDate >= startDate &&
-        extendedNameDayDate <= endDate
-      ) {
+      const nameDayDate = resolveNameDay(member.nameDay, startDate.getFullYear());
+      if (nameDayDate && nameDayDate >= startDate && nameDayDate <= endDate) {
         events.push({
           id: `extended-nameday-${member.id}`,
           title: `${member.name} névnapja`,
-          date: extendedNameDayDate,
+          date: nameDayDate,
           type: "névnap",
           color: "bg-yellow-500",
           icon: Gift,
@@ -7524,19 +7510,16 @@ const FamilyOrganizerApp = () => {
         }
       }
 
-      const memberNameDayDate = resolveNameDay(
-        member.nameDay,
-        today.getFullYear()
-      );
-      if (memberNameDayDate) {
-        if (memberNameDayDate < today) {
-          memberNameDayDate.setFullYear(today.getFullYear() + 1);
+      const nameDayDate = resolveNameDay(member.nameDay, today.getFullYear());
+      if (nameDayDate) {
+        if (nameDayDate < today) {
+          nameDayDate.setFullYear(today.getFullYear() + 1);
         }
-        if (memberNameDayDate >= today && memberNameDayDate <= endDate) {
+        if (nameDayDate >= today && nameDayDate <= endDate) {
           allTasks.push({
             id: `nameday-${member.id}`,
             title: `${member.name} névnapja`,
-            date: memberNameDayDate,
+            date: nameDayDate,
             category: "család",
             type: "névnap",
             icon: "Gift",
@@ -7578,19 +7561,88 @@ const FamilyOrganizerApp = () => {
         }
       }
 
-      const extendedNameDayDate = resolveNameDay(
-        member.nameDay,
-        today.getFullYear()
-      );
-      if (extendedNameDayDate) {
-        if (extendedNameDayDate < today) {
-          extendedNameDayDate.setFullYear(today.getFullYear() + 1);
+      const nameDayDate = resolveNameDay(member.nameDay, today.getFullYear());
+      if (nameDayDate) {
+        if (nameDayDate < today) {
+          nameDayDate.setFullYear(today.getFullYear() + 1);
         }
-        if (extendedNameDayDate >= today && extendedNameDayDate <= endDate) {
+        if (nameDayDate >= today && nameDayDate <= endDate) {
           allTasks.push({
             id: `extended-nameday-${member.id}`,
             title: `${member.name} névnapja`,
-            date: extendedNameDayDate,
+            date: nameDayDate,
+            category: "család",
+            type: "névnap",
+            icon: "Gift",
+            details: "Névnap",
+            memberId: member.id,
+            memberType: "extended",
+            completed: false,
+          });
+        }
+      }
+
+      const nameDayDate = resolveNameDay(member.nameDay, today.getFullYear());
+      if (nameDayDate) {
+        if (nameDayDate < today) {
+          nameDayDate.setFullYear(today.getFullYear() + 1);
+        }
+        if (nameDayDate >= today && nameDayDate <= endDate) {
+          allTasks.push({
+            id: `nameday-${member.id}`,
+            title: `${member.name} névnapja`,
+            date: nameDayDate,
+            category: "család",
+            type: "névnap",
+            icon: "Gift",
+            details: "Névnap",
+            memberId: member.id,
+            completed: false,
+          });
+        }
+      }
+    });
+
+    (data.extendedFamily || []).forEach((member) => {
+      if (member.birthDate) {
+        const birthDate = new Date(member.birthDate);
+        const thisYearBirth = new Date(
+          today.getFullYear(),
+          birthDate.getMonth(),
+          birthDate.getDate()
+        );
+
+        if (thisYearBirth < today) {
+          thisYearBirth.setFullYear(today.getFullYear() + 1);
+        }
+
+        if (thisYearBirth >= today && thisYearBirth <= endDate) {
+          const age = thisYearBirth.getFullYear() - birthDate.getFullYear();
+          allTasks.push({
+            id: `extended-birthday-${member.id}`,
+            title: `${member.name} születésnapja`,
+            date: thisYearBirth,
+            category: "család",
+            type: "születésnap",
+            icon: "Gift",
+            details: age ? `${age}. születésnap` : "Születésnap",
+            memberId: member.id,
+            memberType: "extended",
+            completed: false,
+          });
+        }
+      }
+
+      const nameDayDate = resolveNameDay(member.nameDay, today.getFullYear());
+      if (nameDayDate) {
+        if (nameDayDate < today) {
+          nameDayDate.setFullYear(today.getFullYear() + 1);
+        }
+        if (nameDayDate >= today && nameDayDate <= endDate) {
+          allTasks.push({
+            id: `extended-nameday-${member.id}`,
+            title: `${member.name} névnapja`,
+            date: nameDayDate,
             category: "család",
             type: "névnap",
             icon: "Gift",
@@ -9199,6 +9251,10 @@ const FamilyOrganizerApp = () => {
             </h3>
             <p className="text-sm text-gray-600">
               A család modul részeként kezelt távolabbi rokonok és barátok
+              Távolabbi családtagok és barátok
+            </h3>
+            <p className="text-sm text-gray-600">
+              Születésnapok, névnapok és ajándékötletek nyilvántartása
             </p>
           </div>
           <button
