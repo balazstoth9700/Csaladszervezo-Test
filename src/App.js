@@ -19518,14 +19518,16 @@ const FamilyOrganizerApp = () => {
                   Üzemanyag típus
                 </label>
                 <select
-                  value={formData.fuelType || "benzin"}
+                  value={formData.fuelType || "premiumdízel"}
                   onChange={(e) =>
                     setFormData({ ...formData, fuelType: e.target.value })
                   }
                   className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
                 >
                   <option value="benzin">Benzin</option>
+                  <option value="premiumbenzin">Prémium benzin</option>
                   <option value="dízel">Dízel</option>
+                  <option value="premiumdízel">Prémium dízel</option>
                   <option value="lpg">LPG</option>
                   <option value="elektromos">Elektromos</option>
                   <option value="hibrid">Hibrid</option>
@@ -20349,7 +20351,7 @@ const FamilyOrganizerApp = () => {
                   Üzemanyag típus
                 </label>
                 <select
-                  value={editingFueling.fuelType || "benzin"}
+                  value={editingFueling.fuelType || "premiumdízel"}
                   onChange={(e) =>
                     setEditingFueling({
                       ...editingFueling,
@@ -20360,7 +20362,9 @@ const FamilyOrganizerApp = () => {
                   className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 disabled:bg-gray-100"
                 >
                   <option value="benzin">Benzin</option>
+                  <option value="premiumbenzin">Prémium benzin</option>
                   <option value="dízel">Dízel</option>
+                  <option value="premiumdízel">Prémium dízel</option>
                   <option value="lpg">LPG</option>
                   <option value="elektromos">Elektromos</option>
                   <option value="hibrid">Hibrid</option>
