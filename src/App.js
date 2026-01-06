@@ -916,7 +916,6 @@ const FamilyOrganizerApp = () => {
     setTouchEnd(null);
     setTouchStart(e.targetTouches[0].clientX);
   };
-/*
   const onTouchMove = (e) => {
     setTouchEnd(e.targetTouches[0].clientX);
   };
@@ -937,7 +936,6 @@ const FamilyOrganizerApp = () => {
       }
     }
   };
-*/
   const handlePasswordReset = async () => {
     if (!resetEmail) {
       setResetMessage("Kérlek add meg az email címed!");
@@ -7006,6 +7004,15 @@ const FamilyOrganizerApp = () => {
 
   const getCalendarEvents = (startDate, endDate) => {
     const events = [];
+    const resolveNameDay = (nameDay, year) => {
+      if (!nameDay) return null;
+      const match = nameDay.trim().match(/^(\d{1,2})[.\-/](\d{1,2})$/);
+      if (!match) return null;
+      const month = parseInt(match[1], 10) - 1;
+      const day = parseInt(match[2], 10);
+      if (Number.isNaN(month) || Number.isNaN(day)) return null;
+      return new Date(year, month, day);
+    };
 
     // Feladatok
     data.tasks.forEach((task) => {
@@ -7407,6 +7414,15 @@ const FamilyOrganizerApp = () => {
     const allTasks = [];
     const today = new Date();
     today.setHours(0, 0, 0, 0);
+    const resolveNameDay = (nameDay, year) => {
+      if (!nameDay) return null;
+      const match = nameDay.trim().match(/^(\d{1,2})[.\-/](\d{1,2})$/);
+      if (!match) return null;
+      const month = parseInt(match[1], 10) - 1;
+      const day = parseInt(match[2], 10);
+      if (Number.isNaN(month) || Number.isNaN(day)) return null;
+      return new Date(year, month, day);
+    };
 
     let endDate;
     if (timeFilter === "today") {
