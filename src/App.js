@@ -6936,16 +6936,6 @@ const FamilyOrganizerApp = () => {
     }
   };
 
-  const getNameDayDate = (nameDay, year) => {
-    if (!nameDay) return null;
-    const match = nameDay.trim().match(/^(\d{1,2})[.\-/](\d{1,2})$/);
-    if (!match) return null;
-    const month = parseInt(match[1], 10) - 1;
-    const day = parseInt(match[2], 10);
-    if (Number.isNaN(month) || Number.isNaN(day)) return null;
-    return new Date(year, month, day);
-  };
-
   const getCalendarEvents = (startDate, endDate) => {
     const events = [];
     const resolveNameDay = (nameDay, year) => {
@@ -7002,19 +6992,6 @@ const FamilyOrganizerApp = () => {
     });
 
     data.familyMembers.forEach((member) => {
-      const familyNameDayDate = getNameDayDate(
-        member.nameDay,
-        startDate.getFullYear()
-      );
-      if (
-        familyNameDayDate &&
-        familyNameDayDate >= startDate &&
-        familyNameDayDate <= endDate
-      ) {
-        events.push({
-          id: `nameday-${member.id}`,
-          title: `${member.name} névnapja`,
-          date: familyNameDayDate,
       const nameDayDate = resolveNameDay(member.nameDay, startDate.getFullYear());
       if (nameDayDate && nameDayDate >= startDate && nameDayDate <= endDate) {
         events.push({
@@ -7049,19 +7026,6 @@ const FamilyOrganizerApp = () => {
         }
       }
 
-      const extendedNameDayDate = getNameDayDate(
-        member.nameDay,
-        startDate.getFullYear()
-      );
-      if (
-        extendedNameDayDate &&
-        extendedNameDayDate >= startDate &&
-        extendedNameDayDate <= endDate
-      ) {
-        events.push({
-          id: `extended-nameday-${member.id}`,
-          title: `${member.name} névnapja`,
-          date: extendedNameDayDate,
       const nameDayDate = resolveNameDay(member.nameDay, startDate.getFullYear());
       if (nameDayDate && nameDayDate >= startDate && nameDayDate <= endDate) {
         events.push({
@@ -7544,19 +7508,6 @@ const FamilyOrganizerApp = () => {
         }
       }
 
-      const memberNameDayDate = getNameDayDate(
-        member.nameDay,
-        today.getFullYear()
-      );
-      if (memberNameDayDate) {
-        if (memberNameDayDate < today) {
-          memberNameDayDate.setFullYear(today.getFullYear() + 1);
-        }
-        if (memberNameDayDate >= today && memberNameDayDate <= endDate) {
-          allTasks.push({
-            id: `nameday-${member.id}`,
-            title: `${member.name} névnapja`,
-            date: memberNameDayDate,
       const nameDayDate = resolveNameDay(member.nameDay, today.getFullYear());
       if (nameDayDate) {
         if (nameDayDate < today) {
@@ -7608,19 +7559,6 @@ const FamilyOrganizerApp = () => {
         }
       }
 
-      const extendedNameDayDate = getNameDayDate(
-        member.nameDay,
-        today.getFullYear()
-      );
-      if (extendedNameDayDate) {
-        if (extendedNameDayDate < today) {
-          extendedNameDayDate.setFullYear(today.getFullYear() + 1);
-        }
-        if (extendedNameDayDate >= today && extendedNameDayDate <= endDate) {
-          allTasks.push({
-            id: `extended-nameday-${member.id}`,
-            title: `${member.name} névnapja`,
-            date: extendedNameDayDate,
       const nameDayDate = resolveNameDay(member.nameDay, today.getFullYear());
       if (nameDayDate) {
         if (nameDayDate < today) {
