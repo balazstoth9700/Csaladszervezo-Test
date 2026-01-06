@@ -6936,6 +6936,16 @@ const FamilyOrganizerApp = () => {
     }
   };
 
+  const getNameDayDate = (nameDay, year) => {
+    if (!nameDay) return null;
+    const match = nameDay.trim().match(/^(\d{1,2})[.\-/](\d{1,2})$/);
+    if (!match) return null;
+    const month = parseInt(match[1], 10) - 1;
+    const day = parseInt(match[2], 10);
+    if (Number.isNaN(month) || Number.isNaN(day)) return null;
+    return new Date(year, month, day);
+  };
+
   const getCalendarEvents = (startDate, endDate) => {
     const events = [];
     const resolveNameDay = (nameDay, year) => {
@@ -6992,12 +7002,19 @@ const FamilyOrganizerApp = () => {
     });
 
     data.familyMembers.forEach((member) => {
-      const nameDayDate = resolveNameDay(member.nameDay, startDate.getFullYear());
-      if (nameDayDate && nameDayDate >= startDate && nameDayDate <= endDate) {
+      const familyNameDayDate = getNameDayDate(
+        member.nameDay,
+        startDate.getFullYear()
+      );
+      if (
+        familyNameDayDate &&
+        familyNameDayDate >= startDate &&
+        familyNameDayDate <= endDate
+      ) {
         events.push({
           id: `nameday-${member.id}`,
           title: `${member.name} névnapja`,
-          date: nameDayDate,
+          date: familyNameDayDate,
           type: "névnap",
           color: "bg-yellow-500",
           icon: Gift,
@@ -7026,12 +7043,19 @@ const FamilyOrganizerApp = () => {
         }
       }
 
-      const nameDayDate = resolveNameDay(member.nameDay, startDate.getFullYear());
-      if (nameDayDate && nameDayDate >= startDate && nameDayDate <= endDate) {
+      const extendedCalendarNameDayDate = getNameDayDate(
+        member.nameDay,
+        startDate.getFullYear()
+      );
+      if (
+        extendedCalendarNameDayDate &&
+        extendedCalendarNameDayDate >= startDate &&
+        extendedCalendarNameDayDate <= endDate
+      ) {
         events.push({
           id: `extended-nameday-${member.id}`,
           title: `${member.name} névnapja`,
-          date: nameDayDate,
+          date: extendedCalendarNameDayDate,
           type: "névnap",
           color: "bg-yellow-500",
           icon: Gift,
@@ -7508,16 +7532,19 @@ const FamilyOrganizerApp = () => {
         }
       }
 
-      const nameDayDate = resolveNameDay(member.nameDay, today.getFullYear());
-      if (nameDayDate) {
-        if (nameDayDate < today) {
-          nameDayDate.setFullYear(today.getFullYear() + 1);
+      const memberNameDayDate = getNameDayDate(
+        member.nameDay,
+        today.getFullYear()
+      );
+      if (memberNameDayDate) {
+        if (memberNameDayDate < today) {
+          memberNameDayDate.setFullYear(today.getFullYear() + 1);
         }
-        if (nameDayDate >= today && nameDayDate <= endDate) {
+        if (memberNameDayDate >= today && memberNameDayDate <= endDate) {
           allTasks.push({
             id: `nameday-${member.id}`,
             title: `${member.name} névnapja`,
-            date: nameDayDate,
+            date: memberNameDayDate,
             category: "család",
             type: "névnap",
             icon: "Gift",
@@ -7559,88 +7586,22 @@ const FamilyOrganizerApp = () => {
         }
       }
 
-      const nameDayDate = resolveNameDay(member.nameDay, today.getFullYear());
-      if (nameDayDate) {
-        if (nameDayDate < today) {
-          nameDayDate.setFullYear(today.getFullYear() + 1);
+      const extendedMemberNameDayDate = getNameDayDate(
+        member.nameDay,
+        today.getFullYear()
+      );
+      if (extendedMemberNameDayDate) {
+        if (extendedMemberNameDayDate < today) {
+          extendedMemberNameDayDate.setFullYear(today.getFullYear() + 1);
         }
-        if (nameDayDate >= today && nameDayDate <= endDate) {
+        if (
+          extendedMemberNameDayDate >= today &&
+          extendedMemberNameDayDate <= endDate
+        ) {
           allTasks.push({
             id: `extended-nameday-${member.id}`,
             title: `${member.name} névnapja`,
-            date: nameDayDate,
-            category: "család",
-            type: "névnap",
-            icon: "Gift",
-            details: "Névnap",
-            memberId: member.id,
-            memberType: "extended",
-            completed: false,
-          });
-        }
-      }
-
-      const nameDayDate = resolveNameDay(member.nameDay, today.getFullYear());
-      if (nameDayDate) {
-        if (nameDayDate < today) {
-          nameDayDate.setFullYear(today.getFullYear() + 1);
-        }
-        if (nameDayDate >= today && nameDayDate <= endDate) {
-          allTasks.push({
-            id: `nameday-${member.id}`,
-            title: `${member.name} névnapja`,
-            date: nameDayDate,
-            category: "család",
-            type: "névnap",
-            icon: "Gift",
-            details: "Névnap",
-            memberId: member.id,
-            completed: false,
-          });
-        }
-      }
-    });
-
-    (data.extendedFamily || []).forEach((member) => {
-      if (member.birthDate) {
-        const birthDate = new Date(member.birthDate);
-        const thisYearBirth = new Date(
-          today.getFullYear(),
-          birthDate.getMonth(),
-          birthDate.getDate()
-        );
-
-        if (thisYearBirth < today) {
-          thisYearBirth.setFullYear(today.getFullYear() + 1);
-        }
-
-        if (thisYearBirth >= today && thisYearBirth <= endDate) {
-          const age = thisYearBirth.getFullYear() - birthDate.getFullYear();
-          allTasks.push({
-            id: `extended-birthday-${member.id}`,
-            title: `${member.name} születésnapja`,
-            date: thisYearBirth,
-            category: "család",
-            type: "születésnap",
-            icon: "Gift",
-            details: age ? `${age}. születésnap` : "Születésnap",
-            memberId: member.id,
-            memberType: "extended",
-            completed: false,
-          });
-        }
-      }
-
-      const nameDayDate = resolveNameDay(member.nameDay, today.getFullYear());
-      if (nameDayDate) {
-        if (nameDayDate < today) {
-          nameDayDate.setFullYear(today.getFullYear() + 1);
-        }
-        if (nameDayDate >= today && nameDayDate <= endDate) {
-          allTasks.push({
-            id: `extended-nameday-${member.id}`,
-            title: `${member.name} névnapja`,
-            date: nameDayDate,
+            date: extendedMemberNameDayDate,
             category: "család",
             type: "névnap",
             icon: "Gift",
@@ -9249,10 +9210,6 @@ const FamilyOrganizerApp = () => {
             </h3>
             <p className="text-sm text-gray-600">
               A család modul részeként kezelt távolabbi rokonok és barátok
-              Távolabbi családtagok és barátok
-            </h3>
-            <p className="text-sm text-gray-600">
-              Születésnapok, névnapok és ajándékötletek nyilvántartása
             </p>
           </div>
           <button
