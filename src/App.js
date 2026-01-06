@@ -959,7 +959,9 @@ const FamilyOrganizerApp = () => {
 
   const createOrJoinFamily = async (userId) => {
     try {
-      const familyRef = await addDoc(collection(db, "families"), {
+      const familyRef = doc(collection(db, "families"));
+      await setDoc(familyRef, {
+        familyId: familyRef.id,
         createdBy: userId,
         createdAt: new Date().toISOString(),
         members: [
@@ -1378,7 +1380,8 @@ const FamilyOrganizerApp = () => {
             const familyDocRef = doc(db, "families", familyId);
             const familyDefaultData = { ...defaultData };
             delete familyDefaultData.settings;
-            await setDoc(familyDocRef, familyDefaultData);
+            delete familyDefaultData.familyId;
+            await setDoc(familyDocRef, familyDefaultData, { merge: true });
           }
           setData(defaultData);
           setLoading(false);
