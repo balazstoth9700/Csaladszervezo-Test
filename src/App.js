@@ -18,7 +18,6 @@ import {
   addDoc,
   query,
   where,
-  arrayUnion,
 } from "firebase/firestore";
 import {
   Home,
@@ -280,9 +279,6 @@ const FamilyOrganizerApp = () => {
   const [joinRequestMessage, setJoinRequestMessage] = useState("");
   const [isJoinRequesting, setIsJoinRequesting] = useState(false);
   const [familyInvites, setFamilyInvites] = useState([]);
-  const [familyCreationError, setFamilyCreationError] = useState("");
-  const [familyCreationInProgress, setFamilyCreationInProgress] =
-    useState(false);
 
   // Calendar states - ÚJ
   const [calendarView, setCalendarView] = useState("month"); // 'month' vagy 'week'
@@ -1075,7 +1071,7 @@ const FamilyOrganizerApp = () => {
     setJoinRequestMessage("");
 
     try {
-      const inviteDoc = await addDoc(collection(db, "invitations"), {
+      await addDoc(collection(db, "invitations"), {
         familyId: trimmedId,
         requestedUserId: currentUser.uid,
         requestedByEmail: currentUser.email,
@@ -1083,19 +1079,6 @@ const FamilyOrganizerApp = () => {
         status: "pending",
         createdAt: new Date().toISOString(),
       });
-
-      try {
-        await updateDoc(doc(db, "families", trimmedId), {
-          joinRequests: arrayUnion({
-            id: inviteDoc.id,
-            userId: currentUser.uid,
-            email: currentUser.email,
-            createdAt: new Date().toISOString(),
-          }),
-        });
-      } catch (notifyError) {
-        console.warn("Nem sikerült a család értesítése:", notifyError);
-      }
 
       setJoinRequestMessage("Csatlakozási kérelem elküldve.");
       setJoinFamilyId("");
@@ -1106,46 +1089,6 @@ const FamilyOrganizerApp = () => {
       );
     } finally {
       setIsJoinRequesting(false);
-    }
-  };
-
-  const createFamilyFromSettings = async () => {
-    if (!currentUser) {
-      setFamilyCreationError("Be kell jelentkezned a család létrehozásához.");
-      return;
-    }
-
-    setFamilyCreationInProgress(true);
-    setFamilyCreationError("");
-
-    try {
-      const familyId = await createOrJoinFamily(currentUser.uid);
-      if (!familyId) {
-        setFamilyCreationError(
-          "Nem sikerült családot létrehozni. Ellenőrizd a jogosultságokat."
-        );
-        return;
-      }
-
-      const newData = {
-        ...getDefaultData(),
-        familyId,
-        settings,
-      };
-
-      await setDoc(
-        doc(db, "users", currentUser.uid),
-        { familyId, settings },
-        { merge: true }
-      );
-
-      setData(newData);
-      setFamilyCreationError("");
-    } catch (error) {
-      console.error("Család létrehozási hiba:", error);
-      setFamilyCreationError("Nem sikerült családot létrehozni.");
-    } finally {
-      setFamilyCreationInProgress(false);
     }
   };
 
@@ -1436,11 +1379,6 @@ const FamilyOrganizerApp = () => {
             const familyDefaultData = { ...defaultData };
             delete familyDefaultData.settings;
             await setDoc(familyDocRef, familyDefaultData);
-            setFamilyCreationError("");
-          } else {
-            setFamilyCreationError(
-              "Nem sikerült családot létrehozni. Ellenőrizd a jogosultságokat, vagy csatlakozz egy meglévő családhoz."
-            );
           }
           setData(defaultData);
           setLoading(false);
@@ -14208,8 +14146,7 @@ const FamilyOrganizerApp = () => {
               member.userId === currentUser?.uid && member.role === "admin"
           );
           const pendingJoinRequests = familyInvites.filter(
-            (invite) =>
-              invite.type === "join_request" && invite.status === "pending"
+            (invite) => invite.type === "join_request" && invite.status === "pending"
           );
 
           return (
@@ -14221,33 +14158,9 @@ const FamilyOrganizerApp = () => {
                 {data.familyId}
               </p>
             ) : (
-              <div className="space-y-2">
-                {loading ? (
-                  <div className="flex items-center gap-2">
-                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600"></div>
-                    <p className="text-sm text-gray-600">Betöltés...</p>
-                  </div>
-                ) : (
-                  <p className="text-sm text-gray-600">
-                    Nincs hozzárendelt család.
-                  </p>
-                )}
-                {familyCreationError && (
-                  <p className="text-xs text-red-600">
-                    {familyCreationError}
-                  </p>
-                )}
-                {!data.familyId && !loading && (
-                  <button
-                    onClick={createFamilyFromSettings}
-                    disabled={familyCreationInProgress}
-                    className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
-                  >
-                    {familyCreationInProgress
-                      ? "Létrehozás..."
-                      : "Új család létrehozása"}
-                  </button>
-                )}
+              <div className="flex items-center gap-2">
+                <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600"></div>
+                <p className="text-sm text-gray-600">Betöltés...</p>
               </div>
             )}
           </div>
@@ -14339,8 +14252,7 @@ const FamilyOrganizerApp = () => {
                         {invite.requestedByEmail || "Ismeretlen felhasználó"}
                       </p>
                       <p className="text-xs text-gray-600">
-                        Kérelem:{" "}
-                        {new Date(invite.createdAt).toLocaleString("hu-HU")}
+                        Kérelem: {new Date(invite.createdAt).toLocaleString("hu-HU")}
                       </p>
                     </div>
                     <div className="flex gap-2">
