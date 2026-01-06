@@ -106,6 +106,7 @@ const getDefaultData = () => ({
   vehicles: [],
   orders: [],
   familyMembers: [],
+  extendedFamily: [],
   healthAppointments: [],
   children: [],
   tasks: [],
@@ -245,6 +246,8 @@ const FamilyOrganizerApp = () => {
 
   const [showTaskModal, setShowTaskModal] = useState(false);
   const [showMemberModal, setShowMemberModal] = useState(false);
+  const [showExtendedMemberModal, setShowExtendedMemberModal] =
+    useState(false);
   const [showHomeModal, setShowHomeModal] = useState(false);
   const [showVehicleModal, setShowVehicleModal] = useState(false);
   const [showHealthModal, setShowHealthModal] = useState(false);
@@ -422,6 +425,7 @@ const FamilyOrganizerApp = () => {
   const [showMeasurementModal, setShowMeasurementModal] = useState(false);
   const [showCategoryModal, setShowCategoryModal] = useState(false);
   const [selectedMember, setSelectedMember] = useState(null);
+  const [giftIdeaTargetType, setGiftIdeaTargetType] = useState("family");
   const [selectedChild, setSelectedChild] = useState(null);
   const [categoryType, setCategoryType] = useState("shopping");
   const [shoppingView, setShoppingView] = useState("list");
@@ -944,6 +948,8 @@ const FamilyOrganizerApp = () => {
         vehicles: [],
         orders: [],
         familyMembers: [],
+        extendedFamily: [],
+        extendedFamily: [],
         healthAppointments: [],
         children: [],
         tasks: [],
@@ -1111,6 +1117,17 @@ const FamilyOrganizerApp = () => {
                     (member) => ({
                       ...member,
                       bloodPressureLog: member.bloodPressureLog || [],
+                      giftIdeas: member.giftIdeas || [],
+                    })
+                  );
+                }
+
+                if (!familyData.extendedFamily) {
+                  familyData.extendedFamily = [];
+                } else {
+                  familyData.extendedFamily = familyData.extendedFamily.map(
+                    (member) => ({
+                      ...member,
                       giftIdeas: member.giftIdeas || [],
                     })
                   );
@@ -1705,6 +1722,10 @@ const FamilyOrganizerApp = () => {
     alert("Boldog születésnapot! 🎉");
   };
 
+  const markNameDayAsViewed = async (memberId) => {
+    alert("Boldog névnapot! 🎉");
+  };
+
   const deleteTask = async (taskId) => {
     const newData = {
       ...data,
@@ -1777,6 +1798,25 @@ const FamilyOrganizerApp = () => {
       });
     }
     setShowMemberModal(true);
+  };
+
+  const openExtendedMemberModal = (member = null) => {
+    if (member) {
+      setEditingItem(member);
+      setFormData({
+        ...member,
+      });
+    } else {
+      setEditingItem(null);
+      setFormData({
+        name: "",
+        relation: "",
+        birthDate: "",
+        nameDay: "",
+        giftIdeas: [],
+      });
+    }
+    setShowExtendedMemberModal(true);
   };
 
   const openPetModal = (pet = null) => {
@@ -2718,6 +2758,54 @@ const FamilyOrganizerApp = () => {
     setEditingItem(null);
   };
 
+  const saveExtendedMember = async () => {
+    if (!formData.name) {
+      alert("Név kötelező!");
+      return;
+    }
+
+    if (!formData.birthDate && !formData.nameDay) {
+      alert("Adj meg születési dátumot vagy névnapot!");
+      return;
+    }
+
+    let newData;
+    if (editingItem) {
+      newData = {
+        ...data,
+        extendedFamily: (data.extendedFamily || []).map((m) =>
+          m.id === editingItem.id ? { ...formData, id: editingItem.id } : m
+        ),
+      };
+    } else {
+      newData = {
+        ...data,
+        extendedFamily: [
+          ...(data.extendedFamily || []),
+          { ...formData, id: Date.now() },
+        ],
+      };
+    }
+
+    setData(newData);
+    await saveUserData(newData);
+    setShowExtendedMemberModal(false);
+    setFormData({});
+    setEditingItem(null);
+  };
+
+  const deleteExtendedMember = async (memberId) => {
+    const newData = {
+      ...data,
+      extendedFamily: (data.extendedFamily || []).filter(
+        (m) => m.id !== memberId
+      ),
+    };
+    setData(newData);
+    await saveUserData(newData);
+    setShowDeleteConfirm(null);
+  };
+
   const deleteMember = async (memberId) => {
     const newData = {
       ...data,
@@ -2802,8 +2890,9 @@ const FamilyOrganizerApp = () => {
   };
 
   // === AJÁNDÉK ÖTLETEK ===
-  const openGiftIdeaModal = (member) => {
+  const openGiftIdeaModal = (member, targetType = "family") => {
     setSelectedMember(member);
+    setGiftIdeaTargetType(targetType);
     setFormData({
       occasion: "birthday",
       name: "",
@@ -2831,39 +2920,70 @@ const FamilyOrganizerApp = () => {
       addedAt: new Date().toISOString(),
     };
 
-    const newData = {
-      ...data,
-      familyMembers: data.familyMembers.map((m) =>
-        m.id === selectedMember.id
-          ? {
-              ...m,
-              giftIdeas: [...(m.giftIdeas || []), newIdea],
-            }
-          : m
-      ),
-    };
+    let newData;
+    if (giftIdeaTargetType === "extended") {
+      newData = {
+        ...data,
+        extendedFamily: (data.extendedFamily || []).map((m) =>
+          m.id === selectedMember.id
+            ? {
+                ...m,
+                giftIdeas: [...(m.giftIdeas || []), newIdea],
+              }
+            : m
+        ),
+      };
+    } else {
+      newData = {
+        ...data,
+        familyMembers: data.familyMembers.map((m) =>
+          m.id === selectedMember.id
+            ? {
+                ...m,
+                giftIdeas: [...(m.giftIdeas || []), newIdea],
+              }
+            : m
+        ),
+      };
+    }
 
     setData(newData);
     await saveUserData(newData);
     setShowGiftIdeaModal(false);
     setFormData({});
     setSelectedMember(null);
+    setGiftIdeaTargetType("family");
   };
 
-  const deleteGiftIdea = async (memberId, ideaId) => {
-    const newData = {
-      ...data,
-      familyMembers: data.familyMembers.map((m) =>
-        m.id === memberId
-          ? {
-              ...m,
-              giftIdeas: (m.giftIdeas || []).filter(
-                (idea) => idea.id !== ideaId
-              ),
-            }
-          : m
-      ),
-    };
+  const deleteGiftIdea = async (memberId, ideaId, targetType = "family") => {
+    const newData =
+      targetType === "extended"
+        ? {
+            ...data,
+            extendedFamily: (data.extendedFamily || []).map((m) =>
+              m.id === memberId
+                ? {
+                    ...m,
+                    giftIdeas: (m.giftIdeas || []).filter(
+                      (idea) => idea.id !== ideaId
+                    ),
+                  }
+                : m
+            ),
+          }
+        : {
+            ...data,
+            familyMembers: data.familyMembers.map((m) =>
+              m.id === memberId
+                ? {
+                    ...m,
+                    giftIdeas: (m.giftIdeas || []).filter(
+                      (idea) => idea.id !== ideaId
+                    ),
+                  }
+                : m
+            ),
+          };
     setData(newData);
     await saveUserData(newData);
   };
@@ -6624,6 +6744,15 @@ const FamilyOrganizerApp = () => {
 
   const getCalendarEvents = (startDate, endDate) => {
     const events = [];
+    const resolveNameDay = (nameDay, year) => {
+      if (!nameDay) return null;
+      const match = nameDay.trim().match(/^(\d{1,2})[.\-/](\d{1,2})$/);
+      if (!match) return null;
+      const month = parseInt(match[1], 10) - 1;
+      const day = parseInt(match[2], 10);
+      if (Number.isNaN(month) || Number.isNaN(day)) return null;
+      return new Date(year, month, day);
+    };
 
     // Feladatok
     data.tasks.forEach((task) => {
@@ -6665,6 +6794,54 @@ const FamilyOrganizerApp = () => {
             icon: Gift,
           });
         }
+      }
+    });
+
+    data.familyMembers.forEach((member) => {
+      const nameDayDate = resolveNameDay(member.nameDay, startDate.getFullYear());
+      if (nameDayDate && nameDayDate >= startDate && nameDayDate <= endDate) {
+        events.push({
+          id: `nameday-${member.id}`,
+          title: `${member.name} névnapja`,
+          date: nameDayDate,
+          type: "névnap",
+          color: "bg-yellow-500",
+          icon: Gift,
+        });
+      }
+    });
+
+    (data.extendedFamily || []).forEach((member) => {
+      if (member.birthDate) {
+        const birthDate = new Date(member.birthDate);
+        const thisYearBirth = new Date(
+          startDate.getFullYear(),
+          birthDate.getMonth(),
+          birthDate.getDate()
+        );
+
+        if (thisYearBirth >= startDate && thisYearBirth <= endDate) {
+          events.push({
+            id: `extended-birthday-${member.id}`,
+            title: `${member.name} születésnapja`,
+            date: thisYearBirth,
+            type: "születésnap",
+            color: "bg-pink-500",
+            icon: Gift,
+          });
+        }
+      }
+
+      const nameDayDate = resolveNameDay(member.nameDay, startDate.getFullYear());
+      if (nameDayDate && nameDayDate >= startDate && nameDayDate <= endDate) {
+        events.push({
+          id: `extended-nameday-${member.id}`,
+          title: `${member.name} névnapja`,
+          date: nameDayDate,
+          type: "névnap",
+          color: "bg-yellow-500",
+          icon: Gift,
+        });
       }
     });
 
@@ -6963,6 +7140,15 @@ const FamilyOrganizerApp = () => {
     const allTasks = [];
     const today = new Date();
     today.setHours(0, 0, 0, 0);
+    const resolveNameDay = (nameDay, year) => {
+      if (!nameDay) return null;
+      const match = nameDay.trim().match(/^(\d{1,2})[.\-/](\d{1,2})$/);
+      if (!match) return null;
+      const month = parseInt(match[1], 10) - 1;
+      const day = parseInt(match[2], 10);
+      if (Number.isNaN(month) || Number.isNaN(day)) return null;
+      return new Date(year, month, day);
+    };
 
     let endDate;
     if (timeFilter === "today") {
@@ -7122,6 +7308,79 @@ const FamilyOrganizerApp = () => {
             type: "születésnap",
             icon: "Gift",
             details: `${age}. születésnap`,
+            memberId: member.id,
+            completed: false,
+          });
+        }
+      }
+
+      const nameDayDate = resolveNameDay(member.nameDay, today.getFullYear());
+      if (nameDayDate) {
+        if (nameDayDate < today) {
+          nameDayDate.setFullYear(today.getFullYear() + 1);
+        }
+        if (nameDayDate >= today && nameDayDate <= endDate) {
+          allTasks.push({
+            id: `nameday-${member.id}`,
+            title: `${member.name} névnapja`,
+            date: nameDayDate,
+            category: "család",
+            type: "névnap",
+            icon: "Gift",
+            details: "Névnap",
+            memberId: member.id,
+            completed: false,
+          });
+        }
+      }
+    });
+
+    (data.extendedFamily || []).forEach((member) => {
+      if (member.birthDate) {
+        const birthDate = new Date(member.birthDate);
+        const thisYearBirth = new Date(
+          today.getFullYear(),
+          birthDate.getMonth(),
+          birthDate.getDate()
+        );
+
+        if (thisYearBirth < today) {
+          thisYearBirth.setFullYear(today.getFullYear() + 1);
+        }
+
+        if (thisYearBirth >= today && thisYearBirth <= endDate) {
+          const age = thisYearBirth.getFullYear() - birthDate.getFullYear();
+          allTasks.push({
+            id: `extended-birthday-${member.id}`,
+            title: `${member.name} születésnapja`,
+            date: thisYearBirth,
+            category: "család",
+            type: "születésnap",
+            icon: "Gift",
+            details: age ? `${age}. születésnap` : "Születésnap",
+            memberId: member.id,
+            memberType: "extended",
+            completed: false,
+          });
+        }
+      }
+
+      const nameDayDate = resolveNameDay(member.nameDay, today.getFullYear());
+      if (nameDayDate) {
+        if (nameDayDate < today) {
+          nameDayDate.setFullYear(today.getFullYear() + 1);
+        }
+        if (nameDayDate >= today && nameDayDate <= endDate) {
+          allTasks.push({
+            id: `extended-nameday-${member.id}`,
+            title: `${member.name} névnapja`,
+            date: nameDayDate,
+            category: "család",
+            type: "névnap",
+            icon: "Gift",
+            details: "Névnap",
+            memberId: member.id,
+            memberType: "extended",
             completed: false,
           });
         }
@@ -8224,9 +8483,13 @@ const FamilyOrganizerApp = () => {
                             toggleHealthAppointment(appointmentId);
                           }
                         } else if (task.type === "születésnap") {
-                          // task.id formátuma: birthday-{memberId}
-                          const memberId = parseInt(task.id.split("-")[1]);
+                          const memberId =
+                            task.memberId || parseInt(task.id.split("-")[1]);
                           markBirthdayAsViewed(memberId);
+                        } else if (task.type === "névnap") {
+                          const memberId =
+                            task.memberId || parseInt(task.id.split("-")[1]);
+                          markNameDayAsViewed(memberId);
                         }
                       }}
                       className="text-gray-400 hover:text-green-600 transition"
@@ -8343,7 +8606,7 @@ const FamilyOrganizerApp = () => {
 
   const renderOtthon = () => (
     <div className="space-y-6">
-      <div className="flex justify-between items-center">
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
         <h2 className="text-2xl font-bold text-gray-800">Otthon</h2>
         <button
           onClick={() => openHomeModal()}
@@ -8711,6 +8974,167 @@ const FamilyOrganizerApp = () => {
           );
         })
       )}
+
+      <div className="bg-white rounded-lg shadow-sm border border-gray-200">
+        <div className="p-4 border-b border-gray-200 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
+          <div>
+            <h3 className="font-semibold text-gray-800">
+              Távolabbi családtagok és barátok
+            </h3>
+            <p className="text-sm text-gray-600">
+              Születésnapok, névnapok és ajándékötletek nyilvántartása
+            </p>
+          </div>
+          <button
+            onClick={() => openExtendedMemberModal()}
+            className="flex items-center gap-2 bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700"
+          >
+            <Plus size={18} />
+            <span>Új kapcsolat</span>
+          </button>
+        </div>
+
+        {(data.extendedFamily || []).length === 0 ? (
+          <div className="p-8 text-center text-gray-500">
+            <Users size={48} className="mx-auto mb-3 text-gray-400" />
+            <p>Még nincs hozzáadott távolabbi családtag vagy barát</p>
+          </div>
+        ) : (
+          <div className="p-4 grid grid-cols-1 md:grid-cols-2 gap-4">
+            {(data.extendedFamily || []).map((member) => {
+              const birthDate = member.birthDate
+                ? new Date(member.birthDate)
+                : null;
+              return (
+                <div
+                  key={member.id}
+                  className="border border-gray-200 rounded-lg bg-gray-50"
+                >
+                  <div className="p-4 flex items-start justify-between">
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 bg-indigo-100 rounded-full flex items-center justify-center">
+                        <Users size={20} className="text-indigo-600" />
+                      </div>
+                      <div>
+                        <h4 className="font-semibold text-gray-800">
+                          {member.name}
+                        </h4>
+                        <p className="text-sm text-gray-600 capitalize">
+                          {member.relation || "Kapcsolat"}
+                        </p>
+                      </div>
+                    </div>
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => openExtendedMemberModal(member)}
+                        className="p-2 text-blue-600 hover:bg-blue-50 rounded"
+                      >
+                        <Edit2 size={16} />
+                      </button>
+                      <button
+                        onClick={() =>
+                          setShowDeleteConfirm({
+                            type: "extendedMember",
+                            id: member.id,
+                            name: member.name,
+                          })
+                        }
+                        className="p-2 text-red-600 hover:bg-red-50 rounded"
+                      >
+                        <Trash2 size={16} />
+                      </button>
+                    </div>
+                  </div>
+                  <div className="px-4 pb-4 grid grid-cols-2 gap-3 text-sm">
+                    <div>
+                      <p className="text-gray-600">Születésnap</p>
+                      <p className="font-medium text-gray-800">
+                        {birthDate
+                          ? birthDate.toLocaleDateString("hu-HU")
+                          : "-"}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-gray-600">Névnap</p>
+                      <p className="font-medium text-gray-800">
+                        {member.nameDay || "-"}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="border-t border-gray-200 px-4 py-3 bg-indigo-50">
+                    <div className="flex items-center justify-between mb-2">
+                      <h5 className="font-semibold text-gray-800 text-sm flex items-center gap-2">
+                        <Gift size={14} className="text-indigo-600" />
+                        Ajándék ötletek
+                      </h5>
+                      <button
+                        onClick={() => openGiftIdeaModal(member, "extended")}
+                        className="px-3 py-1 text-xs bg-indigo-600 text-white rounded hover:bg-indigo-700"
+                      >
+                        <Plus size={12} />
+                      </button>
+                    </div>
+                    {member.giftIdeas && member.giftIdeas.length > 0 ? (
+                      <div className="space-y-2">
+                        {member.giftIdeas.map((idea) => {
+                          const occasions = {
+                            birthday: "🎂 Születésnap",
+                            christmas: "🎄 Karácsony",
+                            nameday: "📅 Névnap",
+                            anniversary: "💍 Évforduló",
+                            other: "🎁 Egyéb",
+                          };
+                          return (
+                            <div
+                              key={idea.id}
+                              className="bg-white p-2 rounded-lg text-xs"
+                            >
+                              <div className="flex items-start justify-between">
+                                <div className="flex-1">
+                                  <div className="flex items-center gap-2 mb-1">
+                                    <span className="px-2 py-0.5 bg-indigo-100 text-indigo-700 rounded">
+                                      {occasions[idea.occasion]}
+                                    </span>
+                                    {idea.price && (
+                                      <span className="font-semibold text-gray-700">
+                                        {formatCurrency(idea.price, "HUF")}
+                                      </span>
+                                    )}
+                                  </div>
+                                  <p className="font-medium text-gray-800">
+                                    {idea.name}
+                                  </p>
+                                </div>
+                                <button
+                                  onClick={() =>
+                                    deleteGiftIdea(
+                                      member.id,
+                                      idea.id,
+                                      "extended"
+                                    )
+                                  }
+                                  className="text-red-600 hover:text-red-700"
+                                >
+                                  <Trash2 size={12} />
+                                </button>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    ) : (
+                      <p className="text-xs text-gray-500">
+                        Még nincs rögzített ajándék ötlet
+                      </p>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
     </div>
   );
 
@@ -10015,7 +10439,7 @@ const FamilyOrganizerApp = () => {
                     Ajándék ötletek
                   </h4>
                   <button
-                    onClick={() => openGiftIdeaModal(member)}
+                    onClick={() => openGiftIdeaModal(member, "family")}
                     className="px-3 py-1 text-sm bg-purple-600 text-white rounded hover:bg-purple-700"
                   >
                     <Plus size={14} />
@@ -10065,7 +10489,9 @@ const FamilyOrganizerApp = () => {
                               )}
                             </div>
                             <button
-                              onClick={() => deleteGiftIdea(member.id, idea.id)}
+                              onClick={() =>
+                                deleteGiftIdea(member.id, idea.id, "family")
+                              }
                               className="ml-2 text-red-600 hover:text-red-700"
                             >
                               <Trash2 size={14} />
@@ -15928,6 +16354,109 @@ const FamilyOrganizerApp = () => {
           </div>
         </div>
       )}
+      {/* Extended Member Modal */}
+      {showExtendedMemberModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50 overflow-y-auto">
+          <div className="bg-white rounded-lg shadow-xl max-w-md w-full p-6 my-8">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-xl font-bold text-gray-800">
+                {editingItem ? "Kapcsolat szerkesztése" : "Új kapcsolat"}
+              </h3>
+              <button
+                onClick={() => setShowExtendedMemberModal(false)}
+                className="text-gray-500 hover:text-gray-700"
+              >
+                <X size={24} />
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Név *
+                </label>
+                <input
+                  type="text"
+                  value={formData.name || ""}
+                  onChange={(e) =>
+                    setFormData({ ...formData, name: e.target.value })
+                  }
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                  placeholder="pl. Nagymama, barát"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Kapcsolat típusa
+                </label>
+                <select
+                  value={formData.relation || ""}
+                  onChange={(e) =>
+                    setFormData({ ...formData, relation: e.target.value })
+                  }
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                >
+                  <option value="">Válassz...</option>
+                  <option value="nagyszülő">Nagyszülő</option>
+                  <option value="dédszülő">Dédszülő</option>
+                  <option value="nagynéni">Nagynéni</option>
+                  <option value="nagybácsi">Nagybácsi</option>
+                  <option value="unokatestvér">Unokatestvér</option>
+                  <option value="barát">Barát</option>
+                  <option value="egyéb">Egyéb</option>
+                </select>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Születési dátum
+                  </label>
+                  <input
+                    type="date"
+                    value={formData.birthDate || ""}
+                    onChange={(e) =>
+                      setFormData({ ...formData, birthDate: e.target.value })
+                    }
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Névnap (HH-NN)
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="pl. 06-24"
+                    value={formData.nameDay || ""}
+                    onChange={(e) =>
+                      setFormData({ ...formData, nameDay: e.target.value })
+                    }
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+              </div>
+              <p className="text-xs text-gray-500">
+                Legalább a születési dátum vagy a névnap megadása szükséges.
+              </p>
+            </div>
+
+            <div className="mt-6 flex gap-3">
+              <button
+                onClick={() => setShowExtendedMemberModal(false)}
+                className="flex-1 px-4 py-3 border border-gray-300 rounded-lg hover:bg-gray-50"
+              >
+                Mégse
+              </button>
+              <button
+                onClick={saveExtendedMember}
+                className="flex-1 px-4 py-3 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700"
+              >
+                Mentés
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       {/* Home Modal */}
       {showHomeModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50 overflow-y-auto">
@@ -21732,7 +22261,12 @@ const FamilyOrganizerApp = () => {
             <div className="flex justify-between items-center mb-4">
               <h3 className="text-xl font-bold text-gray-800">Ajándék ötlet</h3>
               <button
-                onClick={() => setShowGiftIdeaModal(false)}
+                onClick={() => {
+                  setShowGiftIdeaModal(false);
+                  setGiftIdeaTargetType("family");
+                  setSelectedMember(null);
+                  setFormData({});
+                }}
                 className="text-gray-500 hover:text-gray-700"
               >
                 <X size={24} />
@@ -21819,7 +22353,12 @@ const FamilyOrganizerApp = () => {
             </div>
             <div className="mt-6 flex gap-3">
               <button
-                onClick={() => setShowGiftIdeaModal(false)}
+                onClick={() => {
+                  setShowGiftIdeaModal(false);
+                  setGiftIdeaTargetType("family");
+                  setSelectedMember(null);
+                  setFormData({});
+                }}
                 className="flex-1 px-4 py-3 border border-gray-300 rounded-lg hover:bg-gray-50"
               >
                 Mégse
@@ -23208,6 +23747,8 @@ const FamilyOrganizerApp = () => {
                 onClick={() => {
                   if (showDeleteConfirm.type === "member")
                     deleteMember(showDeleteConfirm.id);
+                  else if (showDeleteConfirm.type === "extendedMember")
+                    deleteExtendedMember(showDeleteConfirm.id);
                   else if (showDeleteConfirm.type === "home")
                     deleteHome(showDeleteConfirm.id);
                   else if (showDeleteConfirm.type === "vehicle")
