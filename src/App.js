@@ -6994,12 +6994,19 @@ const FamilyOrganizerApp = () => {
     });
 
     data.familyMembers.forEach((member) => {
-      const nameDayDate = resolveNameDay(member.nameDay, startDate.getFullYear());
-      if (nameDayDate && nameDayDate >= startDate && nameDayDate <= endDate) {
+      const familyNameDayDate = resolveNameDay(
+        member.nameDay,
+        startDate.getFullYear()
+      );
+      if (
+        familyNameDayDate &&
+        familyNameDayDate >= startDate &&
+        familyNameDayDate <= endDate
+      ) {
         events.push({
           id: `nameday-${member.id}`,
           title: `${member.name} névnapja`,
-          date: nameDayDate,
+          date: familyNameDayDate,
           type: "névnap",
           color: "bg-yellow-500",
           icon: Gift,
@@ -7028,12 +7035,19 @@ const FamilyOrganizerApp = () => {
         }
       }
 
-      const nameDayDate = resolveNameDay(member.nameDay, startDate.getFullYear());
-      if (nameDayDate && nameDayDate >= startDate && nameDayDate <= endDate) {
+      const extendedNameDayDate = resolveNameDay(
+        member.nameDay,
+        startDate.getFullYear()
+      );
+      if (
+        extendedNameDayDate &&
+        extendedNameDayDate >= startDate &&
+        extendedNameDayDate <= endDate
+      ) {
         events.push({
           id: `extended-nameday-${member.id}`,
           title: `${member.name} névnapja`,
-          date: nameDayDate,
+          date: extendedNameDayDate,
           type: "névnap",
           color: "bg-yellow-500",
           icon: Gift,
@@ -7510,16 +7524,19 @@ const FamilyOrganizerApp = () => {
         }
       }
 
-      const nameDayDate = resolveNameDay(member.nameDay, today.getFullYear());
-      if (nameDayDate) {
-        if (nameDayDate < today) {
-          nameDayDate.setFullYear(today.getFullYear() + 1);
+      const memberNameDayDate = resolveNameDay(
+        member.nameDay,
+        today.getFullYear()
+      );
+      if (memberNameDayDate) {
+        if (memberNameDayDate < today) {
+          memberNameDayDate.setFullYear(today.getFullYear() + 1);
         }
-        if (nameDayDate >= today && nameDayDate <= endDate) {
+        if (memberNameDayDate >= today && memberNameDayDate <= endDate) {
           allTasks.push({
             id: `nameday-${member.id}`,
             title: `${member.name} névnapja`,
-            date: nameDayDate,
+            date: memberNameDayDate,
             category: "család",
             type: "névnap",
             icon: "Gift",
