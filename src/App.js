@@ -913,7 +913,6 @@ const FamilyOrganizerApp = () => {
     setTouchEnd(null);
     setTouchStart(e.targetTouches[0].clientX);
   };
-/*
   const onTouchMove = (e) => {
     setTouchEnd(e.targetTouches[0].clientX);
   };
@@ -934,7 +933,6 @@ const FamilyOrganizerApp = () => {
       }
     }
   };
-*/
   const handlePasswordReset = async () => {
     if (!resetEmail) {
       setResetMessage("Kérlek add meg az email címed!");
