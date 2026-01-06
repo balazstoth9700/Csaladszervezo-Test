@@ -5199,6 +5199,9 @@ const FamilyOrganizerApp = () => {
         currentValue: "",
         currency: "HUF",
         purchaseDate: new Date().toISOString().split("T")[0],
+        interestType: "none",
+        interestPayout: "none",
+        yieldRate: "",
         notes: "",
       });
     }
@@ -5221,6 +5224,9 @@ const FamilyOrganizerApp = () => {
       currency: formData.currency || "HUF",
       purchaseDate:
         formData.purchaseDate || new Date().toISOString().split("T")[0],
+      interestType: formData.interestType || "none",
+      interestPayout: formData.interestPayout || "none",
+      yieldRate: formData.yieldRate ? parseFloat(formData.yieldRate) : "",
       notes: formData.notes || "",
     };
 
@@ -7083,6 +7089,7 @@ const FamilyOrganizerApp = () => {
           id: `health-${appt.id}`,
           title: `${appt.type} - ${person?.name}`,
           date: apptDate,
+          time: appt.startTime || "",
           category: "egészség",
           type: "orvosi időpont",
           icon: "Stethoscope",
@@ -8071,12 +8078,12 @@ const FamilyOrganizerApp = () => {
                 className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
               />
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
               <Filter size={20} className="text-gray-600" />
               <select
                 value={filterCategory}
                 onChange={(e) => setFilterCategory(e.target.value)}
-                className="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                className="w-full sm:w-auto px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
               >
                 <option value="all">Összes kategória</option>
                 <option value="otthon">Otthon</option>
@@ -8092,7 +8099,7 @@ const FamilyOrganizerApp = () => {
                     e.target.value === "all" ? null : e.target.value
                   )
                 }
-                className="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                className="w-full sm:w-auto px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
               >
                 <option value="all">Összes felelős</option>
                 <option value="unassigned">Nincs felelős</option>
@@ -8256,6 +8263,11 @@ const FamilyOrganizerApp = () => {
                           <Calendar size={14} />
                           {task.date.toLocaleDateString("hu-HU")}
                         </span>
+                        {task.time && (
+                          <span className="flex items-center gap-1 text-blue-600">
+                            {task.time}
+                          </span>
+                        )}
                         {task.assignedTo && (
                           <span className="text-blue-600">
                             → {task.assignedTo}
@@ -10362,6 +10374,18 @@ const FamilyOrganizerApp = () => {
       fund: { name: "Alap", icon: "💼", color: "text-indigo-600" },
       other: { name: "Egyéb", icon: "💰", color: "text-gray-600" },
     };
+    const investmentInterestTypes = {
+      fixed: "Fix",
+      variable: "Változó",
+      none: "Nincs",
+    };
+    const investmentPayouts = {
+      none: "Nincs",
+      monthly: "Havi",
+      quarterly: "Negyedéves",
+      semiannual: "Féléves",
+      annual: "Éves",
+    };
 
     // === DEBUG + robust visibleAccounts computing - paste before your JSX return ===
 
@@ -11586,7 +11610,7 @@ const FamilyOrganizerApp = () => {
 
         {/* BEFEKTETÉSEK */}
         <div className="bg-white rounded-lg shadow-sm border border-gray-200">
-          <div className="p-4 border-b border-gray-200 flex justify-between items-center">
+          <div className="p-4 border-b border-gray-200 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
             <h3 className="font-semibold text-gray-800 flex items-center gap-2">
               <TrendingUp size={20} className="text-blue-600" />
               Befektetések
@@ -11701,6 +11725,32 @@ const FamilyOrganizerApp = () => {
                       </div>
                     </div>
 
+                    {(inv?.interestType && inv.interestType !== "none") ||
+                    (inv?.interestPayout && inv.interestPayout !== "none") ||
+                    inv?.yieldRate ? (
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-sm mt-3 text-gray-600">
+                        <div>
+                          <p className="text-gray-500">Kamatozás</p>
+                          <p className="font-medium text-gray-700">
+                            {investmentInterestTypes[inv.interestType] ||
+                              "Nincs"}
+                          </p>
+                        </div>
+                        <div>
+                          <p className="text-gray-500">Kamatfizetés</p>
+                          <p className="font-medium text-gray-700">
+                            {investmentPayouts[inv.interestPayout] || "Nincs"}
+                          </p>
+                        </div>
+                        <div>
+                          <p className="text-gray-500">Hozam</p>
+                          <p className="font-medium text-gray-700">
+                            {inv.yieldRate ? `${inv.yieldRate}%` : "—"}
+                          </p>
+                        </div>
+                      </div>
+                    ) : null}
+
                     {inv?.notes && (
                       <p className="text-sm text-gray-600 mt-2 italic">
                         {inv.notes}
@@ -11715,7 +11765,7 @@ const FamilyOrganizerApp = () => {
 
         {/* HITELEK */}
         <div className="bg-white rounded-lg shadow-sm border border-gray-200">
-          <div className="p-4 border-b border-gray-200 flex justify-between items-center">
+          <div className="p-4 border-b border-gray-200 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
             <h3 className="font-semibold text-gray-800 flex items-center gap-2">
               <DollarSign size={20} className="text-red-600" />
               Hitelek és kölcsönök
@@ -18361,6 +18411,62 @@ const FamilyOrganizerApp = () => {
                 </div>
               </div>
 
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Kamatozás típusa
+                  </label>
+                  <select
+                    value={formData.interestType || "none"}
+                    onChange={(e) =>
+                      setFormData({ ...formData, interestType: e.target.value })
+                    }
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                  >
+                    <option value="none">Nincs</option>
+                    <option value="fixed">Fix</option>
+                    <option value="variable">Változó</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Kamatfizetés
+                  </label>
+                  <select
+                    value={formData.interestPayout || "none"}
+                    onChange={(e) =>
+                      setFormData({
+                        ...formData,
+                        interestPayout: e.target.value,
+                      })
+                    }
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                  >
+                    <option value="none">Nincs</option>
+                    <option value="monthly">Havi</option>
+                    <option value="quarterly">Negyedéves</option>
+                    <option value="semiannual">Féléves</option>
+                    <option value="annual">Éves</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Hozam (%)
+                  </label>
+                  <input
+                    type="number"
+                    value={formData.yieldRate || ""}
+                    onChange={(e) =>
+                      setFormData({ ...formData, yieldRate: e.target.value })
+                    }
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                    placeholder="pl. 6.5"
+                    min="0"
+                    step="0.01"
+                  />
+                </div>
+              </div>
+
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
                   Megjegyzés
@@ -19441,6 +19547,62 @@ const FamilyOrganizerApp = () => {
                       setFormData({ ...formData, purchaseDate: e.target.value })
                     }
                     className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Kamatozás típusa
+                  </label>
+                  <select
+                    value={formData.interestType || "none"}
+                    onChange={(e) =>
+                      setFormData({ ...formData, interestType: e.target.value })
+                    }
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                  >
+                    <option value="none">Nincs</option>
+                    <option value="fixed">Fix</option>
+                    <option value="variable">Változó</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Kamatfizetés
+                  </label>
+                  <select
+                    value={formData.interestPayout || "none"}
+                    onChange={(e) =>
+                      setFormData({
+                        ...formData,
+                        interestPayout: e.target.value,
+                      })
+                    }
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                  >
+                    <option value="none">Nincs</option>
+                    <option value="monthly">Havi</option>
+                    <option value="quarterly">Negyedéves</option>
+                    <option value="semiannual">Féléves</option>
+                    <option value="annual">Éves</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Hozam (%)
+                  </label>
+                  <input
+                    type="number"
+                    value={formData.yieldRate || ""}
+                    onChange={(e) =>
+                      setFormData({ ...formData, yieldRate: e.target.value })
+                    }
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                    placeholder="pl. 6.5"
+                    min="0"
+                    step="0.01"
                   />
                 </div>
               </div>
