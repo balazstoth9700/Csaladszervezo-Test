@@ -7581,6 +7581,78 @@ const FamilyOrganizerApp = () => {
           });
         }
       }
+
+      const nameDayDate = resolveNameDay(member.nameDay, today.getFullYear());
+      if (nameDayDate) {
+        if (nameDayDate < today) {
+          nameDayDate.setFullYear(today.getFullYear() + 1);
+        }
+        if (nameDayDate >= today && nameDayDate <= endDate) {
+          allTasks.push({
+            id: `nameday-${member.id}`,
+            title: `${member.name} névnapja`,
+            date: nameDayDate,
+            category: "család",
+            type: "névnap",
+            icon: "Gift",
+            details: "Névnap",
+            memberId: member.id,
+            completed: false,
+          });
+        }
+      }
+    });
+
+    (data.extendedFamily || []).forEach((member) => {
+      if (member.birthDate) {
+        const birthDate = new Date(member.birthDate);
+        const thisYearBirth = new Date(
+          today.getFullYear(),
+          birthDate.getMonth(),
+          birthDate.getDate()
+        );
+
+        if (thisYearBirth < today) {
+          thisYearBirth.setFullYear(today.getFullYear() + 1);
+        }
+
+        if (thisYearBirth >= today && thisYearBirth <= endDate) {
+          const age = thisYearBirth.getFullYear() - birthDate.getFullYear();
+          allTasks.push({
+            id: `extended-birthday-${member.id}`,
+            title: `${member.name} születésnapja`,
+            date: thisYearBirth,
+            category: "család",
+            type: "születésnap",
+            icon: "Gift",
+            details: age ? `${age}. születésnap` : "Születésnap",
+            memberId: member.id,
+            memberType: "extended",
+            completed: false,
+          });
+        }
+      }
+
+      const nameDayDate = resolveNameDay(member.nameDay, today.getFullYear());
+      if (nameDayDate) {
+        if (nameDayDate < today) {
+          nameDayDate.setFullYear(today.getFullYear() + 1);
+        }
+        if (nameDayDate >= today && nameDayDate <= endDate) {
+          allTasks.push({
+            id: `extended-nameday-${member.id}`,
+            title: `${member.name} névnapja`,
+            date: nameDayDate,
+            category: "család",
+            type: "névnap",
+            icon: "Gift",
+            details: "Névnap",
+            memberId: member.id,
+            memberType: "extended",
+            completed: false,
+          });
+        }
+      }
     });
 
     allTasks.sort((a, b) => a.date - b.date);
@@ -9179,6 +9251,10 @@ const FamilyOrganizerApp = () => {
             </h3>
             <p className="text-sm text-gray-600">
               A család modul részeként kezelt távolabbi rokonok és barátok
+              Távolabbi családtagok és barátok
+            </h3>
+            <p className="text-sm text-gray-600">
+              Születésnapok, névnapok és ajándékötletek nyilvántartása
             </p>
           </div>
           <button
