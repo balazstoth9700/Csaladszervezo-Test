@@ -12,7 +12,6 @@ import {
   getFirestore,
   doc,
   setDoc,
-  getDoc,
   updateDoc,
   onSnapshot,
   collection,
@@ -1072,13 +1071,6 @@ const FamilyOrganizerApp = () => {
     setJoinRequestMessage("");
 
     try {
-      const familyDocRef = doc(db, "families", trimmedId);
-      const familyDoc = await getDoc(familyDocRef);
-      if (!familyDoc.exists()) {
-        setJoinRequestMessage("Nem található ilyen család azonosító.");
-        return;
-      }
-
       await addDoc(collection(db, "invitations"), {
         familyId: trimmedId,
         requestedUserId: currentUser.uid,
@@ -1092,7 +1084,9 @@ const FamilyOrganizerApp = () => {
       setJoinFamilyId("");
     } catch (error) {
       console.error("Csatlakozási hiba:", error);
-      setJoinRequestMessage("Hiba történt a csatlakozás során.");
+      setJoinRequestMessage(
+        "Nem sikerült elküldeni a kérelmet. Ellenőrizd, hogy van-e jogosultságod a családhoz csatlakozáshoz."
+      );
     } finally {
       setIsJoinRequesting(false);
     }
