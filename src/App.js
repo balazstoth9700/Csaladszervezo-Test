@@ -201,6 +201,15 @@ const getDefaultData = () => ({
         ],
       },
     },
+    shoppingStores: [
+      { id: "spar", name: "Spar" },
+      { id: "penny", name: "Penny" },
+      { id: "dm", name: "DM" },
+      { id: "rossmann", name: "Rossmann" },
+      { id: "aldi", name: "Aldi" },
+      { id: "lidl", name: "Lidl" },
+      { id: "obi", name: "OBI" },
+    ],
     notificationSettings: {
       enabled: true,
       taskReminders: true,
@@ -415,6 +424,12 @@ const FamilyOrganizerApp = () => {
   const [selectedMember, setSelectedMember] = useState(null);
   const [selectedChild, setSelectedChild] = useState(null);
   const [categoryType, setCategoryType] = useState("shopping");
+  const [shoppingView, setShoppingView] = useState("list");
+  const [shoppingSearch, setShoppingSearch] = useState("");
+  const [shoppingCategoryFilter, setShoppingCategoryFilter] = useState("all");
+  const [shoppingStoreFilter, setShoppingStoreFilter] = useState("all");
+  const [newStoreName, setNewStoreName] = useState("");
+  const [newStoreModalName, setNewStoreModalName] = useState("");
 
   //receptek state változók
   const [showRecipeModal, setShowRecipeModal] = useState(false);
@@ -1012,6 +1027,11 @@ const FamilyOrganizerApp = () => {
           if (!userData.settings?.customCategories) {
             userData.settings.customCategories =
               defaultData.settings.customCategories;
+          }
+
+          if (!userData.settings?.shoppingStores) {
+            userData.settings.shoppingStores =
+              defaultData.settings.shoppingStores;
           }
 
           if (userData.familyId) {
@@ -3046,6 +3066,75 @@ const FamilyOrganizerApp = () => {
     await updateSettings(newSettings);
   };
 
+  const addShoppingStore = async (storeName) => {
+    const trimmedName = storeName.trim();
+    if (!trimmedName) {
+      alert("Az áruház neve kötelező!");
+      return null;
+    }
+
+    const existingStore = (settings.shoppingStores || []).find(
+      (store) => store.name.toLowerCase() === trimmedName.toLowerCase()
+    );
+
+    if (existingStore) {
+      alert("Ez az áruház már létezik!");
+      return existingStore;
+    }
+
+    const newStore = {
+      id: Date.now().toString(),
+      name: trimmedName,
+    };
+
+    const newSettings = {
+      ...settings,
+      shoppingStores: [...(settings.shoppingStores || []), newStore],
+    };
+
+    await updateSettings(newSettings);
+    return newStore;
+  };
+
+  const editShoppingStore = async (storeId, storeName) => {
+    const trimmedName = storeName.trim();
+    if (!trimmedName) {
+      alert("Az áruház neve kötelező!");
+      return;
+    }
+
+    const duplicateStore = (settings.shoppingStores || []).find(
+      (store) =>
+        store.name.toLowerCase() === trimmedName.toLowerCase() &&
+        store.id !== storeId
+    );
+
+    if (duplicateStore) {
+      alert("Ez az áruház már létezik!");
+      return;
+    }
+
+    const newSettings = {
+      ...settings,
+      shoppingStores: (settings.shoppingStores || []).map((store) =>
+        store.id === storeId ? { ...store, name: trimmedName } : store
+      ),
+    };
+
+    await updateSettings(newSettings);
+  };
+
+  const deleteShoppingStore = async (storeId) => {
+    const newSettings = {
+      ...settings,
+      shoppingStores: (settings.shoppingStores || []).filter(
+        (store) => store.id !== storeId
+      ),
+    };
+
+    await updateSettings(newSettings);
+  };
+
   const openHomeModal = (home = null) => {
     if (home) {
       setEditingItem(home);
@@ -3442,6 +3531,9 @@ const FamilyOrganizerApp = () => {
         personId: data.familyMembers[0]?.id || "",
         type: "",
         date: "",
+        startTime: "",
+        endTime: "",
+        duration: "",
         location: "",
         phone: "",
       });
@@ -3455,12 +3547,19 @@ const FamilyOrganizerApp = () => {
       return;
     }
 
+    const normalizedAppointment = {
+      ...formData,
+      duration: formData.duration ? parseInt(formData.duration, 10) : "",
+    };
+
     let newData;
     if (editingItem) {
       newData = {
         ...data,
         healthAppointments: data.healthAppointments.map((h) =>
-          h.id === editingItem.id ? { ...formData, id: editingItem.id } : h
+          h.id === editingItem.id
+            ? { ...normalizedAppointment, id: editingItem.id }
+            : h
         ),
       };
     } else {
@@ -3468,7 +3567,7 @@ const FamilyOrganizerApp = () => {
         ...data,
         healthAppointments: [
           ...data.healthAppointments,
-          { ...formData, id: Date.now() },
+          { ...normalizedAppointment, id: Date.now() },
         ],
       };
     }
@@ -4954,6 +5053,19 @@ const FamilyOrganizerApp = () => {
     setEditingItem(null);
   };
 
+  const deleteLoan = async (loanId) => {
+    const newData = {
+      ...data,
+      finances: {
+        ...data.finances,
+        loans: (data.finances?.loans || []).filter((loan) => loan.id !== loanId),
+      },
+    };
+    setData(newData);
+    await saveUserData(newData);
+    setShowDeleteConfirm(null);
+  };
+
   // ==================== SAVING GOAL (MEGTAKARÍTÁS) FÜGGVÉNYEK ====================
 
   const openSavingGoalModal = (goal = null) => {
@@ -5020,6 +5132,21 @@ const FamilyOrganizerApp = () => {
     setEditingItem(null);
   };
 
+  const deleteSavingGoal = async (goalId) => {
+    const newData = {
+      ...data,
+      finances: {
+        ...data.finances,
+        savingGoals: (data.finances?.savingGoals || []).filter(
+          (goal) => goal.id !== goalId
+        ),
+      },
+    };
+    setData(newData);
+    await saveUserData(newData);
+    setShowDeleteConfirm(null);
+  };
+
   const addDeposit = async () => {
     if (!depositAmount || parseFloat(depositAmount) <= 0) {
       alert("Adj meg egy érvényes összeget!");
@@ -5072,6 +5199,9 @@ const FamilyOrganizerApp = () => {
         currentValue: "",
         currency: "HUF",
         purchaseDate: new Date().toISOString().split("T")[0],
+        interestType: "none",
+        interestPayout: "none",
+        yieldRate: "",
         notes: "",
       });
     }
@@ -5094,6 +5224,9 @@ const FamilyOrganizerApp = () => {
       currency: formData.currency || "HUF",
       purchaseDate:
         formData.purchaseDate || new Date().toISOString().split("T")[0],
+      interestType: formData.interestType || "none",
+      interestPayout: formData.interestPayout || "none",
+      yieldRate: formData.yieldRate ? parseFloat(formData.yieldRate) : "",
       notes: formData.notes || "",
     };
 
@@ -5123,6 +5256,51 @@ const FamilyOrganizerApp = () => {
     setShowInvestmentModal(false);
     setFormData({});
     setEditingItem(null);
+  };
+
+  const deleteInvestment = async (investmentId) => {
+    const newData = {
+      ...data,
+      finances: {
+        ...data.finances,
+        investments: (data.finances?.investments || []).filter(
+          (investment) => investment.id !== investmentId
+        ),
+      },
+    };
+    setData(newData);
+    await saveUserData(newData);
+    setShowDeleteConfirm(null);
+  };
+
+  const deleteTransaction = async (transactionId) => {
+    const newData = {
+      ...data,
+      finances: {
+        ...data.finances,
+        transactions: (data.finances?.transactions || []).filter(
+          (transaction) => transaction.id !== transactionId
+        ),
+      },
+    };
+    setData(newData);
+    await saveUserData(newData);
+    setShowDeleteConfirm(null);
+  };
+
+  const deleteAccount = async (accountId) => {
+    const newData = {
+      ...data,
+      finances: {
+        ...data.finances,
+        accounts: (data.finances?.accounts || []).filter(
+          (account) => account.id !== accountId
+        ),
+      },
+    };
+    setData(newData);
+    await saveUserData(newData);
+    setShowDeleteConfirm(null);
   };
 
   // === CHAT FUNKCIÓK ===
@@ -5852,12 +6030,15 @@ const FamilyOrganizerApp = () => {
       setFormData({
         name: "",
         quantity: 1,
-        category: "élelmiszer",
+        unit: "db",
+        category: settings.customCategories?.shopping?.[0]?.id || "élelmiszer",
         priority: "normal",
+        storeId: "",
         checked: false,
         addedBy: currentUser?.email,
       });
     }
+    setNewStoreModalName("");
     setShowShoppingItemModal(true);
   };
 
@@ -5895,6 +6076,7 @@ const FamilyOrganizerApp = () => {
     await saveUserData(newData);
     setShowShoppingItemModal(false);
     setFormData({});
+    setNewStoreModalName("");
     setEditingItem(null);
   };
 
@@ -6488,7 +6670,9 @@ const FamilyOrganizerApp = () => {
 
     // Orvosi időpontok
     data.healthAppointments.forEach((appt) => {
-      const apptDate = new Date(appt.date);
+      const apptDate = appt.startTime
+        ? new Date(`${appt.date}T${appt.startTime}`)
+        : new Date(appt.date);
       if (apptDate >= startDate && apptDate <= endDate) {
         const person = data.familyMembers.find((m) => m.id === appt.personId);
         events.push({
@@ -6896,13 +7080,16 @@ const FamilyOrganizerApp = () => {
     });
 
     data.healthAppointments.forEach((appt) => {
-      const apptDate = new Date(appt.date);
+      const apptDate = appt.startTime
+        ? new Date(`${appt.date}T${appt.startTime}`)
+        : new Date(appt.date);
       if (apptDate >= today && apptDate <= endDate) {
         const person = data.familyMembers.find((m) => m.id === appt.personId);
         allTasks.push({
           id: `health-${appt.id}`,
           title: `${appt.type} - ${person?.name}`,
           date: apptDate,
+          time: appt.startTime || "",
           category: "egészség",
           type: "orvosi időpont",
           icon: "Stethoscope",
@@ -7891,12 +8078,12 @@ const FamilyOrganizerApp = () => {
                 className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
               />
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
               <Filter size={20} className="text-gray-600" />
               <select
                 value={filterCategory}
                 onChange={(e) => setFilterCategory(e.target.value)}
-                className="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                className="w-full sm:w-auto px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
               >
                 <option value="all">Összes kategória</option>
                 <option value="otthon">Otthon</option>
@@ -7912,7 +8099,7 @@ const FamilyOrganizerApp = () => {
                     e.target.value === "all" ? null : e.target.value
                   )
                 }
-                className="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                className="w-full sm:w-auto px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
               >
                 <option value="all">Összes felelős</option>
                 <option value="unassigned">Nincs felelős</option>
@@ -8076,6 +8263,11 @@ const FamilyOrganizerApp = () => {
                           <Calendar size={14} />
                           {task.date.toLocaleDateString("hu-HU")}
                         </span>
+                        {task.time && (
+                          <span className="flex items-center gap-1 text-blue-600">
+                            {task.time}
+                          </span>
+                        )}
                         {task.assignedTo && (
                           <span className="text-blue-600">
                             → {task.assignedTo}
@@ -9181,6 +9373,9 @@ const FamilyOrganizerApp = () => {
                 const person = data.familyMembers.find(
                   (m) => m.id === appt.personId
                 );
+                const timeRange = appt.startTime
+                  ? `${appt.startTime}${appt.endTime ? ` - ${appt.endTime}` : ""}`
+                  : "";
                 return (
                   <div key={appt.id} className="p-4 hover:bg-gray-50">
                     <div className="flex items-start gap-3">
@@ -9193,7 +9388,9 @@ const FamilyOrganizerApp = () => {
                           {person?.name}
                         </p>
                         <p className="text-sm text-gray-600">
-                          {new Date(appt.date).toLocaleDateString("hu-HU")} -{" "}
+                          {new Date(appt.date).toLocaleDateString("hu-HU")}
+                          {timeRange && ` • ${timeRange}`}
+                          {appt.duration && ` • ${appt.duration} perc`} -{" "}
                           {appt.location || "Nincs megadva"}
                         </p>
                         <p className="text-sm text-blue-600 mt-1">
@@ -10176,6 +10373,18 @@ const FamilyOrganizerApp = () => {
       real_estate: { name: "Ingatlan", icon: "🏢", color: "text-purple-600" },
       fund: { name: "Alap", icon: "💼", color: "text-indigo-600" },
       other: { name: "Egyéb", icon: "💰", color: "text-gray-600" },
+    };
+    const investmentInterestTypes = {
+      fixed: "Fix",
+      variable: "Változó",
+      none: "Nincs",
+    };
+    const investmentPayouts = {
+      none: "Nincs",
+      monthly: "Havi",
+      quarterly: "Negyedéves",
+      semiannual: "Féléves",
+      annual: "Éves",
     };
 
     // === DEBUG + robust visibleAccounts computing - paste before your JSX return ===
@@ -11401,7 +11610,7 @@ const FamilyOrganizerApp = () => {
 
         {/* BEFEKTETÉSEK */}
         <div className="bg-white rounded-lg shadow-sm border border-gray-200">
-          <div className="p-4 border-b border-gray-200 flex justify-between items-center">
+          <div className="p-4 border-b border-gray-200 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
             <h3 className="font-semibold text-gray-800 flex items-center gap-2">
               <TrendingUp size={20} className="text-blue-600" />
               Befektetések
@@ -11516,6 +11725,32 @@ const FamilyOrganizerApp = () => {
                       </div>
                     </div>
 
+                    {(inv?.interestType && inv.interestType !== "none") ||
+                    (inv?.interestPayout && inv.interestPayout !== "none") ||
+                    inv?.yieldRate ? (
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-sm mt-3 text-gray-600">
+                        <div>
+                          <p className="text-gray-500">Kamatozás</p>
+                          <p className="font-medium text-gray-700">
+                            {investmentInterestTypes[inv.interestType] ||
+                              "Nincs"}
+                          </p>
+                        </div>
+                        <div>
+                          <p className="text-gray-500">Kamatfizetés</p>
+                          <p className="font-medium text-gray-700">
+                            {investmentPayouts[inv.interestPayout] || "Nincs"}
+                          </p>
+                        </div>
+                        <div>
+                          <p className="text-gray-500">Hozam</p>
+                          <p className="font-medium text-gray-700">
+                            {inv.yieldRate ? `${inv.yieldRate}%` : "—"}
+                          </p>
+                        </div>
+                      </div>
+                    ) : null}
+
                     {inv?.notes && (
                       <p className="text-sm text-gray-600 mt-2 italic">
                         {inv.notes}
@@ -11530,7 +11765,7 @@ const FamilyOrganizerApp = () => {
 
         {/* HITELEK */}
         <div className="bg-white rounded-lg shadow-sm border border-gray-200">
-          <div className="p-4 border-b border-gray-200 flex justify-between items-center">
+          <div className="p-4 border-b border-gray-200 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
             <h3 className="font-semibold text-gray-800 flex items-center gap-2">
               <DollarSign size={20} className="text-red-600" />
               Hitelek és kölcsönök
@@ -11851,6 +12086,8 @@ const FamilyOrganizerApp = () => {
     );
   };
 
+  const shoppingUnits = ["db", "csomag", "liter", "kg", "ml", "g"];
+
   const renderBevasarlas = () => {
     const uncheckedItems = (data.shoppingList || []).filter(
       (item) => !item.checked
@@ -11858,8 +12095,62 @@ const FamilyOrganizerApp = () => {
     const checkedItems = (data.shoppingList || []).filter(
       (item) => item.checked
     );
+    const shoppingStores = settings.shoppingStores || [];
+    const storeLookup = shoppingStores.reduce((acc, store) => {
+      acc[store.id] = store.name;
+      return acc;
+    }, {});
+    const getStoreName = (item) =>
+      item.storeId
+        ? storeLookup[item.storeId] || "Ismeretlen áruház"
+        : "Általános";
 
-    const categories = {
+    const normalizedSearch = shoppingSearch.trim().toLowerCase();
+    const matchesFilters = (item) => {
+      const storeName = getStoreName(item).toLowerCase();
+      const matchesSearch =
+        !normalizedSearch ||
+        item.name?.toLowerCase().includes(normalizedSearch) ||
+        storeName.includes(normalizedSearch) ||
+        item.category?.toLowerCase().includes(normalizedSearch);
+      const matchesCategory =
+        shoppingCategoryFilter === "all" ||
+        item.category === shoppingCategoryFilter;
+      const matchesStore =
+        shoppingStoreFilter === "all" ||
+        (shoppingStoreFilter === "none" && !item.storeId) ||
+        item.storeId === shoppingStoreFilter;
+
+      return matchesSearch && matchesCategory && matchesStore;
+    };
+
+    const filteredUnchecked = uncheckedItems.filter(matchesFilters);
+    const filteredChecked = checkedItems.filter(matchesFilters);
+    const groupedUnchecked = filteredUnchecked.reduce((acc, item) => {
+      const groupId = item.storeId || "none";
+      if (!acc[groupId]) {
+        acc[groupId] = [];
+      }
+      acc[groupId].push(item);
+      return acc;
+    }, {});
+    const orderedGroupIds = [
+      ...shoppingStores.map((store) => store.id).filter((id) => groupedUnchecked[id]),
+      ...Object.keys(groupedUnchecked).filter(
+        (id) =>
+          id !== "none" && !shoppingStores.some((store) => store.id === id)
+      ),
+      ...(groupedUnchecked.none ? ["none"] : []),
+    ];
+
+    const categories = (settings.customCategories?.shopping || []).reduce(
+      (acc, cat) => {
+        acc[cat.id] = cat.icon;
+        return acc;
+      },
+      {}
+    );
+    const legacyCategoryIcons = {
       élelmiszer: "🥗",
       háztartás: "🧹",
       ruházat: "👕",
@@ -11907,6 +12198,82 @@ const FamilyOrganizerApp = () => {
           </div>
         </div>
 
+        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4 space-y-4">
+          <div className="flex flex-col lg:flex-row gap-3 lg:items-center">
+            <div className="relative flex-1">
+              <Search
+                size={18}
+                className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"
+              />
+              <input
+                type="text"
+                value={shoppingSearch}
+                onChange={(e) => setShoppingSearch(e.target.value)}
+                placeholder="Keresés név, áruház vagy kategória szerint"
+                className="w-full pl-10 pr-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+              />
+            </div>
+            <select
+              value={shoppingCategoryFilter}
+              onChange={(e) => setShoppingCategoryFilter(e.target.value)}
+              className="w-full lg:w-48 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+            >
+              <option value="all">Minden kategória</option>
+              {(settings.customCategories?.shopping || []).map((cat) => (
+                <option key={cat.id} value={cat.id}>
+                  {cat.icon} {cat.name}
+                </option>
+              ))}
+            </select>
+            <select
+              value={shoppingStoreFilter}
+              onChange={(e) => setShoppingStoreFilter(e.target.value)}
+              className="w-full lg:w-48 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+            >
+              <option value="all">Minden áruház</option>
+              <option value="none">Általános (nincs áruház)</option>
+              {shoppingStores.map((store) => (
+                <option key={store.id} value={store.id}>
+                  {store.name}
+                </option>
+              ))}
+            </select>
+            <button
+              onClick={() => {
+                setShoppingSearch("");
+                setShoppingCategoryFilter("all");
+                setShoppingStoreFilter("all");
+              }}
+              className="flex items-center justify-center gap-2 px-3 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 text-sm"
+            >
+              <Filter size={16} />
+              Szűrők törlése
+            </button>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <button
+              onClick={() => setShoppingView("list")}
+              className={`px-3 py-2 rounded-lg text-sm font-medium transition ${
+                shoppingView === "list"
+                  ? "bg-blue-600 text-white"
+                  : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+              }`}
+            >
+              Ömlesztett lista
+            </button>
+            <button
+              onClick={() => setShoppingView("grouped")}
+              className={`px-3 py-2 rounded-lg text-sm font-medium transition ${
+                shoppingView === "grouped"
+                  ? "bg-blue-600 text-white"
+                  : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+              }`}
+            >
+              Áruházanként
+            </button>
+          </div>
+        </div>
+
         <div className="bg-white rounded-lg shadow-sm border border-gray-200">
           <div className="p-4 border-b border-gray-200 flex justify-between items-center">
             <h3 className="font-semibold text-gray-800">Vásárolandó tételek</h3>
@@ -11921,58 +12288,160 @@ const FamilyOrganizerApp = () => {
             )}
           </div>
           <div className="divide-y divide-gray-200">
-            {uncheckedItems.length === 0 ? (
+            {shoppingView === "list" ? (
+              filteredUnchecked.length === 0 ? (
+                <div className="p-8 text-center text-gray-500">
+                  <ShoppingCart
+                    size={48}
+                    className="mx-auto mb-3 text-gray-400"
+                  />
+                  <p>
+                    {uncheckedItems.length === 0
+                      ? "Minden tétel megvásárolva!"
+                      : "Nincs találat a szűrők alapján."}
+                  </p>
+                </div>
+              ) : (
+                filteredUnchecked.map((item) => (
+                  <div
+                    key={item.id}
+                    className="p-4 hover:bg-gray-50 flex items-center gap-4"
+                  >
+                    <button
+                      onClick={() => toggleShoppingItem(item.id)}
+                      className="text-gray-400 hover:text-green-600"
+                    >
+                      <Circle size={24} />
+                    </button>
+                    <div className="flex-1">
+                      <div className="flex items-center gap-2">
+                        <span className="text-xl">
+                          {categories[item.category] ||
+                            legacyCategoryIcons[item.category] ||
+                            "📦"}
+                        </span>
+                        <h4 className="font-medium text-gray-800">
+                          {item.name}
+                        </h4>
+                        {item.priority === "high" && (
+                          <span className="px-2 py-1 bg-red-100 text-red-700 text-xs rounded font-medium">
+                            Sürgős
+                          </span>
+                        )}
+                      </div>
+                      <div className="flex flex-wrap items-center gap-3 text-sm text-gray-600 mt-1">
+                        <span>
+                          Mennyiség: {item.quantity} {item.unit || "db"}
+                        </span>
+                        <span>•</span>
+                        <span className="capitalize">{item.category}</span>
+                        <span>•</span>
+                        <span>{getStoreName(item)}</span>
+                        {item.addedBy && (
+                          <>
+                            <span>•</span>
+                            <span>Hozzáadta: {item.addedBy}</span>
+                          </>
+                        )}
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => deleteShoppingItem(item.id)}
+                      className="text-red-500 hover:text-red-700"
+                    >
+                      <Trash2 size={18} />
+                    </button>
+                  </div>
+                ))
+              )
+            ) : filteredUnchecked.length === 0 ? (
               <div className="p-8 text-center text-gray-500">
                 <ShoppingCart
                   size={48}
                   className="mx-auto mb-3 text-gray-400"
                 />
-                <p>Minden tétel megvásárolva!</p>
+                <p>Nincs megjeleníthető tétel a szűrők alapján.</p>
               </div>
             ) : (
-              uncheckedItems.map((item) => (
-                <div
-                  key={item.id}
-                  className="p-4 hover:bg-gray-50 flex items-center gap-4"
-                >
-                  <button
-                    onClick={() => toggleShoppingItem(item.id)}
-                    className="text-gray-400 hover:text-green-600"
-                  >
-                    <Circle size={24} />
-                  </button>
-                  <div className="flex-1">
-                    <div className="flex items-center gap-2">
-                      <span className="text-xl">
-                        {categories[item.category] || "📦"}
-                      </span>
-                      <h4 className="font-medium text-gray-800">{item.name}</h4>
-                      {item.priority === "high" && (
-                        <span className="px-2 py-1 bg-red-100 text-red-700 text-xs rounded font-medium">
-                          Sürgős
+              <div className="p-4 space-y-4">
+                {orderedGroupIds.map((groupId) => {
+                  const groupName =
+                    groupId === "none"
+                      ? "Általános"
+                      : storeLookup[groupId] || "Ismeretlen áruház";
+                  const groupItems = groupedUnchecked[groupId] || [];
+
+                  return (
+                    <div
+                      key={groupId}
+                      className="border border-gray-200 rounded-lg"
+                    >
+                      <div className="px-4 py-3 border-b border-gray-200 bg-gray-50 flex items-center justify-between">
+                        <h4 className="font-semibold text-gray-800">
+                          {groupName}
+                        </h4>
+                        <span className="text-sm text-gray-600">
+                          {groupItems.length} tétel
                         </span>
-                      )}
+                      </div>
+                      <div className="divide-y divide-gray-200">
+                        {groupItems.map((item) => (
+                          <div
+                            key={item.id}
+                            className="p-4 hover:bg-gray-50 flex items-center gap-4"
+                          >
+                            <button
+                              onClick={() => toggleShoppingItem(item.id)}
+                              className="text-gray-400 hover:text-green-600"
+                            >
+                              <Circle size={24} />
+                            </button>
+                            <div className="flex-1">
+                              <div className="flex items-center gap-2">
+                                <span className="text-xl">
+                                  {categories[item.category] ||
+                                    legacyCategoryIcons[item.category] ||
+                                    "📦"}
+                                </span>
+                                <h4 className="font-medium text-gray-800">
+                                  {item.name}
+                                </h4>
+                                {item.priority === "high" && (
+                                  <span className="px-2 py-1 bg-red-100 text-red-700 text-xs rounded font-medium">
+                                    Sürgős
+                                  </span>
+                                )}
+                              </div>
+                              <div className="flex flex-wrap items-center gap-3 text-sm text-gray-600 mt-1">
+                                <span>
+                                  Mennyiség: {item.quantity}{" "}
+                                  {item.unit || "db"}
+                                </span>
+                                <span>•</span>
+                                <span className="capitalize">
+                                  {item.category}
+                                </span>
+                                {item.addedBy && (
+                                  <>
+                                    <span>•</span>
+                                    <span>Hozzáadta: {item.addedBy}</span>
+                                  </>
+                                )}
+                              </div>
+                            </div>
+                            <button
+                              onClick={() => deleteShoppingItem(item.id)}
+                              className="text-red-500 hover:text-red-700"
+                            >
+                              <Trash2 size={18} />
+                            </button>
+                          </div>
+                        ))}
+                      </div>
                     </div>
-                    <div className="flex items-center gap-3 text-sm text-gray-600 mt-1">
-                      <span>Mennyiség: {item.quantity}</span>
-                      <span>•</span>
-                      <span className="capitalize">{item.category}</span>
-                      {item.addedBy && (
-                        <>
-                          <span>•</span>
-                          <span>Hozzáadta: {item.addedBy}</span>
-                        </>
-                      )}
-                    </div>
-                  </div>
-                  <button
-                    onClick={() => deleteShoppingItem(item.id)}
-                    className="text-red-500 hover:text-red-700"
-                  >
-                    <Trash2 size={18} />
-                  </button>
-                </div>
-              ))
+                  );
+                })}
+              </div>
             )}
           </div>
         </div>
@@ -11984,34 +12453,47 @@ const FamilyOrganizerApp = () => {
                 Megvásárolt tételek
               </h3>
             </div>
-            <div className="divide-y divide-gray-200">
-              {checkedItems.map((item) => (
-                <div
-                  key={item.id}
-                  className="p-4 hover:bg-gray-50 flex items-center gap-4 opacity-60"
-                >
-                  <button
-                    onClick={() => toggleShoppingItem(item.id)}
-                    className="text-green-600"
-                  >
-                    <CheckCircle size={24} />
-                  </button>
-                  <div className="flex-1">
-                    <h4 className="font-medium text-gray-800 line-through">
-                      {item.name}
-                    </h4>
-                  </div>
-                  <button
-                    onClick={() => deleteShoppingItem(item.id)}
-                    className="text-red-500 hover:text-red-700"
-                  >
-                    <Trash2 size={18} />
-                  </button>
+          <div className="divide-y divide-gray-200">
+              {filteredChecked.length === 0 ? (
+                <div className="p-6 text-center text-sm text-gray-500">
+                  Nincs megjeleníthető megvásárolt tétel a szűrők alapján.
                 </div>
-              ))}
-            </div>
+              ) : (
+                filteredChecked.map((item) => (
+                  <div
+                    key={item.id}
+                    className="p-4 hover:bg-gray-50 flex items-center gap-4 opacity-60"
+                  >
+                    <button
+                      onClick={() => toggleShoppingItem(item.id)}
+                      className="text-green-600"
+                    >
+                      <CheckCircle size={24} />
+                    </button>
+                    <div className="flex-1">
+                      <h4 className="font-medium text-gray-800 line-through">
+                        {item.name}
+                      </h4>
+                      <div className="flex flex-wrap items-center gap-3 text-sm text-gray-600 mt-1">
+                        <span>
+                          Mennyiség: {item.quantity} {item.unit || "db"}
+                        </span>
+                        <span>•</span>
+                        <span>{getStoreName(item)}</span>
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => deleteShoppingItem(item.id)}
+                      className="text-red-500 hover:text-red-700"
+                    >
+                      <Trash2 size={18} />
+                    </button>
+                  </div>
+                ))
+              )}
           </div>
-        )}
+        </div>
+      )}
       </div>
     );
   };
@@ -13621,6 +14103,65 @@ const FamilyOrganizerApp = () => {
                   >
                     <Trash2 size={16} />
                   </button>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Áruházak kezelése */}
+          <div className="mb-6">
+            <div className="flex items-center justify-between mb-3">
+              <h4 className="font-medium text-gray-700">🏬 Áruházak</h4>
+            </div>
+            <div className="flex flex-col sm:flex-row gap-2 mb-3">
+              <input
+                type="text"
+                value={newStoreName}
+                onChange={(e) => setNewStoreName(e.target.value)}
+                placeholder="Új áruház neve"
+                className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+              />
+              <button
+                onClick={async () => {
+                  const newStore = await addShoppingStore(newStoreName);
+                  if (newStore) {
+                    setNewStoreName("");
+                  }
+                }}
+                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+              >
+                Hozzáadás
+              </button>
+            </div>
+            <div className="space-y-2">
+              {(settings.shoppingStores || []).map((store) => (
+                <div
+                  key={store.id}
+                  className="flex items-center justify-between p-2 bg-gray-50 rounded"
+                >
+                  <span className="text-sm">{store.name}</span>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => {
+                        const newName = prompt(
+                          "Áruház neve:",
+                          store.name
+                        );
+                        if (newName !== null) {
+                          editShoppingStore(store.id, newName);
+                        }
+                      }}
+                      className="text-blue-600 hover:text-blue-700"
+                    >
+                      <Edit2 size={16} />
+                    </button>
+                    <button
+                      onClick={() => deleteShoppingStore(store.id)}
+                      className="text-red-600 hover:text-red-700"
+                    >
+                      <Trash2 size={16} />
+                    </button>
+                  </div>
                 </div>
               ))}
             </div>
@@ -16547,6 +17088,49 @@ const FamilyOrganizerApp = () => {
                   className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
                 />
               </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Kezdő időpont
+                  </label>
+                  <input
+                    type="time"
+                    value={formData.startTime || ""}
+                    onChange={(e) =>
+                      setFormData({ ...formData, startTime: e.target.value })
+                    }
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Záró időpont
+                  </label>
+                  <input
+                    type="time"
+                    value={formData.endTime || ""}
+                    onChange={(e) =>
+                      setFormData({ ...formData, endTime: e.target.value })
+                    }
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Időtartam (perc)
+                </label>
+                <input
+                  type="number"
+                  min="0"
+                  value={formData.duration || ""}
+                  onChange={(e) =>
+                    setFormData({ ...formData, duration: e.target.value })
+                  }
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                  placeholder="pl. 30"
+                />
+              </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
                   Helyszín
@@ -17358,7 +17942,10 @@ const FamilyOrganizerApp = () => {
                 {editingItem ? "Tétel szerkesztése" : "Új tétel"}
               </h3>
               <button
-                onClick={() => setShowShoppingItemModal(false)}
+                onClick={() => {
+                  setShowShoppingItemModal(false);
+                  setNewStoreModalName("");
+                }}
                 className="text-gray-500 hover:text-gray-700"
               >
                 <X size={24} />
@@ -17379,7 +17966,7 @@ const FamilyOrganizerApp = () => {
                   placeholder="pl. Tej"
                 />
               </div>
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
                     Mennyiség
@@ -17396,6 +17983,24 @@ const FamilyOrganizerApp = () => {
                     className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
                     min="1"
                   />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Mértékegység
+                  </label>
+                  <select
+                    value={formData.unit || "db"}
+                    onChange={(e) =>
+                      setFormData({ ...formData, unit: e.target.value })
+                    }
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                  >
+                    {shoppingUnits.map((unit) => (
+                      <option key={unit} value={unit}>
+                        {unit}
+                      </option>
+                    ))}
+                  </select>
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -17418,6 +18023,51 @@ const FamilyOrganizerApp = () => {
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Áruház
+                </label>
+                <select
+                  value={formData.storeId || ""}
+                  onChange={(e) =>
+                    setFormData({ ...formData, storeId: e.target.value })
+                  }
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                >
+                  <option value="">Nincs áruház</option>
+                  {(settings.shoppingStores || []).map((store) => (
+                    <option key={store.id} value={store.id}>
+                      {store.name}
+                    </option>
+                  ))}
+                </select>
+                <div className="mt-2 flex gap-2">
+                  <input
+                    type="text"
+                    value={newStoreModalName}
+                    onChange={(e) => setNewStoreModalName(e.target.value)}
+                    placeholder="Új áruház neve"
+                    className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                  />
+                  <button
+                    onClick={async () => {
+                      const newStore = await addShoppingStore(
+                        newStoreModalName
+                      );
+                      if (newStore) {
+                        setFormData({
+                          ...formData,
+                          storeId: newStore.id,
+                        });
+                        setNewStoreModalName("");
+                      }
+                    }}
+                    className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+                  >
+                    Hozzáadás
+                  </button>
+                </div>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
                   Prioritás
                 </label>
                 <select
@@ -17435,7 +18085,10 @@ const FamilyOrganizerApp = () => {
             </div>
             <div className="mt-6 flex gap-3">
               <button
-                onClick={() => setShowShoppingItemModal(false)}
+                onClick={() => {
+                  setShowShoppingItemModal(false);
+                  setNewStoreModalName("");
+                }}
                 className="flex-1 px-4 py-3 border border-gray-300 rounded-lg hover:bg-gray-50"
               >
                 Mégse
@@ -17754,6 +18407,62 @@ const FamilyOrganizerApp = () => {
                       setFormData({ ...formData, purchaseDate: e.target.value })
                     }
                     className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Kamatozás típusa
+                  </label>
+                  <select
+                    value={formData.interestType || "none"}
+                    onChange={(e) =>
+                      setFormData({ ...formData, interestType: e.target.value })
+                    }
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                  >
+                    <option value="none">Nincs</option>
+                    <option value="fixed">Fix</option>
+                    <option value="variable">Változó</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Kamatfizetés
+                  </label>
+                  <select
+                    value={formData.interestPayout || "none"}
+                    onChange={(e) =>
+                      setFormData({
+                        ...formData,
+                        interestPayout: e.target.value,
+                      })
+                    }
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                  >
+                    <option value="none">Nincs</option>
+                    <option value="monthly">Havi</option>
+                    <option value="quarterly">Negyedéves</option>
+                    <option value="semiannual">Féléves</option>
+                    <option value="annual">Éves</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Hozam (%)
+                  </label>
+                  <input
+                    type="number"
+                    value={formData.yieldRate || ""}
+                    onChange={(e) =>
+                      setFormData({ ...formData, yieldRate: e.target.value })
+                    }
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                    placeholder="pl. 6.5"
+                    min="0"
+                    step="0.01"
                   />
                 </div>
               </div>
@@ -18838,6 +19547,62 @@ const FamilyOrganizerApp = () => {
                       setFormData({ ...formData, purchaseDate: e.target.value })
                     }
                     className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Kamatozás típusa
+                  </label>
+                  <select
+                    value={formData.interestType || "none"}
+                    onChange={(e) =>
+                      setFormData({ ...formData, interestType: e.target.value })
+                    }
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                  >
+                    <option value="none">Nincs</option>
+                    <option value="fixed">Fix</option>
+                    <option value="variable">Változó</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Kamatfizetés
+                  </label>
+                  <select
+                    value={formData.interestPayout || "none"}
+                    onChange={(e) =>
+                      setFormData({
+                        ...formData,
+                        interestPayout: e.target.value,
+                      })
+                    }
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                  >
+                    <option value="none">Nincs</option>
+                    <option value="monthly">Havi</option>
+                    <option value="quarterly">Negyedéves</option>
+                    <option value="semiannual">Féléves</option>
+                    <option value="annual">Éves</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Hozam (%)
+                  </label>
+                  <input
+                    type="number"
+                    value={formData.yieldRate || ""}
+                    onChange={(e) =>
+                      setFormData({ ...formData, yieldRate: e.target.value })
+                    }
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                    placeholder="pl. 6.5"
+                    min="0"
+                    step="0.01"
                   />
                 </div>
               </div>
