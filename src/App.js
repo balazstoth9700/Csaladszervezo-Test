@@ -12,9 +12,13 @@ import {
   getFirestore,
   doc,
   setDoc,
+  getDoc,
+  updateDoc,
   onSnapshot,
   collection,
   addDoc,
+  query,
+  where,
 } from "firebase/firestore";
 import {
   Home,
@@ -272,6 +276,10 @@ const FamilyOrganizerApp = () => {
 
   const [inviteEmail, setInviteEmail] = useState("");
   const [inviteRole, setInviteRole] = useState("member");
+  const [joinFamilyId, setJoinFamilyId] = useState("");
+  const [joinRequestMessage, setJoinRequestMessage] = useState("");
+  const [isJoinRequesting, setIsJoinRequesting] = useState(false);
+  const [familyInvites, setFamilyInvites] = useState([]);
 
   // Calendar states - ÚJ
   const [calendarView, setCalendarView] = useState("month"); // 'month' vagy 'week'
@@ -879,6 +887,28 @@ const FamilyOrganizerApp = () => {
     }
   }, [settings]);
 
+  useEffect(() => {
+    if (!data.familyId) {
+      setFamilyInvites([]);
+      return undefined;
+    }
+
+    const invitesQuery = query(
+      collection(db, "invitations"),
+      where("familyId", "==", data.familyId)
+    );
+
+    const unsubscribe = onSnapshot(invitesQuery, (snapshot) => {
+      const invites = snapshot.docs.map((docSnap) => ({
+        id: docSnap.id,
+        ...docSnap.data(),
+      }));
+      setFamilyInvites(invites);
+    });
+
+    return () => unsubscribe();
+  }, [data.familyId]);
+
   const onTouchStart = (e) => {
     setTouchEnd(null);
     setTouchStart(e.targetTouches[0].clientX);
@@ -973,6 +1003,17 @@ const FamilyOrganizerApp = () => {
   };
 
   const inviteUserToFamily = async () => {
+    const familyMembers = data.members || [];
+    const isAdmin = familyMembers.some(
+      (member) =>
+        member.userId === currentUser?.uid && member.role === "admin"
+    );
+
+    if (!isAdmin) {
+      alert("Csak admin jogosultságú felhasználó küldhet meghívót.");
+      return;
+    }
+
     if (!inviteEmail) {
       alert("Kérlek add meg az email címet!");
       return;
@@ -986,12 +1027,13 @@ const FamilyOrganizerApp = () => {
     }
 
     try {
-      await addDoc(collection(db, "invitations"), {
+      const inviteDoc = await addDoc(collection(db, "invitations"), {
         familyId: data.familyId,
         invitedEmail: inviteEmail,
         invitedBy: currentUser.uid,
         invitedByEmail: currentUser.email,
         role: inviteRole,
+        type: "email_invite",
         status: "pending",
         createdAt: new Date().toISOString(),
       });
@@ -999,9 +1041,142 @@ const FamilyOrganizerApp = () => {
       alert(`Meghívó elküldve: ${inviteEmail}`);
       setShowInviteModal(false);
       setInviteEmail("");
+
+      const subject = encodeURIComponent("Családi meghívó");
+      const body = encodeURIComponent(
+        `Szia!\n\nMeghívtalak a családi szervezőbe. A család azonosítója:\n${data.familyId}\n\nLépj be, menj a Beállítások > Család kezelése részhez, add meg az azonosítót és kérj csatlakozást.\n\nMeghívó azonosító: ${inviteDoc.id}\n`
+      );
+      window.location.href = `mailto:${inviteEmail}?subject=${subject}&body=${body}`;
     } catch (error) {
       console.error("Meghívási hiba:", error);
       alert("Hiba történt a meghívás során!");
+    }
+  };
+
+  const requestJoinFamily = async () => {
+    const trimmedId = joinFamilyId.trim();
+    if (!trimmedId) {
+      setJoinRequestMessage("Add meg a család azonosítót.");
+      return;
+    }
+
+    if (trimmedId === data.familyId) {
+      setJoinRequestMessage("Már ehhez a családhoz tartozol.");
+      return;
+    }
+
+    if (!currentUser) {
+      setJoinRequestMessage("Be kell jelentkezned a csatlakozáshoz.");
+      return;
+    }
+
+    setIsJoinRequesting(true);
+    setJoinRequestMessage("");
+
+    try {
+      const familyDocRef = doc(db, "families", trimmedId);
+      const familyDoc = await getDoc(familyDocRef);
+      if (!familyDoc.exists()) {
+        setJoinRequestMessage("Nem található ilyen család azonosító.");
+        return;
+      }
+
+      await addDoc(collection(db, "invitations"), {
+        familyId: trimmedId,
+        requestedUserId: currentUser.uid,
+        requestedByEmail: currentUser.email,
+        type: "join_request",
+        status: "pending",
+        createdAt: new Date().toISOString(),
+      });
+
+      setJoinRequestMessage("Csatlakozási kérelem elküldve.");
+      setJoinFamilyId("");
+    } catch (error) {
+      console.error("Csatlakozási hiba:", error);
+      setJoinRequestMessage("Hiba történt a csatlakozás során.");
+    } finally {
+      setIsJoinRequesting(false);
+    }
+  };
+
+  const approveJoinRequest = async (invite) => {
+    if (!invite?.requestedUserId || !invite?.familyId) return;
+
+    const familyDocRef = doc(db, "families", invite.familyId);
+    const existingMembers = data.members || [];
+    const alreadyMember = existingMembers.some(
+      (member) => member.userId === invite.requestedUserId
+    );
+    const updatedMembers = alreadyMember
+      ? existingMembers
+      : [
+          ...existingMembers,
+          {
+            userId: invite.requestedUserId,
+            email: invite.requestedByEmail || "unknown",
+            role: "member",
+            joinedAt: new Date().toISOString(),
+          },
+        ];
+
+    try {
+      await setDoc(
+        familyDocRef,
+        {
+          members: updatedMembers,
+        },
+        { merge: true }
+      );
+
+      await setDoc(
+        doc(db, "users", invite.requestedUserId),
+        { familyId: invite.familyId },
+        { merge: true }
+      );
+
+      await updateDoc(doc(db, "invitations", invite.id), {
+        status: "approved",
+        updatedAt: new Date().toISOString(),
+        approvedBy: currentUser?.uid || null,
+      });
+    } catch (error) {
+      console.error("Jóváhagyási hiba:", error);
+      alert("Nem sikerült jóváhagyni a kérést.");
+    }
+  };
+
+  const rejectJoinRequest = async (invite) => {
+    if (!invite?.id) return;
+
+    try {
+      await updateDoc(doc(db, "invitations", invite.id), {
+        status: "rejected",
+        updatedAt: new Date().toISOString(),
+        approvedBy: currentUser?.uid || null,
+      });
+    } catch (error) {
+      console.error("Elutasítási hiba:", error);
+      alert("Nem sikerült elutasítani a kérést.");
+    }
+  };
+
+  const removeFamilyUser = async (userId) => {
+    const updatedMembers = (data.members || []).filter(
+      (member) => member.userId !== userId
+    );
+
+    try {
+      await setDoc(
+        doc(db, "families", data.familyId),
+        { members: updatedMembers },
+        { merge: true }
+      );
+
+      await setDoc(doc(db, "users", userId), { familyId: null }, { merge: true });
+    } catch (error) {
+      console.error("Tag eltávolítási hiba:", error);
+      alert("Nem sikerült eltávolítani a tagot.");
     }
   };
 
@@ -1110,6 +1285,27 @@ const FamilyOrganizerApp = () => {
                     ...familyData.finances,
                     accounts: defaultData.finances.accounts,
                   };
+                }
+
+                if (!familyData.members || familyData.members.length === 0) {
+                  familyData.members = [
+                    {
+                      userId,
+                      email: currentUser?.email || userData.email || "unknown",
+                      role: "admin",
+                      joinedAt: new Date().toISOString(),
+                    },
+                  ];
+                  try {
+                    const familyDataToSave = { ...familyData };
+                    delete familyDataToSave.settings;
+                    delete familyDataToSave.familyId;
+                    await setDoc(familyDocRef, familyDataToSave, {
+                      merge: true,
+                    });
+                  } catch (error) {
+                    console.error("❌ Tagság migrációs hiba:", error);
+                  }
                 }
 
                 if (familyData.familyMembers) {
@@ -7385,6 +7581,78 @@ const FamilyOrganizerApp = () => {
           });
         }
       }
+
+      const nameDayDate = resolveNameDay(member.nameDay, today.getFullYear());
+      if (nameDayDate) {
+        if (nameDayDate < today) {
+          nameDayDate.setFullYear(today.getFullYear() + 1);
+        }
+        if (nameDayDate >= today && nameDayDate <= endDate) {
+          allTasks.push({
+            id: `nameday-${member.id}`,
+            title: `${member.name} névnapja`,
+            date: nameDayDate,
+            category: "család",
+            type: "névnap",
+            icon: "Gift",
+            details: "Névnap",
+            memberId: member.id,
+            completed: false,
+          });
+        }
+      }
+    });
+
+    (data.extendedFamily || []).forEach((member) => {
+      if (member.birthDate) {
+        const birthDate = new Date(member.birthDate);
+        const thisYearBirth = new Date(
+          today.getFullYear(),
+          birthDate.getMonth(),
+          birthDate.getDate()
+        );
+
+        if (thisYearBirth < today) {
+          thisYearBirth.setFullYear(today.getFullYear() + 1);
+        }
+
+        if (thisYearBirth >= today && thisYearBirth <= endDate) {
+          const age = thisYearBirth.getFullYear() - birthDate.getFullYear();
+          allTasks.push({
+            id: `extended-birthday-${member.id}`,
+            title: `${member.name} születésnapja`,
+            date: thisYearBirth,
+            category: "család",
+            type: "születésnap",
+            icon: "Gift",
+            details: age ? `${age}. születésnap` : "Születésnap",
+            memberId: member.id,
+            memberType: "extended",
+            completed: false,
+          });
+        }
+      }
+
+      const nameDayDate = resolveNameDay(member.nameDay, today.getFullYear());
+      if (nameDayDate) {
+        if (nameDayDate < today) {
+          nameDayDate.setFullYear(today.getFullYear() + 1);
+        }
+        if (nameDayDate >= today && nameDayDate <= endDate) {
+          allTasks.push({
+            id: `extended-nameday-${member.id}`,
+            title: `${member.name} névnapja`,
+            date: nameDayDate,
+            category: "család",
+            type: "névnap",
+            icon: "Gift",
+            details: "Névnap",
+            memberId: member.id,
+            memberType: "extended",
+            completed: false,
+          });
+        }
+      }
     });
 
     allTasks.sort((a, b) => a.date - b.date);
@@ -8979,6 +9247,10 @@ const FamilyOrganizerApp = () => {
         <div className="p-4 border-b border-gray-200 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
           <div>
             <h3 className="font-semibold text-gray-800">
+              Családon kívüli kapcsolatok
+            </h3>
+            <p className="text-sm text-gray-600">
+              A család modul részeként kezelt távolabbi rokonok és barátok
               Távolabbi családtagok és barátok
             </h3>
             <p className="text-sm text-gray-600">
@@ -13918,7 +14190,18 @@ const FamilyOrganizerApp = () => {
           <h3 className="font-semibold text-gray-800">Család kezelése</h3>
         </div>
 
-        <div className="space-y-4">
+        {(() => {
+          const familyUsers = data.members || [];
+          const isAdmin = familyUsers.some(
+            (member) =>
+              member.userId === currentUser?.uid && member.role === "admin"
+          );
+          const pendingJoinRequests = familyInvites.filter(
+            (invite) => invite.type === "join_request" && invite.status === "pending"
+          );
+
+          return (
+            <div className="space-y-6">
           <div>
             <p className="text-sm text-gray-600 mb-2">Család azonosító</p>
             {data.familyId ? (
@@ -13935,11 +14218,113 @@ const FamilyOrganizerApp = () => {
 
           <button
             onClick={() => setShowInviteModal(true)}
-            className="w-full flex items-center justify-center gap-2 bg-blue-600 text-white px-4 py-3 rounded-lg hover:bg-blue-700"
+            className="w-full flex items-center justify-center gap-2 bg-blue-600 text-white px-4 py-3 rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+            disabled={!isAdmin}
           >
             <Mail size={20} />
             Családtag meghívása
           </button>
+          {!isAdmin && (
+            <p className="text-xs text-gray-500">
+              Csak admin jogosultságú felhasználó küldhet meghívót.
+            </p>
+          )}
+
+          <div className="border-t pt-4 space-y-3">
+            <p className="text-sm text-gray-600">Csatlakozás családhoz</p>
+            <div className="flex flex-col sm:flex-row gap-2">
+              <input
+                type="text"
+                value={joinFamilyId}
+                onChange={(e) => setJoinFamilyId(e.target.value)}
+                placeholder="Család azonosító"
+                className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+              />
+              <button
+                onClick={requestJoinFamily}
+                disabled={isJoinRequesting}
+                className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50"
+              >
+                {isJoinRequesting ? "Küldés..." : "Csatlakozási kérelem"}
+              </button>
+            </div>
+            {joinRequestMessage && (
+              <p className="text-xs text-gray-600">{joinRequestMessage}</p>
+            )}
+            <p className="text-xs text-gray-500">
+              A csatlakozás admin jóváhagyáshoz kötött.
+            </p>
+          </div>
+
+          <div className="border-t pt-4 space-y-3">
+            <p className="text-sm text-gray-600">Család tagjai</p>
+            {familyUsers.length === 0 ? (
+              <p className="text-xs text-gray-500">Nincs megjeleníthető tag.</p>
+            ) : (
+              <div className="space-y-2">
+                {familyUsers.map((member) => (
+                  <div
+                    key={member.userId}
+                    className="flex items-center justify-between p-2 bg-gray-50 rounded"
+                  >
+                    <div>
+                      <p className="text-sm font-medium text-gray-800">
+                        {member.email || "Ismeretlen"}
+                      </p>
+                      <p className="text-xs text-gray-500 capitalize">
+                        {member.role === "admin" ? "Admin" : "Tag"}
+                      </p>
+                    </div>
+                    {isAdmin && member.userId !== currentUser?.uid && (
+                      <button
+                        onClick={() => removeFamilyUser(member.userId)}
+                        className="text-red-600 hover:text-red-700"
+                      >
+                        <Trash2 size={16} />
+                      </button>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {isAdmin && pendingJoinRequests.length > 0 && (
+            <div className="border-t pt-4 space-y-3">
+              <p className="text-sm text-gray-600">Csatlakozási kérelmek</p>
+              <div className="space-y-2">
+                {pendingJoinRequests.map((invite) => (
+                  <div
+                    key={invite.id}
+                    className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 p-2 bg-yellow-50 border border-yellow-200 rounded"
+                  >
+                    <div>
+                      <p className="text-sm font-medium text-gray-800">
+                        {invite.requestedByEmail || "Ismeretlen felhasználó"}
+                      </p>
+                      <p className="text-xs text-gray-600">
+                        Kérelem: {new Date(invite.createdAt).toLocaleString("hu-HU")}
+                      </p>
+                    </div>
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => approveJoinRequest(invite)}
+                        className="px-3 py-1 text-xs bg-green-600 text-white rounded hover:bg-green-700"
+                      >
+                        Jóváhagyás
+                      </button>
+                      <button
+                        onClick={() => rejectJoinRequest(invite)}
+                        className="px-3 py-1 text-xs bg-red-600 text-white rounded hover:bg-red-700"
+                      >
+                        Elutasítás
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
 
           <div className="border-t pt-4">
             <p className="text-sm text-gray-600 mb-2">Megosztott hozzáférés</p>
@@ -13949,6 +14334,8 @@ const FamilyOrganizerApp = () => {
             </p>
           </div>
         </div>
+          );
+        })()}
       </div>
       <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
         <div className="flex items-center gap-3 mb-4">
