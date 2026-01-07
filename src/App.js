@@ -9433,19 +9433,41 @@ const FamilyOrganizerApp = () => {
             className="bg-white rounded-lg shadow-sm border border-gray-200"
           >
             <div className="p-4 border-b border-gray-200 bg-gray-50">
-              <div className="flex justify-between items-center">
-                <div className="flex items-center gap-4">
-                  <Car size={32} className="text-blue-600" />
-                  <div>
-                    <h3 className="font-semibold text-gray-800">
-                      {vehicle.name}
-                    </h3>
-                    <p className="text-sm text-gray-600">
-                      Rendszám: {vehicle.plate}
-                    </p>
+              <div className="flex flex-col gap-3">
+                <div className="flex justify-between items-center">
+                  <div className="flex items-center gap-4">
+                    <Car size={32} className="text-blue-600" />
+                    <div>
+                      <h3 className="font-semibold text-gray-800">
+                        {vehicle.name}
+                      </h3>
+                      <p className="text-sm text-gray-600">
+                        Rendszám: {vehicle.plate}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => openVehicleModal(vehicle)}
+                      className="p-2 text-blue-600 hover:bg-blue-50 rounded"
+                    >
+                      <Edit2 size={18} />
+                    </button>
+                    <button
+                      onClick={() =>
+                        setShowDeleteConfirm({
+                          type: "vehicle",
+                          id: vehicle.id,
+                          name: vehicle.name,
+                        })
+                      }
+                      className="p-2 text-red-600 hover:bg-red-50 rounded"
+                    >
+                      <Trash2 size={18} />
+                    </button>
                   </div>
                 </div>
-                <div className="flex gap-2">
+                <div className="flex flex-wrap gap-2">
                   <button
                     onClick={() => openKmModal(vehicle)}
                     className="px-3 py-2 text-sm bg-green-600 text-white rounded hover:bg-green-700 flex items-center gap-1"
@@ -9477,24 +9499,6 @@ const FamilyOrganizerApp = () => {
                   >
                     <Activity size={16} />
                     Stat
-                  </button>
-                  <button
-                    onClick={() => openVehicleModal(vehicle)}
-                    className="p-2 text-blue-600 hover:bg-blue-50 rounded"
-                  >
-                    <Edit2 size={18} />
-                  </button>
-                  <button
-                    onClick={() =>
-                      setShowDeleteConfirm({
-                        type: "vehicle",
-                        id: vehicle.id,
-                        name: vehicle.name,
-                      })
-                    }
-                    className="p-2 text-red-600 hover:bg-red-50 rounded"
-                  >
-                    <Trash2 size={18} />
                   </button>
                 </div>
               </div>
