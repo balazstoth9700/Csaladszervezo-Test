@@ -420,10 +420,7 @@ const FamilyOrganizerApp = () => {
   const [filterCategory, setFilterCategory] = useState("all");
   const [timeFilter, setTimeFilter] = useState("week");
 
-  const [touchStart, setTouchStart] = useState(null);
-  const [touchEnd, setTouchEnd] = useState(null);
   const [showInstallPrompt, setShowInstallPrompt] = useState(false);
-  const minSwipeDistance = 50;
 
   const [draggedModuleIndex, setDraggedModuleIndex] = useState(null);
 
@@ -909,30 +906,6 @@ const FamilyOrganizerApp = () => {
     return () => unsubscribe();
   }, [data.familyId]);
 
-  const onTouchStart = (e) => {
-    setTouchEnd(null);
-    setTouchStart(e.targetTouches[0].clientX);
-  };
-  const onTouchMove = (e) => {
-    setTouchEnd(e.targetTouches[0].clientX);
-  };
-
-  const onTouchEnd = () => {
-    if (!touchStart || !touchEnd) return;
-    const distance = touchStart - touchEnd;
-    const isLeftSwipe = distance > minSwipeDistance;
-    const isRightSwipe = distance < -minSwipeDistance;
-
-    const modules = getModules();
-    if (isLeftSwipe || isRightSwipe) {
-      const currentIndex = modules.findIndex((m) => m.id === activeModule);
-      if (isLeftSwipe && currentIndex < modules.length - 1) {
-        setActiveModule(modules[currentIndex + 1].id);
-      } else if (isRightSwipe && currentIndex > 0) {
-        setActiveModule(modules[currentIndex - 1].id);
-      }
-    }
-  };
   const handlePasswordReset = async () => {
     if (!resetEmail) {
       setResetMessage("Kérlek add meg az email címed!");
@@ -15823,7 +15796,7 @@ const FamilyOrganizerApp = () => {
     );
 
   return (
-    <div className="min-h-screen bg-gray-50 pb-16 md:pb-0">
+    <div className="min-h-screen bg-gray-50 pb-16 md:pb-0 overflow-x-hidden">
       <style>{`
       @keyframes checkmark {
         0% { transform: scale(1); }
@@ -16079,12 +16052,7 @@ const FamilyOrganizerApp = () => {
           </nav>
         </aside>
 
-        <main
-          className="flex-1 p-4 md:p-8 md:ml-64"
-          onTouchStart={onTouchStart}
-          onTouchMove={onTouchMove}
-          onTouchEnd={onTouchEnd}
-        >
+        <main className="flex-1 p-4 md:p-8 md:ml-64">
           <div className="max-w-6xl mx-auto">{renderContent()}</div>
         </main>
       </div>
