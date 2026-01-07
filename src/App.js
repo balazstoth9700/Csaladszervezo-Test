@@ -1421,6 +1421,7 @@ const FamilyOrganizerApp = () => {
               settings: userData.settings,
             };
             setData(finalData);
+            localStorage.removeItem("householdData");
             setLoading(false);
           }
         } else {
@@ -1449,7 +1450,12 @@ const FamilyOrganizerApp = () => {
     console.log("💾 saveUserData MEGHÍVVA!");
     console.log("📍 Hívási stack:", new Error().stack);
 
-    if (!currentUser || !newData.familyId) {
+    if (
+      !currentUser ||
+      !newData.familyId ||
+      !data.familyId ||
+      newData.familyId !== data.familyId
+    ) {
       console.log("⚠️ Mentés megszakítva - nincs user vagy familyId");
       return;
     }
@@ -6657,7 +6663,16 @@ const FamilyOrganizerApp = () => {
           }
         );
 
-        const data = await response.json();
+        if (!response.ok) {
+          console.warn(
+            "⚠️ Google fiókok betöltése sikertelen:",
+            response.status
+          );
+          return;
+        }
+
+        const rawText = await response.text();
+        const data = rawText ? JSON.parse(rawText) : {};
         if (data.success) {
           setGoogleCalendarAccounts(data.accounts);
         }
@@ -8193,7 +8208,10 @@ const FamilyOrganizerApp = () => {
   useEffect(() => {
     const savedData = localStorage.getItem("householdData");
     if (savedData) {
-      setData(JSON.parse(savedData));
+      const parsedData = JSON.parse(savedData);
+      if (parsedData?.familyId) {
+        setData(parsedData);
+      }
     }
 
     // Heti menük betöltése
