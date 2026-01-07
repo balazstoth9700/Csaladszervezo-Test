@@ -1180,6 +1180,14 @@ const FamilyOrganizerApp = () => {
     try {
       const userDocRef = doc(db, "users", userId);
 
+      const seedFamilyData = async (familyId, baseData) => {
+        const familyDocRef = doc(db, "families", familyId);
+        const familyDefaultData = { ...baseData };
+        delete familyDefaultData.settings;
+        delete familyDefaultData.familyId;
+        await setDoc(familyDocRef, familyDefaultData, { merge: true });
+      };
+
       const unsubscribeUser = onSnapshot(userDocRef, async (docSnap) => {
         console.log("👤 User snapshot meghívva");
 
@@ -1191,6 +1199,11 @@ const FamilyOrganizerApp = () => {
           console.log("🎯 defaultData vehicles:", defaultData.vehicles.length);
 
           // Settings migráció...
+          userData.settings = {
+            ...defaultData.settings,
+            ...userData.settings,
+          };
+
           if (!userData.settings?.mobileBottomNav) {
             userData.settings = {
               ...defaultData.settings,
@@ -1207,6 +1220,28 @@ const FamilyOrganizerApp = () => {
           if (!userData.settings?.shoppingStores) {
             userData.settings.shoppingStores =
               defaultData.settings.shoppingStores;
+          }
+
+          if (!userData.familyId) {
+            console.log("⚠️ Hiányzó familyId - család létrehozása...");
+            const familyId = await createOrJoinFamily(userId);
+            if (familyId) {
+              defaultData.familyId = familyId;
+              await setDoc(
+                userDocRef,
+                {
+                  familyId,
+                  settings: userData.settings,
+                },
+                { merge: true }
+              );
+              await seedFamilyData(familyId, defaultData);
+              setData(defaultData);
+            } else {
+              setData(defaultData);
+            }
+            setLoading(false);
+            return;
           }
 
           if (userData.familyId) {
@@ -1372,16 +1407,15 @@ const FamilyOrganizerApp = () => {
           const familyId = await createOrJoinFamily(userId);
           if (familyId) {
             defaultData.familyId = familyId;
-            await setDoc(userDocRef, {
-              familyId,
-              settings: defaultData.settings,
-            });
-
-            const familyDocRef = doc(db, "families", familyId);
-            const familyDefaultData = { ...defaultData };
-            delete familyDefaultData.settings;
-            delete familyDefaultData.familyId;
-            await setDoc(familyDocRef, familyDefaultData, { merge: true });
+            await setDoc(
+              userDocRef,
+              {
+                familyId,
+                settings: defaultData.settings,
+              },
+              { merge: true }
+            );
+            await seedFamilyData(familyId, defaultData);
           }
           setData(defaultData);
           setLoading(false);
