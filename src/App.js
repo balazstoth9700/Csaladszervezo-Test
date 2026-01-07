@@ -135,6 +135,7 @@ const getDefaultData = () => ({
   recipes: [],
   weeklyMenu: [],
   settings: {
+    nickname: "",
     activeModules: [
       "attekintes",
       "naptar",
@@ -959,13 +960,17 @@ const FamilyOrganizerApp = () => {
 
   const createOrJoinFamily = async (userId) => {
     try {
-      const familyRef = await addDoc(collection(db, "families"), {
+      const familyRef = doc(collection(db, "families"));
+      const trimmedNickname = settings.nickname?.trim();
+      await setDoc(familyRef, {
+        familyId: familyRef.id,
         createdBy: userId,
         createdAt: new Date().toISOString(),
         members: [
           {
             userId: userId,
             email: currentUser?.email || "unknown",
+            nickname: trimmedNickname || null,
             role: "admin",
             joinedAt: new Date().toISOString(),
           },
@@ -997,6 +1002,33 @@ const FamilyOrganizerApp = () => {
       console.error("Család létrehozási hiba:", error);
       return null;
     }
+  };
+
+  const seedFamilyData = async (familyId, baseData) => {
+    const familyDocRef = doc(db, "families", familyId);
+    const familyDefaultData = { ...baseData };
+    delete familyDefaultData.settings;
+    delete familyDefaultData.familyId;
+    await setDoc(familyDocRef, familyDefaultData, { merge: true });
+  };
+
+  const createFamilyForUser = async () => {
+    if (!currentUser || data.familyId) return;
+    const defaultData = getDefaultData();
+    const familyId = await createOrJoinFamily(currentUser.uid);
+    if (!familyId) return;
+
+    defaultData.familyId = familyId;
+    await setDoc(
+      doc(db, "users", currentUser.uid),
+      {
+        familyId,
+        settings,
+      },
+      { merge: true }
+    );
+    await seedFamilyData(familyId, defaultData);
+    setData(defaultData);
   };
 
   const inviteUserToFamily = async () => {
@@ -1071,10 +1103,12 @@ const FamilyOrganizerApp = () => {
     setJoinRequestMessage("");
 
     try {
+      const trimmedNickname = settings.nickname?.trim();
       await addDoc(collection(db, "invitations"), {
         familyId: trimmedId,
         requestedUserId: currentUser.uid,
         requestedByEmail: currentUser.email,
+        requestedByNickname: trimmedNickname || null,
         type: "join_request",
         status: "pending",
         createdAt: new Date().toISOString(),
@@ -1107,6 +1141,7 @@ const FamilyOrganizerApp = () => {
           {
             userId: invite.requestedUserId,
             email: invite.requestedByEmail || "unknown",
+            nickname: invite.requestedByNickname || null,
             role: "member",
             joinedAt: new Date().toISOString(),
           },
@@ -1189,6 +1224,11 @@ const FamilyOrganizerApp = () => {
           console.log("🎯 defaultData vehicles:", defaultData.vehicles.length);
 
           // Settings migráció...
+          userData.settings = {
+            ...defaultData.settings,
+            ...userData.settings,
+          };
+
           if (!userData.settings?.mobileBottomNav) {
             userData.settings = {
               ...defaultData.settings,
@@ -1206,6 +1246,9 @@ const FamilyOrganizerApp = () => {
             userData.settings.shoppingStores =
               defaultData.settings.shoppingStores;
           }
+
+          setSettings(userData.settings);
+          localStorage.setItem("userSettings", JSON.stringify(userData.settings));
 
           if (userData.familyId) {
             console.log("👨‍👩‍👧 familyId található:", userData.familyId);
@@ -1363,23 +1406,25 @@ const FamilyOrganizerApp = () => {
               }
               setLoading(false);
             });
+          } else {
+            const finalData = {
+              ...defaultData,
+              familyId: null,
+              settings: userData.settings,
+            };
+            setData(finalData);
+            setLoading(false);
           }
         } else {
           console.log("🆕 Új felhasználó - default adatok");
           const defaultData = getDefaultData();
-          const familyId = await createOrJoinFamily(userId);
-          if (familyId) {
-            defaultData.familyId = familyId;
-            await setDoc(userDocRef, {
-              familyId,
+          await setDoc(
+            userDocRef,
+            {
               settings: defaultData.settings,
-            });
-
-            const familyDocRef = doc(db, "families", familyId);
-            const familyDefaultData = { ...defaultData };
-            delete familyDefaultData.settings;
-            await setDoc(familyDocRef, familyDefaultData);
-          }
+            },
+            { merge: true }
+          );
           setData(defaultData);
           setLoading(false);
         }
@@ -7298,8 +7343,12 @@ const FamilyOrganizerApp = () => {
     localStorage.setItem("userSettings", JSON.stringify(newSettings));
 
     // Ha van Firebase sync, ott is frissítjük
-    if (data.familyId && currentUser) {
-      // Firebase update logika ide
+    if (currentUser) {
+      setDoc(
+        doc(db, "users", currentUser.uid),
+        { settings: newSettings },
+        { merge: true }
+      );
       console.log("Beállítások frissítve:", newSettings);
     }
   };
@@ -14136,6 +14185,27 @@ const FamilyOrganizerApp = () => {
       <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
         <div className="flex items-center gap-3 mb-4">
           <UserPlus size={24} className="text-blue-600" />
+          <h3 className="font-semibold text-gray-800">Profil</h3>
+        </div>
+        <label className="block">
+          <span className="text-sm text-gray-600">Becenév</span>
+          <input
+            type="text"
+            value={settings.nickname || ""}
+            onChange={(e) =>
+              updateSettings({ ...settings, nickname: e.target.value })
+            }
+            placeholder="Add meg a beceneved"
+            className="mt-2 w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+          />
+        </label>
+        <p className="text-xs text-gray-500 mt-2">
+          A beceneved megjelenhet a családtagok listájában és a kérésekben.
+        </p>
+      </div>
+      <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+        <div className="flex items-center gap-3 mb-4">
+          <UserPlus size={24} className="text-blue-600" />
           <h3 className="font-semibold text-gray-800">Család kezelése</h3>
         </div>
 
@@ -14158,9 +14228,16 @@ const FamilyOrganizerApp = () => {
                 {data.familyId}
               </p>
             ) : (
-              <div className="flex items-center gap-2">
-                <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600"></div>
-                <p className="text-sm text-gray-600">Betöltés...</p>
+              <div className="space-y-2">
+                <p className="text-sm text-gray-600">
+                  Még nem tartozol családhoz.
+                </p>
+                <button
+                  onClick={createFamilyForUser}
+                  className="w-full flex items-center justify-center gap-2 bg-green-600 text-white px-4 py-3 rounded-lg hover:bg-green-700"
+                >
+                  Új család létrehozása
+                </button>
               </div>
             )}
           </div>
@@ -14218,7 +14295,9 @@ const FamilyOrganizerApp = () => {
                   >
                     <div>
                       <p className="text-sm font-medium text-gray-800">
-                        {member.email || "Ismeretlen"}
+                        {member.nickname
+                          ? `${member.nickname} (${member.email || "Ismeretlen"})`
+                          : member.email || "Ismeretlen"}
                       </p>
                       <p className="text-xs text-gray-500 capitalize">
                         {member.role === "admin" ? "Admin" : "Tag"}
@@ -14249,7 +14328,9 @@ const FamilyOrganizerApp = () => {
                   >
                     <div>
                       <p className="text-sm font-medium text-gray-800">
-                        {invite.requestedByEmail || "Ismeretlen felhasználó"}
+                        {invite.requestedByNickname
+                          ? `${invite.requestedByNickname} (${invite.requestedByEmail || "Ismeretlen felhasználó"})`
+                          : invite.requestedByEmail || "Ismeretlen felhasználó"}
                       </p>
                       <p className="text-xs text-gray-600">
                         Kérelem: {new Date(invite.createdAt).toLocaleString("hu-HU")}
