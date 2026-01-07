@@ -9243,167 +9243,6 @@ const FamilyOrganizerApp = () => {
           );
         })
       )}
-
-      <div className="bg-white rounded-lg shadow-sm border border-gray-200">
-        <div className="p-4 border-b border-gray-200 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
-          <div>
-            <h3 className="font-semibold text-gray-800">
-              Családon kívüli kapcsolatok
-            </h3>
-            <p className="text-sm text-gray-600">
-              A család modul részeként kezelt távolabbi rokonok és barátok
-            </p>
-          </div>
-          <button
-            onClick={() => openExtendedMemberModal()}
-            className="flex items-center gap-2 bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700"
-          >
-            <Plus size={18} />
-            <span>Új kapcsolat</span>
-          </button>
-        </div>
-
-        {(data.extendedFamily || []).length === 0 ? (
-          <div className="p-8 text-center text-gray-500">
-            <Users size={48} className="mx-auto mb-3 text-gray-400" />
-            <p>Még nincs hozzáadott távolabbi családtag vagy barát</p>
-          </div>
-        ) : (
-          <div className="p-4 grid grid-cols-1 md:grid-cols-2 gap-4">
-            {(data.extendedFamily || []).map((member) => {
-              const birthDate = member.birthDate
-                ? new Date(member.birthDate)
-                : null;
-              return (
-                <div
-                  key={member.id}
-                  className="border border-gray-200 rounded-lg bg-gray-50"
-                >
-                  <div className="p-4 flex items-start justify-between">
-                    <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 bg-indigo-100 rounded-full flex items-center justify-center">
-                        <Users size={20} className="text-indigo-600" />
-                      </div>
-                      <div>
-                        <h4 className="font-semibold text-gray-800">
-                          {member.name}
-                        </h4>
-                        <p className="text-sm text-gray-600 capitalize">
-                          {member.relation || "Kapcsolat"}
-                        </p>
-                      </div>
-                    </div>
-                    <div className="flex gap-2">
-                      <button
-                        onClick={() => openExtendedMemberModal(member)}
-                        className="p-2 text-blue-600 hover:bg-blue-50 rounded"
-                      >
-                        <Edit2 size={16} />
-                      </button>
-                      <button
-                        onClick={() =>
-                          setShowDeleteConfirm({
-                            type: "extendedMember",
-                            id: member.id,
-                            name: member.name,
-                          })
-                        }
-                        className="p-2 text-red-600 hover:bg-red-50 rounded"
-                      >
-                        <Trash2 size={16} />
-                      </button>
-                    </div>
-                  </div>
-                  <div className="px-4 pb-4 grid grid-cols-2 gap-3 text-sm">
-                    <div>
-                      <p className="text-gray-600">Születésnap</p>
-                      <p className="font-medium text-gray-800">
-                        {birthDate
-                          ? birthDate.toLocaleDateString("hu-HU")
-                          : "-"}
-                      </p>
-                    </div>
-                    <div>
-                      <p className="text-gray-600">Névnap</p>
-                      <p className="font-medium text-gray-800">
-                        {member.nameDay || "-"}
-                      </p>
-                    </div>
-                  </div>
-
-                  <div className="border-t border-gray-200 px-4 py-3 bg-indigo-50">
-                    <div className="flex items-center justify-between mb-2">
-                      <h5 className="font-semibold text-gray-800 text-sm flex items-center gap-2">
-                        <Gift size={14} className="text-indigo-600" />
-                        Ajándék ötletek
-                      </h5>
-                      <button
-                        onClick={() => openGiftIdeaModal(member, "extended")}
-                        className="px-3 py-1 text-xs bg-indigo-600 text-white rounded hover:bg-indigo-700"
-                      >
-                        <Plus size={12} />
-                      </button>
-                    </div>
-                    {member.giftIdeas && member.giftIdeas.length > 0 ? (
-                      <div className="space-y-2">
-                        {member.giftIdeas.map((idea) => {
-                          const occasions = {
-                            birthday: "🎂 Születésnap",
-                            christmas: "🎄 Karácsony",
-                            nameday: "📅 Névnap",
-                            anniversary: "💍 Évforduló",
-                            other: "🎁 Egyéb",
-                          };
-                          return (
-                            <div
-                              key={idea.id}
-                              className="bg-white p-2 rounded-lg text-xs"
-                            >
-                              <div className="flex items-start justify-between">
-                                <div className="flex-1">
-                                  <div className="flex items-center gap-2 mb-1">
-                                    <span className="px-2 py-0.5 bg-indigo-100 text-indigo-700 rounded">
-                                      {occasions[idea.occasion]}
-                                    </span>
-                                    {idea.price && (
-                                      <span className="font-semibold text-gray-700">
-                                        {formatCurrency(idea.price, "HUF")}
-                                      </span>
-                                    )}
-                                  </div>
-                                  <p className="font-medium text-gray-800">
-                                    {idea.name}
-                                  </p>
-                                </div>
-                                <button
-                                  onClick={() =>
-                                    deleteGiftIdea(
-                                      member.id,
-                                      idea.id,
-                                      "extended"
-                                    )
-                                  }
-                                  className="text-red-600 hover:text-red-700"
-                                >
-                                  <Trash2 size={12} />
-                                </button>
-                              </div>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    ) : (
-                      <p className="text-xs text-gray-500">
-                        Még nincs rögzített ajándék ötlet
-                      </p>
-                    )}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </div>
     </div>
   );
 
@@ -10784,6 +10623,166 @@ const FamilyOrganizerApp = () => {
           );
         })
       )}
+<div className="bg-white rounded-lg shadow-sm border border-gray-200">
+        <div className="p-4 border-b border-gray-200 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
+          <div>
+            <h3 className="font-semibold text-gray-800">
+              Családon kívüli kapcsolatok
+            </h3>
+            <p className="text-sm text-gray-600">
+              A család modul részeként kezelt távolabbi rokonok és barátok
+            </p>
+          </div>
+          <button
+            onClick={() => openExtendedMemberModal()}
+            className="flex items-center gap-2 bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700"
+          >
+            <Plus size={18} />
+            <span>Új kapcsolat</span>
+          </button>
+        </div>
+
+        {(data.extendedFamily || []).length === 0 ? (
+          <div className="p-8 text-center text-gray-500">
+            <Users size={48} className="mx-auto mb-3 text-gray-400" />
+            <p>Még nincs hozzáadott távolabbi családtag vagy barát</p>
+          </div>
+        ) : (
+          <div className="p-4 grid grid-cols-1 md:grid-cols-2 gap-4">
+            {(data.extendedFamily || []).map((member) => {
+              const birthDate = member.birthDate
+                ? new Date(member.birthDate)
+                : null;
+              return (
+                <div
+                  key={member.id}
+                  className="border border-gray-200 rounded-lg bg-gray-50"
+                >
+                  <div className="p-4 flex items-start justify-between">
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 bg-indigo-100 rounded-full flex items-center justify-center">
+                        <Users size={20} className="text-indigo-600" />
+                      </div>
+                      <div>
+                        <h4 className="font-semibold text-gray-800">
+                          {member.name}
+                        </h4>
+                        <p className="text-sm text-gray-600 capitalize">
+                          {member.relation || "Kapcsolat"}
+                        </p>
+                      </div>
+                    </div>
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => openExtendedMemberModal(member)}
+                        className="p-2 text-blue-600 hover:bg-blue-50 rounded"
+                      >
+                        <Edit2 size={16} />
+                      </button>
+                      <button
+                        onClick={() =>
+                          setShowDeleteConfirm({
+                            type: "extendedMember",
+                            id: member.id,
+                            name: member.name,
+                          })
+                        }
+                        className="p-2 text-red-600 hover:bg-red-50 rounded"
+                      >
+                        <Trash2 size={16} />
+                      </button>
+                    </div>
+                  </div>
+                  <div className="px-4 pb-4 grid grid-cols-2 gap-3 text-sm">
+                    <div>
+                      <p className="text-gray-600">Születésnap</p>
+                      <p className="font-medium text-gray-800">
+                        {birthDate
+                          ? birthDate.toLocaleDateString("hu-HU")
+                          : "-"}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-gray-600">Névnap</p>
+                      <p className="font-medium text-gray-800">
+                        {member.nameDay || "-"}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="border-t border-gray-200 px-4 py-3 bg-indigo-50">
+                    <div className="flex items-center justify-between mb-2">
+                      <h5 className="font-semibold text-gray-800 text-sm flex items-center gap-2">
+                        <Gift size={14} className="text-indigo-600" />
+                        Ajándék ötletek
+                      </h5>
+                      <button
+                        onClick={() => openGiftIdeaModal(member, "extended")}
+                        className="px-3 py-1 text-xs bg-indigo-600 text-white rounded hover:bg-indigo-700"
+                      >
+                        <Plus size={12} />
+                      </button>
+                    </div>
+                    {member.giftIdeas && member.giftIdeas.length > 0 ? (
+                      <div className="space-y-2">
+                        {member.giftIdeas.map((idea) => {
+                          const occasions = {
+                            birthday: "🎂 Születésnap",
+                            christmas: "🎄 Karácsony",
+                            nameday: "📅 Névnap",
+                            anniversary: "💍 Évforduló",
+                            other: "🎁 Egyéb",
+                          };
+                          return (
+                            <div
+                              key={idea.id}
+                              className="bg-white p-2 rounded-lg text-xs"
+                            >
+                              <div className="flex items-start justify-between">
+                                <div className="flex-1">
+                                  <div className="flex items-center gap-2 mb-1">
+                                    <span className="px-2 py-0.5 bg-indigo-100 text-indigo-700 rounded">
+                                      {occasions[idea.occasion]}
+                                    </span>
+                                    {idea.price && (
+                                      <span className="font-semibold text-gray-700">
+                                        {formatCurrency(idea.price, "HUF")}
+                                      </span>
+                                    )}
+                                  </div>
+                                  <p className="font-medium text-gray-800">
+                                    {idea.name}
+                                  </p>
+                                </div>
+                                <button
+                                  onClick={() =>
+                                    deleteGiftIdea(
+                                      member.id,
+                                      idea.id,
+                                      "extended"
+                                    )
+                                  }
+                                  className="text-red-600 hover:text-red-700"
+                                >
+                                  <Trash2 size={12} />
+                                </button>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    ) : (
+                      <p className="text-xs text-gray-500">
+                        Még nincs rögzített ajándék ötlet
+                      </p>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
     </div>
   );
 
