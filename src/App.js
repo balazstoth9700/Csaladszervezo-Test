@@ -1213,6 +1213,14 @@ const FamilyOrganizerApp = () => {
     try {
       const userDocRef = doc(db, "users", userId);
 
+      const seedFamilyData = async (familyId, baseData) => {
+        const familyDocRef = doc(db, "families", familyId);
+        const familyDefaultData = { ...baseData };
+        delete familyDefaultData.settings;
+        delete familyDefaultData.familyId;
+        await setDoc(familyDocRef, familyDefaultData, { merge: true });
+      };
+
       const unsubscribeUser = onSnapshot(userDocRef, async (docSnap) => {
         console.log("👤 User snapshot meghívva");
 
