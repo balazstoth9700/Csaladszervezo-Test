@@ -12,12 +12,10 @@ import {
   getFirestore,
   doc,
   setDoc,
-  updateDoc,
+  getDoc,
   onSnapshot,
   collection,
   addDoc,
-  query,
-  where,
 } from "firebase/firestore";
 import {
   Home,
@@ -228,6 +226,139 @@ const getDefaultData = () => ({
   },
 });
 
+const SHAREABLE_SECTIONS = [
+  { key: "homes", label: "Otthon" },
+  { key: "vehicles", label: "Járművek" },
+  { key: "orders", label: "Rendelések" },
+  { key: "familyMembers", label: "Családtagok" },
+  { key: "extendedFamily", label: "Kiterjesztett család" },
+  { key: "healthAppointments", label: "Egészség" },
+  { key: "children", label: "Gyerekek" },
+  { key: "tasks", label: "Feladatok" },
+  { key: "notifications", label: "Értesítések" },
+  { key: "devices", label: "Eszközök" },
+  { key: "shoppingList", label: "Bevásárlólista" },
+  { key: "weeklyNotes", label: "Heti jegyzetek" },
+  { key: "subscriptions", label: "Előfizetések" },
+  { key: "finances", label: "Pénzügyek" },
+  { key: "chatMessages", label: "Családi chat" },
+  { key: "pets", label: "Kisállatok" },
+  { key: "recipes", label: "Receptek" },
+  { key: "weeklyMenu", label: "Heti menü" },
+];
+
+const getDefaultShareConfig = () => ({
+  sections: SHAREABLE_SECTIONS.reduce((acc, section) => {
+    acc[section.key] = true;
+    return acc;
+  }, {}),
+});
+
+const getAllPrivateShareConfig = () => ({
+  sections: SHAREABLE_SECTIONS.reduce((acc, section) => {
+    acc[section.key] = false;
+    return acc;
+  }, {}),
+});
+
+const normalizeFinances = (source) => {
+  const defaultFinances = getDefaultData().finances;
+  const finances =
+    source && source.finances ? { ...defaultFinances, ...source.finances } : {
+      ...defaultFinances,
+      ...(source || {}),
+    };
+
+  const accounts = Array.isArray(source?.accounts)
+    ? source.accounts
+    : finances.accounts;
+  const transactions = Array.isArray(source?.transactions)
+    ? source.transactions
+    : finances.transactions;
+
+  return {
+    ...finances,
+    accounts: Array.isArray(accounts) ? accounts : defaultFinances.accounts,
+    transactions: Array.isArray(transactions) ? transactions : [],
+  };
+};
+
+const buildSharedAndPrivateData = (newData, shareConfig) => {
+  const defaultData = getDefaultData();
+  const sharedData = {};
+  const privateData = {};
+
+  SHAREABLE_SECTIONS.forEach(({ key }) => {
+    if (key === "finances") {
+      const normalizedFinances = normalizeFinances(newData);
+      if (shareConfig.sections.finances) {
+        const sharedAccounts = (normalizedFinances.accounts || []).filter(
+          (acc) => acc.isShared !== false
+        );
+        const privateAccounts = (normalizedFinances.accounts || []).filter(
+          (acc) => acc.isShared === false
+        );
+        const sharedTransactions = (normalizedFinances.transactions || []).filter(
+          (transaction) => transaction.isShared !== false
+        );
+        const privateTransactions = (normalizedFinances.transactions || []).filter(
+          (transaction) => transaction.isShared === false
+        );
+
+        sharedData.finances = {
+          ...normalizedFinances,
+          accounts: sharedAccounts,
+          transactions: sharedTransactions,
+        };
+        privateData.finances = {
+          ...normalizedFinances,
+          accounts: privateAccounts,
+          transactions: privateTransactions,
+        };
+      } else {
+        sharedData.finances = { ...defaultData.finances };
+        privateData.finances = normalizedFinances;
+      }
+      return;
+    }
+
+    if (shareConfig.sections[key]) {
+      sharedData[key] = newData[key] ?? defaultData[key];
+      privateData[key] = defaultData[key];
+    } else {
+      sharedData[key] = defaultData[key];
+      privateData[key] = newData[key] ?? defaultData[key];
+    }
+  });
+
+  return { sharedData, privateData };
+};
+
+const mergeFinancesForDisplay = (sharedFinances, privateFinances) => {
+  const defaultFinances = getDefaultData().finances;
+  const merged = {
+    ...defaultFinances,
+    ...(sharedFinances || {}),
+  };
+  const privateData = privateFinances || {};
+
+  const accounts = [
+    ...(sharedFinances?.accounts || []),
+    ...(privateData.accounts || []),
+  ];
+  const transactions = [
+    ...(sharedFinances?.transactions || []),
+    ...(privateData.transactions || []),
+  ];
+
+  return {
+    ...merged,
+    ...privateData,
+    accounts,
+    transactions,
+  };
+};
+
 const FamilyOrganizerApp = () => {
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [currentUser, setCurrentUser] = useState(null);
@@ -237,6 +368,9 @@ const FamilyOrganizerApp = () => {
   const [currentView, setCurrentView] = useState("attekintes");
   const [data, setData] = useState(getDefaultData());
   const [settings, setSettings] = useState(getDefaultData().settings);
+  const [familyShareDraft, setFamilyShareDraft] = useState(
+    getDefaultShareConfig()
+  );
 
   const [showNotifications, setShowNotifications] = useState(false);
   const [unreadCount, setUnreadCount] = useState(0);
@@ -279,7 +413,6 @@ const FamilyOrganizerApp = () => {
   const [joinFamilyId, setJoinFamilyId] = useState("");
   const [joinRequestMessage, setJoinRequestMessage] = useState("");
   const [isJoinRequesting, setIsJoinRequesting] = useState(false);
-  const [familyInvites, setFamilyInvites] = useState([]);
 
   // Calendar states - ÚJ
   const [calendarView, setCalendarView] = useState("month"); // 'month' vagy 'week'
@@ -885,26 +1018,10 @@ const FamilyOrganizerApp = () => {
   }, [settings]);
 
   useEffect(() => {
-    if (!data.familyId) {
-      setFamilyInvites([]);
-      return undefined;
+    if (data.familyShareConfig) {
+      setFamilyShareDraft(normalizeShareConfig(data.familyShareConfig));
     }
-
-    const invitesQuery = query(
-      collection(db, "invitations"),
-      where("familyId", "==", data.familyId)
-    );
-
-    const unsubscribe = onSnapshot(invitesQuery, (snapshot) => {
-      const invites = snapshot.docs.map((docSnap) => ({
-        id: docSnap.id,
-        ...docSnap.data(),
-      }));
-      setFamilyInvites(invites);
-    });
-
-    return () => unsubscribe();
-  }, [data.familyId]);
+  }, [data.familyShareConfig]);
 
   const handlePasswordReset = async () => {
     if (!resetEmail) {
@@ -931,77 +1048,63 @@ const FamilyOrganizerApp = () => {
     }
   };
 
-  const createOrJoinFamily = async (userId) => {
-    try {
-      const familyRef = doc(collection(db, "families"));
-      const trimmedNickname = settings.nickname?.trim();
-      await setDoc(familyRef, {
-        familyId: familyRef.id,
-        createdBy: userId,
-        createdAt: new Date().toISOString(),
-        members: [
-          {
-            userId: userId,
-            email: currentUser?.email || "unknown",
-            nickname: trimmedNickname || null,
-            role: "admin",
-            joinedAt: new Date().toISOString(),
-          },
-        ],
-        // Alapértelmezett megosztott adatok
-        homes: [],
-        vehicles: [],
-        orders: [],
-        familyMembers: [],
-        extendedFamily: [],
-        extendedFamily: [],
-        healthAppointments: [],
-        children: [],
-        tasks: [],
-        notifications: [],
-        devices: [],
-        shoppingList: [],
-        weeklyNotes: [],
-        subscriptions: [],
-        chatMessages: [],
-        finances: {
-          loans: [],
-          savingGoals: [],
-        },
-      });
-      console.log("Család létrehozva, ID:", familyRef.id);
-      return familyRef.id;
-    } catch (error) {
-      console.error("Család létrehozási hiba:", error);
-      return null;
-    }
-  };
-
-  const seedFamilyData = async (familyId, baseData) => {
-    const familyDocRef = doc(db, "families", familyId);
-    const familyDefaultData = { ...baseData };
-    delete familyDefaultData.settings;
-    delete familyDefaultData.familyId;
-    await setDoc(familyDocRef, familyDefaultData, { merge: true });
-  };
-
   const createFamilyForUser = async () => {
     if (!currentUser || data.familyId) return;
-    const defaultData = getDefaultData();
-    const familyId = await createOrJoinFamily(currentUser.uid);
-    if (!familyId) return;
 
-    defaultData.familyId = familyId;
-    await setDoc(
-      doc(db, "users", currentUser.uid),
-      {
-        familyId,
-        settings,
-      },
-      { merge: true }
+    const shareConfig = normalizeShareConfig(
+      familyShareDraft || getDefaultShareConfig()
     );
-    await seedFamilyData(familyId, defaultData);
-    setData(defaultData);
+    const defaultData = getDefaultData();
+    const familyRef = doc(collection(db, "families"));
+    const trimmedNickname = settings.nickname?.trim();
+    const members = [
+      {
+        userId: currentUser.uid,
+        email: currentUser?.email || "unknown",
+        nickname: trimmedNickname || null,
+        role: "admin",
+        joinedAt: new Date().toISOString(),
+      },
+    ];
+
+    const { sharedData, privateData } = buildSharedAndPrivateData(
+      defaultData,
+      shareConfig
+    );
+
+    try {
+      await setDoc(familyRef, {
+        familyId: familyRef.id,
+        createdBy: currentUser.uid,
+        createdAt: new Date().toISOString(),
+        members,
+        shareConfig,
+        sharedData,
+      });
+
+      await setDoc(
+        doc(db, "users", currentUser.uid),
+        {
+          familyId: familyRef.id,
+          settings,
+          personalData: privateData,
+        },
+        { merge: true }
+      );
+
+      setData({
+        ...defaultData,
+        familyId: familyRef.id,
+        members,
+        settings,
+        familyShareConfig: shareConfig,
+      });
+      setFamilyShareDraft(shareConfig);
+      console.log("Család létrehozva, ID:", familyRef.id);
+    } catch (error) {
+      console.error("Család létrehozási hiba:", error);
+      alert("Nem sikerült létrehozni a családot.");
+    }
   };
 
   const inviteUserToFamily = async () => {
@@ -1046,7 +1149,7 @@ const FamilyOrganizerApp = () => {
 
       const subject = encodeURIComponent("Családi meghívó");
       const body = encodeURIComponent(
-        `Szia!\n\nMeghívtalak a családi szervezőbe. A család azonosítója:\n${data.familyId}\n\nLépj be, menj a Beállítások > Család kezelése részhez, add meg az azonosítót és kérj csatlakozást.\n\nMeghívó azonosító: ${inviteDoc.id}\n`
+        `Szia!\n\nMeghívtalak a családi szervezőbe. A család azonosítója:\n${data.familyId}\n\nLépj be, menj a Beállítások > Család kezelése részhez, add meg az azonosítót és csatlakozz.\n\nMeghívó azonosító: ${inviteDoc.id}\n`
       );
       window.location.href = `mailto:${inviteEmail}?subject=${subject}&body=${body}`;
     } catch (error) {
@@ -1055,7 +1158,7 @@ const FamilyOrganizerApp = () => {
     }
   };
 
-  const requestJoinFamily = async () => {
+  const joinFamilyById = async () => {
     const trimmedId = joinFamilyId.trim();
     if (!trimmedId) {
       setJoinRequestMessage("Add meg a család azonosítót.");
@@ -1072,55 +1175,44 @@ const FamilyOrganizerApp = () => {
       return;
     }
 
+    if (data.familyId && trimmedId !== data.familyId) {
+      setJoinRequestMessage(
+        "Először lépj ki a jelenlegi családból, mielőtt másikhoz csatlakozol."
+      );
+      return;
+    }
+
     setIsJoinRequesting(true);
     setJoinRequestMessage("");
 
     try {
-      const trimmedNickname = settings.nickname?.trim();
-      await addDoc(collection(db, "invitations"), {
-        familyId: trimmedId,
-        requestedUserId: currentUser.uid,
-        requestedByEmail: currentUser.email,
-        requestedByNickname: trimmedNickname || null,
-        type: "join_request",
-        status: "pending",
-        createdAt: new Date().toISOString(),
-      });
+      const familyDocRef = doc(db, "families", trimmedId);
+      const familySnap = await getDoc(familyDocRef);
 
-      setJoinRequestMessage("Csatlakozási kérelem elküldve.");
-      setJoinFamilyId("");
-    } catch (error) {
-      console.error("Csatlakozási hiba:", error);
-      setJoinRequestMessage(
-        "Nem sikerült elküldeni a kérelmet. Ellenőrizd, hogy van-e jogosultságod a családhoz csatlakozáshoz."
+      if (!familySnap.exists()) {
+        setJoinRequestMessage("Nem található ilyen családazonosító.");
+        return;
+      }
+
+      const familyData = familySnap.data();
+      const members = familyData.members || [];
+      const alreadyMember = members.some(
+        (member) => member.userId === currentUser.uid
       );
-    } finally {
-      setIsJoinRequesting(false);
-    }
-  };
+      const trimmedNickname = settings.nickname?.trim();
+      const updatedMembers = alreadyMember
+        ? members
+        : [
+            ...members,
+            {
+              userId: currentUser.uid,
+              email: currentUser.email || "unknown",
+              nickname: trimmedNickname || null,
+              role: "member",
+              joinedAt: new Date().toISOString(),
+            },
+          ];
 
-  const approveJoinRequest = async (invite) => {
-    if (!invite?.requestedUserId || !invite?.familyId) return;
-
-    const familyDocRef = doc(db, "families", invite.familyId);
-    const existingMembers = data.members || [];
-    const alreadyMember = existingMembers.some(
-      (member) => member.userId === invite.requestedUserId
-    );
-    const updatedMembers = alreadyMember
-      ? existingMembers
-      : [
-          ...existingMembers,
-          {
-            userId: invite.requestedUserId,
-            email: invite.requestedByEmail || "unknown",
-            nickname: invite.requestedByNickname || null,
-            role: "member",
-            joinedAt: new Date().toISOString(),
-          },
-        ];
-
-    try {
       await setDoc(
         familyDocRef,
         {
@@ -1130,35 +1222,78 @@ const FamilyOrganizerApp = () => {
       );
 
       await setDoc(
-        doc(db, "users", invite.requestedUserId),
-        { familyId: invite.familyId },
+        doc(db, "users", currentUser.uid),
+        { familyId: trimmedId },
         { merge: true }
       );
 
-      await updateDoc(doc(db, "invitations", invite.id), {
-        status: "approved",
-        updatedAt: new Date().toISOString(),
-        approvedBy: currentUser?.uid || null,
-      });
+      setJoinRequestMessage("Sikeresen csatlakoztál a családhoz.");
+      setJoinFamilyId("");
     } catch (error) {
-      console.error("Jóváhagyási hiba:", error);
-      alert("Nem sikerült jóváhagyni a kérést.");
+      console.error("Csatlakozási hiba:", error);
+      setJoinRequestMessage(
+        "Nem sikerült csatlakozni. Ellenőrizd az azonosítót és próbáld újra."
+      );
+    } finally {
+      setIsJoinRequesting(false);
     }
   };
 
-  const rejectJoinRequest = async (invite) => {
-    if (!invite?.id) return;
+  const leaveFamily = async () => {
+    if (!currentUser || !data.familyId) return;
+    if (!window.confirm("Biztosan kilépsz a családból?")) return;
+
+    const familyDocRef = doc(db, "families", data.familyId);
+    const updatedMembers = (data.members || []).filter(
+      (member) => member.userId !== currentUser.uid
+    );
+    const privateConfig = normalizeShareConfig(getAllPrivateShareConfig());
+    const { privateData } = buildSharedAndPrivateData(data, privateConfig);
 
     try {
-      await updateDoc(doc(db, "invitations", invite.id), {
-        status: "rejected",
-        updatedAt: new Date().toISOString(),
-        approvedBy: currentUser?.uid || null,
+      await setDoc(
+        familyDocRef,
+        { members: updatedMembers },
+        { merge: true }
+      );
+
+      await setDoc(
+        doc(db, "users", currentUser.uid),
+        {
+          familyId: null,
+          personalData: privateData,
+        },
+        { merge: true }
+      );
+
+      const defaultData = getDefaultData();
+      const finalData = buildFinalData({
+        defaultData,
+        sharedData: normalizeSharedData({}),
+        privateData,
+        shareConfig: privateConfig,
+        familyId: null,
+        settings,
+        members: [],
       });
+      setData(finalData);
+      setFamilyShareDraft(getDefaultShareConfig());
     } catch (error) {
-      console.error("Elutasítási hiba:", error);
-      alert("Nem sikerült elutasítani a kérést.");
+      console.error("Kilépési hiba:", error);
+      alert("Nem sikerült kilépni a családból.");
     }
+  };
+
+  const updateFamilyShareConfig = async (newConfig) => {
+    if (!data.familyId) return;
+    const normalizedConfig = normalizeShareConfig(newConfig);
+    const updatedData = {
+      ...data,
+      familyShareConfig: normalizedConfig,
+    };
+    setData(updatedData);
+    setFamilyShareDraft(normalizedConfig);
+    await saveUserData(updatedData);
   };
 
   const removeFamilyUser = async (userId) => {
@@ -1180,19 +1315,113 @@ const FamilyOrganizerApp = () => {
     }
   };
 
+  const normalizeShareConfig = (shareConfig) => {
+    const defaultConfig = getDefaultShareConfig();
+    return {
+      sections: {
+        ...defaultConfig.sections,
+        ...(shareConfig?.sections || {}),
+      },
+    };
+  };
+
+  const normalizeSharedData = (rawSharedData) => {
+    const defaultData = getDefaultData();
+    const normalized = {};
+
+    SHAREABLE_SECTIONS.forEach(({ key }) => {
+      if (key === "finances") {
+        normalized.finances = normalizeFinances(rawSharedData || {});
+        return;
+      }
+      normalized[key] = rawSharedData?.[key] ?? defaultData[key];
+    });
+
+    return normalized;
+  };
+
+  const extractSharedDataFromFamily = (familyDocData) => {
+    if (familyDocData?.sharedData) {
+      return normalizeSharedData(familyDocData.sharedData);
+    }
+
+    const legacySharedData = {};
+    SHAREABLE_SECTIONS.forEach(({ key }) => {
+      if (key === "finances") {
+        legacySharedData.finances = familyDocData?.finances;
+        legacySharedData.accounts = familyDocData?.accounts;
+        legacySharedData.transactions = familyDocData?.transactions;
+        return;
+      }
+      if (typeof familyDocData?.[key] !== "undefined") {
+        legacySharedData[key] = familyDocData[key];
+      }
+    });
+
+    return normalizeSharedData(legacySharedData);
+  };
+
+  const normalizePrivateData = (privateData) => {
+    const defaultData = getDefaultData();
+    const normalized = {};
+
+    SHAREABLE_SECTIONS.forEach(({ key }) => {
+      if (key === "finances") {
+        normalized.finances = normalizeFinances(privateData || {});
+        return;
+      }
+      normalized[key] = privateData?.[key] ?? defaultData[key];
+    });
+
+    return normalized;
+  };
+
+  const buildFinalData = ({
+    defaultData,
+    sharedData,
+    privateData,
+    shareConfig,
+    familyId,
+    settings,
+    members,
+  }) => {
+    const finalData = {
+      ...defaultData,
+      familyId: familyId || null,
+      settings,
+      members: members || [],
+      familyShareConfig: shareConfig,
+    };
+
+    SHAREABLE_SECTIONS.forEach(({ key }) => {
+      if (key === "finances") {
+        if (shareConfig.sections.finances) {
+          finalData.finances = mergeFinancesForDisplay(
+            sharedData.finances,
+            privateData.finances
+          );
+        } else {
+          finalData.finances = privateData.finances;
+        }
+        return;
+      }
+
+      finalData[key] = shareConfig.sections[key]
+        ? sharedData[key]
+        : privateData[key];
+    });
+
+    finalData.accounts = finalData.finances?.accounts || [];
+    finalData.transactions = finalData.finances?.transactions || [];
+
+    return finalData;
+  };
+
   const loadUserData = async (userId) => {
     console.log("🚀 loadUserData indítása, userId:", userId);
 
     try {
       const userDocRef = doc(db, "users", userId);
-
-      const seedFamilyData = async (familyId, baseData) => {
-        const familyDocRef = doc(db, "families", familyId);
-        const familyDefaultData = { ...baseData };
-        delete familyDefaultData.settings;
-        delete familyDefaultData.familyId;
-        await setDoc(familyDocRef, familyDefaultData, { merge: true });
-      };
 
       const unsubscribeUser = onSnapshot(userDocRef, async (docSnap) => {
         console.log("👤 User snapshot meghívva");
@@ -1239,14 +1468,14 @@ const FamilyOrganizerApp = () => {
               console.log("👪 Family snapshot meghívva");
 
               if (familyDoc.exists()) {
-                let familyData = familyDoc.data();
+                const familyData = familyDoc.data();
 
                 console.log("📥 FIREBASE-BŐL BETÖLTÖTT ADAT:");
                 console.log(
                   "  - vehicles count:",
-                  familyData.vehicles?.length || 0
+                  familyData?.vehicles?.length || 0
                 );
-                familyData.vehicles?.forEach((v, idx) => {
+                familyData?.vehicles?.forEach((v, idx) => {
                   console.log(`  - Vehicle ${idx}:`, {
                     name: v.name,
                     fuelings: v.fuelings?.length || 0,
@@ -1257,7 +1486,7 @@ const FamilyOrganizerApp = () => {
                 });
 
                 // MIGRÁCIÓ ELLENŐRZÉS
-                const needsMigration = familyData.vehicles?.some(
+                const needsMigration = familyData?.vehicles?.some(
                   (v) => v.refuels && v.refuels.length > 0
                 );
 
@@ -1269,10 +1498,10 @@ const FamilyOrganizerApp = () => {
                     JSON.stringify(familyData.vehicles)
                   );
 
-                  familyData = migrateRefuelsToFuelings(familyData);
+                  const migratedData = migrateRefuelsToFuelings(familyData);
 
                   console.log("📤 MIGRÁCIÓ UTÁN:");
-                  familyData.vehicles?.forEach((v, idx) => {
+                  migratedData.vehicles?.forEach((v, idx) => {
                     console.log(`  - Vehicle ${idx}:`, {
                       name: v.name,
                       fuelings: v.fuelings?.length || 0,
@@ -1281,30 +1510,56 @@ const FamilyOrganizerApp = () => {
                   });
 
                   try {
-                    const familyDataToSave = { ...familyData };
-                    delete familyDataToSave.settings;
-                    delete familyDataToSave.familyId;
+                    const shareConfig = normalizeShareConfig(
+                      familyData.shareConfig
+                    );
+                    const migratedSharedData = extractSharedDataFromFamily(
+                      migratedData
+                    );
 
                     console.log("💾 Migrált adat mentése Firebase-be...");
-                    await setDoc(familyDocRef, familyDataToSave, {
-                      merge: true,
-                    });
+                    await setDoc(
+                      familyDocRef,
+                      {
+                        shareConfig,
+                        sharedData: migratedSharedData,
+                      },
+                      {
+                        merge: true,
+                      }
+                    );
                     console.log("✅ Migráció mentve!");
                   } catch (error) {
                     console.error("❌ Migráció mentési hiba:", error);
                   }
                 }
 
-                // Többi migráció...
-                if (!familyData.finances?.accounts) {
-                  familyData.finances = {
-                    ...familyData.finances,
-                    accounts: defaultData.finances.accounts,
-                  };
+                const shareConfig = normalizeShareConfig(
+                  familyData.shareConfig
+                );
+                const sharedData = extractSharedDataFromFamily(familyData);
+                const privateData = normalizePrivateData(
+                  userData.personalData
+                );
+                let members = familyData.members || [];
+
+                if (!familyData.shareConfig || !familyData.sharedData) {
+                  try {
+                    await setDoc(
+                      familyDocRef,
+                      {
+                        shareConfig,
+                        sharedData,
+                      },
+                      { merge: true }
+                    );
+                  } catch (error) {
+                    console.error("❌ Megosztási migrációs hiba:", error);
+                  }
                 }
 
-                if (!familyData.members || familyData.members.length === 0) {
-                  familyData.members = [
+                if (!members || members.length === 0) {
+                  members = [
                     {
                       userId,
                       email: currentUser?.email || userData.email || "unknown",
@@ -1313,19 +1568,18 @@ const FamilyOrganizerApp = () => {
                     },
                   ];
                   try {
-                    const familyDataToSave = { ...familyData };
-                    delete familyDataToSave.settings;
-                    delete familyDataToSave.familyId;
-                    await setDoc(familyDocRef, familyDataToSave, {
-                      merge: true,
-                    });
+                    await setDoc(
+                      familyDocRef,
+                      { members },
+                      { merge: true }
+                    );
                   } catch (error) {
                     console.error("❌ Tagság migrációs hiba:", error);
                   }
                 }
 
-                if (familyData.familyMembers) {
-                  familyData.familyMembers = familyData.familyMembers.map(
+                if (sharedData.familyMembers) {
+                  sharedData.familyMembers = sharedData.familyMembers.map(
                     (member) => ({
                       ...member,
                       bloodPressureLog: member.bloodPressureLog || [],
@@ -1334,10 +1588,10 @@ const FamilyOrganizerApp = () => {
                   );
                 }
 
-                if (!familyData.extendedFamily) {
-                  familyData.extendedFamily = [];
+                if (!sharedData.extendedFamily) {
+                  sharedData.extendedFamily = [];
                 } else {
-                  familyData.extendedFamily = familyData.extendedFamily.map(
+                  sharedData.extendedFamily = sharedData.extendedFamily.map(
                     (member) => ({
                       ...member,
                       giftIdeas: member.giftIdeas || [],
@@ -1345,21 +1599,23 @@ const FamilyOrganizerApp = () => {
                   );
                 }
 
-                if (familyData.children) {
-                  familyData.children = familyData.children.map((child) => ({
+                if (sharedData.children) {
+                  sharedData.children = sharedData.children.map((child) => ({
                     ...child,
                     milestones: child.milestones || [],
                     measurements: child.measurements || [],
                   }));
                 }
 
-                // STATE BEÁLLÍTÁSA
-                const finalData = {
-                  ...defaultData,
-                  ...familyData,
+                const finalData = buildFinalData({
+                  defaultData,
+                  sharedData,
+                  privateData,
+                  shareConfig,
                   familyId: userData.familyId,
                   settings: userData.settings,
-                };
+                  members,
+                });
 
                 console.log("🎨 STATE BEÁLLÍTÁSA:");
                 console.log(
@@ -1368,7 +1624,7 @@ const FamilyOrganizerApp = () => {
                 );
                 console.log(
                   "  - familyData.vehicles:",
-                  familyData.vehicles?.length || 0
+                  sharedData.vehicles?.length || 0
                 );
                 console.log(
                   "  - finalData.vehicles:",
@@ -1388,11 +1644,19 @@ const FamilyOrganizerApp = () => {
               setLoading(false);
             });
           } else {
-            const finalData = {
-              ...defaultData,
+            const shareConfig = normalizeShareConfig(
+              getAllPrivateShareConfig()
+            );
+            const privateData = normalizePrivateData(userData.personalData);
+            const finalData = buildFinalData({
+              defaultData,
+              sharedData: normalizeSharedData({}),
+              privateData,
+              shareConfig,
               familyId: null,
               settings: userData.settings,
-            };
+              members: [],
+            });
             setData(finalData);
             localStorage.removeItem("householdData");
             setLoading(false);
@@ -1400,14 +1664,19 @@ const FamilyOrganizerApp = () => {
         } else {
           console.log("🆕 Új felhasználó - default adatok");
           const defaultData = getDefaultData();
+          const privateData = normalizePrivateData(defaultData);
           await setDoc(
             userDocRef,
             {
               settings: defaultData.settings,
+              personalData: privateData,
             },
             { merge: true }
           );
-          setData(defaultData);
+          setData({
+            ...defaultData,
+            familyShareConfig: normalizeShareConfig(getAllPrivateShareConfig()),
+          });
           setLoading(false);
         }
       });
@@ -1423,44 +1692,63 @@ const FamilyOrganizerApp = () => {
     console.log("💾 saveUserData MEGHÍVVA!");
     console.log("📍 Hívási stack:", new Error().stack);
 
-    if (
-      !currentUser ||
-      !newData.familyId ||
-      !data.familyId ||
-      newData.familyId !== data.familyId
-    ) {
-      console.log("⚠️ Mentés megszakítva - nincs user vagy familyId");
-      return;
-    }
-
     try {
-      const familyDocRef = doc(db, "families", newData.familyId);
-      const familyData = { ...newData };
-      delete familyData.settings;
-      delete familyData.familyId;
+      if (!currentUser) {
+        console.log("⚠️ Mentés megszakítva - nincs bejelentkezett user");
+        return;
+      }
 
-      console.log("📤 MENTENDŐ ADAT:");
-      console.log("  - vehicles count:", familyData.vehicles?.length || 0);
-      familyData.vehicles?.forEach((v, idx) => {
-        console.log(`  - Vehicle ${idx}:`, {
-          name: v.name,
-          fuelings: v.fuelings?.length || 0,
-          refuels: v.refuels?.length || 0,
+      const shareConfig = newData.familyId
+        ? normalizeShareConfig(
+            newData.familyShareConfig || getDefaultShareConfig()
+          )
+        : normalizeShareConfig(getAllPrivateShareConfig());
+      const { sharedData, privateData } = buildSharedAndPrivateData(
+        newData,
+        shareConfig
+      );
+
+      if (newData.familyId && data.familyId === newData.familyId) {
+        const familyDocRef = doc(db, "families", newData.familyId);
+
+        console.log("📤 MENTENDŐ ADAT:");
+        console.log(
+          "  - vehicles count:",
+          sharedData.vehicles?.length || 0
+        );
+        sharedData.vehicles?.forEach((v, idx) => {
+          console.log(`  - Vehicle ${idx}:`, {
+            name: v.name,
+            fuelings: v.fuelings?.length || 0,
+            refuels: v.refuels?.length || 0,
+          });
         });
-      });
 
-      await setDoc(familyDocRef, familyData, { merge: true });
-
-      console.log("✅ Firebase mentés sikeres!");
+        await setDoc(
+          familyDocRef,
+          {
+            shareConfig,
+            sharedData,
+            members: newData.members || [],
+          },
+          { merge: true }
+        );
+      }
 
       if (newData.settings) {
         const userDocRef = doc(db, "users", currentUser.uid);
         await setDoc(
           userDocRef,
-          { settings: newData.settings },
+          {
+            settings: newData.settings,
+            familyId: newData.familyId || null,
+            personalData: privateData,
+          },
           { merge: true }
         );
       }
+
+      console.log("✅ Firebase mentés sikeres!");
     } catch (error) {
       console.error("❌ Mentési hiba:", error);
       alert("Hiba történt az adatok mentése során!");
@@ -6420,13 +6708,15 @@ const FamilyOrganizerApp = () => {
     setEditingItem(null);
   };
 
-  const toggleShoppingItem = (itemId) => {
-    setData({
+  const toggleShoppingItem = async (itemId) => {
+    const newData = {
       ...data,
       shoppingList: (data.shoppingList || []).map((item) =>
         item.id === itemId ? { ...item, checked: !item.checked } : item
       ),
-    });
+    };
+    setData(newData);
+    await saveUserData(newData);
   };
 
   const deleteShoppingItem = async (itemId) => {
@@ -14217,9 +14507,9 @@ const FamilyOrganizerApp = () => {
             (member) =>
               member.userId === currentUser?.uid && member.role === "admin"
           );
-          const pendingJoinRequests = familyInvites.filter(
-            (invite) => invite.type === "join_request" && invite.status === "pending"
-          );
+          const shareConfig = data.familyId
+            ? normalizeShareConfig(data.familyShareConfig)
+            : familyShareDraft;
 
           return (
             <div className="space-y-6">
@@ -14234,6 +14524,39 @@ const FamilyOrganizerApp = () => {
                 <p className="text-sm text-gray-600">
                   Még nem tartozol családhoz.
                 </p>
+                <div className="rounded-lg border border-gray-200 bg-gray-50 p-4 space-y-3">
+                  <p className="text-sm font-medium text-gray-700">
+                    Milyen modulok legyenek megosztva?
+                  </p>
+                  <div className="grid gap-2 sm:grid-cols-2">
+                    {SHAREABLE_SECTIONS.map((section) => (
+                      <label
+                        key={section.key}
+                        className="flex items-center gap-2 text-sm text-gray-700"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={shareConfig.sections[section.key]}
+                          onChange={(e) =>
+                            setFamilyShareDraft({
+                              ...shareConfig,
+                              sections: {
+                                ...shareConfig.sections,
+                                [section.key]: e.target.checked,
+                              },
+                            })
+                          }
+                          className="w-4 h-4 text-blue-600 rounded"
+                        />
+                        {section.label}
+                      </label>
+                    ))}
+                  </div>
+                  <p className="text-xs text-gray-500">
+                    A pénzügyeknél az egyes számláknál külön is jelölheted,
+                    hogy megosztottak-e.
+                  </p>
+                </div>
                 <button
                   onClick={createFamilyForUser}
                   className="w-full flex items-center justify-center gap-2 bg-green-600 text-white px-4 py-3 rounded-lg hover:bg-green-700"
@@ -14269,18 +14592,18 @@ const FamilyOrganizerApp = () => {
                 className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
               />
               <button
-                onClick={requestJoinFamily}
+                onClick={joinFamilyById}
                 disabled={isJoinRequesting}
                 className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50"
               >
-                {isJoinRequesting ? "Küldés..." : "Csatlakozási kérelem"}
+                {isJoinRequesting ? "Csatlakozás..." : "Csatlakozás"}
               </button>
             </div>
             {joinRequestMessage && (
               <p className="text-xs text-gray-600">{joinRequestMessage}</p>
             )}
             <p className="text-xs text-gray-500">
-              A csatlakozás admin jóváhagyáshoz kötött.
+              A csatlakozás azonnali, nem szükséges admin jóváhagyás.
             </p>
           </div>
 
@@ -14319,52 +14642,55 @@ const FamilyOrganizerApp = () => {
             )}
           </div>
 
-          {isAdmin && pendingJoinRequests.length > 0 && (
+          {data.familyId && (
             <div className="border-t pt-4 space-y-3">
-              <p className="text-sm text-gray-600">Csatlakozási kérelmek</p>
-              <div className="space-y-2">
-                {pendingJoinRequests.map((invite) => (
-                  <div
-                    key={invite.id}
-                    className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 p-2 bg-yellow-50 border border-yellow-200 rounded"
+              <p className="text-sm text-gray-600">Megosztási beállítások</p>
+              <p className="text-xs text-gray-500">
+                Adminként kiválaszthatod, mely modulok kerüljenek a családi
+                közösbe.
+              </p>
+              <div className="grid gap-2 sm:grid-cols-2">
+                {SHAREABLE_SECTIONS.map((section) => (
+                  <label
+                    key={section.key}
+                    className="flex items-center gap-2 text-sm text-gray-700"
                   >
-                    <div>
-                      <p className="text-sm font-medium text-gray-800">
-                        {invite.requestedByNickname
-                          ? `${invite.requestedByNickname} (${invite.requestedByEmail || "Ismeretlen felhasználó"})`
-                          : invite.requestedByEmail || "Ismeretlen felhasználó"}
-                      </p>
-                      <p className="text-xs text-gray-600">
-                        Kérelem: {new Date(invite.createdAt).toLocaleString("hu-HU")}
-                      </p>
-                    </div>
-                    <div className="flex gap-2">
-                      <button
-                        onClick={() => approveJoinRequest(invite)}
-                        className="px-3 py-1 text-xs bg-green-600 text-white rounded hover:bg-green-700"
-                      >
-                        Jóváhagyás
-                      </button>
-                      <button
-                        onClick={() => rejectJoinRequest(invite)}
-                        className="px-3 py-1 text-xs bg-red-600 text-white rounded hover:bg-red-700"
-                      >
-                        Elutasítás
-                      </button>
-                    </div>
-                  </div>
+                    <input
+                      type="checkbox"
+                      checked={shareConfig.sections[section.key]}
+                      onChange={(e) => {
+                        if (!isAdmin) return;
+                        updateFamilyShareConfig({
+                          ...shareConfig,
+                          sections: {
+                            ...shareConfig.sections,
+                            [section.key]: e.target.checked,
+                          },
+                        });
+                      }}
+                      disabled={!isAdmin}
+                      className="w-4 h-4 text-blue-600 rounded disabled:opacity-50"
+                    />
+                    {section.label}
+                  </label>
                 ))}
               </div>
+              <p className="text-xs text-gray-500">
+                A pénzügyeknél a számlák megosztását külön is szabályozhatod.
+              </p>
             </div>
           )}
 
-          <div className="border-t pt-4">
-            <p className="text-sm text-gray-600 mb-2">Megosztott hozzáférés</p>
-            <p className="text-xs text-gray-500">
-              A meghívott családtagok valós időben látják és szerkeszthetik az
-              adatokat.
-            </p>
-          </div>
+          {data.familyId && (
+            <div className="border-t pt-4">
+              <button
+                onClick={leaveFamily}
+                className="w-full flex items-center justify-center gap-2 bg-red-600 text-white px-4 py-3 rounded-lg hover:bg-red-700"
+              >
+                Kilépés a családból
+              </button>
+            </div>
+          )}
         </div>
           );
         })()}
