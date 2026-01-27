@@ -16,6 +16,10 @@ import {
   onSnapshot,
   collection,
   addDoc,
+  query,
+  where,
+  getDocs,
+  deleteDoc,
 } from "firebase/firestore";
 import {
   Home,
@@ -231,7 +235,7 @@ const SHAREABLE_SECTIONS = [
   { key: "vehicles", label: "Járművek" },
   { key: "orders", label: "Rendelések" },
   { key: "familyMembers", label: "Családtagok" },
-  { key: "extendedFamily", label: "Kiterjesztett család" },
+  { key: "extendedFamily", label: "További családi és baráti kapcsolatok" },
   { key: "healthAppointments", label: "Egészség" },
   { key: "children", label: "Gyerekek" },
   { key: "tasks", label: "Feladatok" },
@@ -413,6 +417,9 @@ const FamilyOrganizerApp = () => {
   const [joinFamilyId, setJoinFamilyId] = useState("");
   const [joinRequestMessage, setJoinRequestMessage] = useState("");
   const [isJoinRequesting, setIsJoinRequesting] = useState(false);
+  const [pendingJoinRequests, setPendingJoinRequests] = useState([]);
+  const [pendingInvitations, setPendingInvitations] = useState([]);
+  const [showJoinRequestsModal, setShowJoinRequestsModal] = useState(false);
 
   // Calendar states - ÚJ
   const [calendarView, setCalendarView] = useState("month"); // 'month' vagy 'week'
@@ -1023,6 +1030,16 @@ const FamilyOrganizerApp = () => {
     }
   }, [data.familyShareConfig]);
 
+  // Csatlakozási kérelmek és meghívások lekérése
+  useEffect(() => {
+    if (currentUser && data.familyId) {
+      fetchPendingJoinRequests();
+    }
+    if (currentUser) {
+      fetchPendingInvitations();
+    }
+  }, [currentUser, data.familyId, data.members]);
+
   const handlePasswordReset = async () => {
     if (!resetEmail) {
       setResetMessage("Kérlek add meg az email címed!");
@@ -1199,43 +1216,234 @@ const FamilyOrganizerApp = () => {
       const alreadyMember = members.some(
         (member) => member.userId === currentUser.uid
       );
+
+      if (alreadyMember) {
+        setJoinRequestMessage("Már tagja vagy ennek a családnak.");
+        return;
+      }
+
+      // Ellenőrizzük, hogy van-e már függő kérelem ettől a felhasználótól
+      const existingRequestQuery = query(
+        collection(db, "joinRequests"),
+        where("userId", "==", currentUser.uid),
+        where("familyId", "==", trimmedId),
+        where("status", "==", "pending")
+      );
+      const existingRequests = await getDocs(existingRequestQuery);
+
+      if (!existingRequests.empty) {
+        setJoinRequestMessage("Már van függő csatlakozási kérelmed ehhez a családhoz.");
+        return;
+      }
+
+      // Csatlakozási kérelem létrehozása
       const trimmedNickname = settings.nickname?.trim();
-      const updatedMembers = alreadyMember
-        ? members
-        : [
-            ...members,
-            {
-              userId: currentUser.uid,
-              email: currentUser.email || "unknown",
-              nickname: trimmedNickname || null,
-              role: "member",
-              joinedAt: new Date().toISOString(),
-            },
-          ];
+      await addDoc(collection(db, "joinRequests"), {
+        familyId: trimmedId,
+        userId: currentUser.uid,
+        email: currentUser.email || "unknown",
+        nickname: trimmedNickname || null,
+        status: "pending",
+        createdAt: new Date().toISOString(),
+      });
+
+      setJoinRequestMessage("Csatlakozási kérelem elküldve! Az admin jóváhagyására vár.");
+      setJoinFamilyId("");
+    } catch (error) {
+      console.error("Csatlakozási hiba:", error);
+      setJoinRequestMessage(
+        "Nem sikerült elküldeni a kérelmet. Ellenőrizd az azonosítót és próbáld újra."
+      );
+    } finally {
+      setIsJoinRequesting(false);
+    }
+  };
+
+  // Függő csatlakozási kérelmek lekérése (admin számára)
+  const fetchPendingJoinRequests = async () => {
+    if (!data.familyId || !currentUser) return;
+
+    const familyMembers = data.members || [];
+    const isAdmin = familyMembers.some(
+      (member) => member.userId === currentUser?.uid && member.role === "admin"
+    );
+
+    if (!isAdmin) return;
+
+    try {
+      const requestsQuery = query(
+        collection(db, "joinRequests"),
+        where("familyId", "==", data.familyId),
+        where("status", "==", "pending")
+      );
+      const requestsSnap = await getDocs(requestsQuery);
+      const requests = requestsSnap.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      }));
+      setPendingJoinRequests(requests);
+    } catch (error) {
+      console.error("Kérelmek lekérési hiba:", error);
+    }
+  };
+
+  // Függő meghívások lekérése (felhasználó számára)
+  const fetchPendingInvitations = async () => {
+    if (!currentUser) return;
+
+    try {
+      const invitesQuery = query(
+        collection(db, "invitations"),
+        where("invitedEmail", "==", currentUser.email),
+        where("status", "==", "pending")
+      );
+      const invitesSnap = await getDocs(invitesQuery);
+      const invites = invitesSnap.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      }));
+      setPendingInvitations(invites);
+    } catch (error) {
+      console.error("Meghívások lekérési hiba:", error);
+    }
+  };
+
+  // Csatlakozási kérelem jóváhagyása
+  const approveJoinRequest = async (request) => {
+    try {
+      const familyDocRef = doc(db, "families", request.familyId);
+      const familySnap = await getDoc(familyDocRef);
+
+      if (!familySnap.exists()) {
+        alert("A család nem található.");
+        return;
+      }
+
+      const familyData = familySnap.data();
+      const members = familyData.members || [];
+
+      const updatedMembers = [
+        ...members,
+        {
+          userId: request.userId,
+          email: request.email,
+          nickname: request.nickname || null,
+          role: "member",
+          joinedAt: new Date().toISOString(),
+        },
+      ];
 
       await setDoc(
         familyDocRef,
+        { members: updatedMembers },
+        { merge: true }
+      );
+
+      await setDoc(
+        doc(db, "users", request.userId),
+        { familyId: request.familyId },
+        { merge: true }
+      );
+
+      // Kérelem státuszának frissítése
+      await setDoc(
+        doc(db, "joinRequests", request.id),
+        { status: "approved", approvedAt: new Date().toISOString() },
+        { merge: true }
+      );
+
+      alert(`${request.email} sikeresen hozzáadva a családhoz!`);
+      fetchPendingJoinRequests();
+    } catch (error) {
+      console.error("Jóváhagyási hiba:", error);
+      alert("Hiba történt a jóváhagyás során.");
+    }
+  };
+
+  // Csatlakozási kérelem elutasítása
+  const rejectJoinRequest = async (request) => {
+    try {
+      await setDoc(
+        doc(db, "joinRequests", request.id),
+        { status: "rejected", rejectedAt: new Date().toISOString() },
+        { merge: true }
+      );
+
+      alert(`${request.email} kérelme elutasítva.`);
+      fetchPendingJoinRequests();
+    } catch (error) {
+      console.error("Elutasítási hiba:", error);
+      alert("Hiba történt az elutasítás során.");
+    }
+  };
+
+  // Meghívás elfogadása
+  const acceptInvitation = async (invitation) => {
+    try {
+      const familyDocRef = doc(db, "families", invitation.familyId);
+      const familySnap = await getDoc(familyDocRef);
+
+      if (!familySnap.exists()) {
+        alert("A család nem található.");
+        return;
+      }
+
+      const familyData = familySnap.data();
+      const members = familyData.members || [];
+      const trimmedNickname = settings.nickname?.trim();
+
+      const updatedMembers = [
+        ...members,
         {
-          members: updatedMembers,
+          userId: currentUser.uid,
+          email: currentUser.email,
+          nickname: trimmedNickname || null,
+          role: invitation.role || "member",
+          joinedAt: new Date().toISOString(),
         },
+      ];
+
+      await setDoc(
+        familyDocRef,
+        { members: updatedMembers },
         { merge: true }
       );
 
       await setDoc(
         doc(db, "users", currentUser.uid),
-        { familyId: trimmedId },
+        { familyId: invitation.familyId },
         { merge: true }
       );
 
-      setJoinRequestMessage("Sikeresen csatlakoztál a családhoz.");
-      setJoinFamilyId("");
-    } catch (error) {
-      console.error("Csatlakozási hiba:", error);
-      setJoinRequestMessage(
-        "Nem sikerült csatlakozni. Ellenőrizd az azonosítót és próbáld újra."
+      // Meghívás státuszának frissítése
+      await setDoc(
+        doc(db, "invitations", invitation.id),
+        { status: "accepted", acceptedAt: new Date().toISOString() },
+        { merge: true }
       );
-    } finally {
-      setIsJoinRequesting(false);
+
+      alert("Sikeresen csatlakoztál a családhoz!");
+      fetchPendingInvitations();
+    } catch (error) {
+      console.error("Elfogadási hiba:", error);
+      alert("Hiba történt a meghívás elfogadása során.");
+    }
+  };
+
+  // Meghívás elutasítása
+  const declineInvitation = async (invitation) => {
+    try {
+      await setDoc(
+        doc(db, "invitations", invitation.id),
+        { status: "declined", declinedAt: new Date().toISOString() },
+        { merge: true }
+      );
+
+      alert("Meghívás elutasítva.");
+      fetchPendingInvitations();
+    } catch (error) {
+      console.error("Elutasítási hiba:", error);
+      alert("Hiba történt az elutasítás során.");
     }
   };
 
@@ -1735,18 +1943,17 @@ const FamilyOrganizerApp = () => {
         );
       }
 
+      // Mindig mentsük a user dokumentumot a privateData-val
+      const userDocRef = doc(db, "users", currentUser.uid);
+      const userUpdateData = {
+        familyId: newData.familyId || null,
+        personalData: privateData,
+      };
+      // Ha van settings, azt is mentsük
       if (newData.settings) {
-        const userDocRef = doc(db, "users", currentUser.uid);
-        await setDoc(
-          userDocRef,
-          {
-            settings: newData.settings,
-            familyId: newData.familyId || null,
-            personalData: privateData,
-          },
-          { merge: true }
-        );
+        userUpdateData.settings = newData.settings;
       }
+      await setDoc(userDocRef, userUpdateData, { merge: true });
 
       console.log("✅ Firebase mentés sikeres!");
     } catch (error) {
@@ -7571,19 +7778,62 @@ const FamilyOrganizerApp = () => {
     await saveUserData(newData);
   };
 
-  const openEventModal = (date = null) => {
-    setSelectedDate(date || new Date());
-    setFormData({
-      title: "",
-      date: date
-        ? date.toISOString().split("T")[0]
-        : new Date().toISOString().split("T")[0],
-      time: "09:00", // ÚJ sor
-      type: "egyéb",
-      description: "",
-      allDay: true,
-    });
+  const [editingEvent, setEditingEvent] = useState(null);
+
+  const openEventModal = (dateOrEvent = null, isEvent = false) => {
+    if (isEvent && dateOrEvent) {
+      // Meglévő esemény szerkesztése
+      const event = dateOrEvent;
+      const eventDate = event.dueDate ? new Date(event.dueDate) : new Date();
+      setEditingEvent(event);
+      setSelectedDate(eventDate);
+      setFormData({
+        title: event.title || "",
+        date: event.dueDate ? event.dueDate.split("T")[0] : new Date().toISOString().split("T")[0],
+        time: event.time || "09:00",
+        endDate: event.endDate || "",
+        duration: event.duration || "",
+        type: event.category || "egyéb",
+        description: event.description || "",
+        allDay: event.allDay !== false,
+      });
+    } else {
+      // Új esemény létrehozása
+      const date = dateOrEvent;
+      setEditingEvent(null);
+      setSelectedDate(date || new Date());
+      setFormData({
+        title: "",
+        date: date
+          ? date.toISOString().split("T")[0]
+          : new Date().toISOString().split("T")[0],
+        time: "09:00",
+        endDate: "",
+        duration: "",
+        type: "egyéb",
+        description: "",
+        allDay: true,
+      });
+    }
     setShowEventModal(true);
+  };
+
+  // Befejező dátum számítása időtartamból
+  const calculateEndDateFromDuration = (startDate, durationDays) => {
+    if (!startDate || !durationDays) return "";
+    const start = new Date(startDate);
+    start.setDate(start.getDate() + parseInt(durationDays) - 1);
+    return start.toISOString().split("T")[0];
+  };
+
+  // Időtartam számítása két dátumból
+  const calculateDurationFromDates = (startDate, endDate) => {
+    if (!startDate || !endDate) return "";
+    const start = new Date(startDate);
+    const end = new Date(endDate);
+    const diffTime = Math.abs(end - start);
+    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)) + 1;
+    return diffDays.toString();
   };
 
   const saveEvent = async () => {
@@ -7598,12 +7848,12 @@ const FamilyOrganizerApp = () => {
       finalDate = `${formData.date}T${formData.time}:00`;
     }
 
-    // Új esemény létrehozása task-ként
-    const newTask = {
-      id: Date.now(),
+    const eventData = {
       title: formData.title,
       dueDate: finalDate,
-      time: formData.allDay ? null : formData.time, // Időpont mentése
+      time: formData.allDay ? null : formData.time,
+      endDate: formData.endDate || null,
+      duration: formData.duration || null,
       allDay: formData.allDay,
       category: formData.type || "egyéb",
       description: formData.description || "",
@@ -7612,9 +7862,39 @@ const FamilyOrganizerApp = () => {
       recurring: { enabled: false },
     };
 
+    let newData;
+    if (editingEvent) {
+      // Meglévő esemény frissítése
+      newData = {
+        ...data,
+        tasks: data.tasks.map((t) =>
+          t.id === editingEvent.id ? { ...t, ...eventData } : t
+        ),
+      };
+    } else {
+      // Új esemény létrehozása
+      newData = {
+        ...data,
+        tasks: [...data.tasks, { ...eventData, id: Date.now() }],
+      };
+    }
+
+    setData(newData);
+    await saveUserData(newData);
+    setShowEventModal(false);
+    setFormData({});
+    setSelectedDate(null);
+    setEditingEvent(null);
+  };
+
+  const deleteEvent = async (eventId) => {
+    if (!window.confirm("Biztosan törölni szeretnéd ezt az eseményt?")) {
+      return;
+    }
+
     const newData = {
       ...data,
-      tasks: [...data.tasks, newTask],
+      tasks: data.tasks.filter((t) => t.id !== eventId),
     };
 
     setData(newData);
@@ -7622,6 +7902,110 @@ const FamilyOrganizerApp = () => {
     setShowEventModal(false);
     setFormData({});
     setSelectedDate(null);
+    setEditingEvent(null);
+  };
+
+  // Magyar állami ünnepek és munkaszüneti napok
+  const getHungarianHolidays = (year) => {
+    // Fix ünnepek
+    const fixedHolidays = [
+      { date: `${year}-01-01`, title: "Újév", type: "ünnep" },
+      { date: `${year}-03-15`, title: "Nemzeti ünnep (1848-as forradalom)", type: "ünnep" },
+      { date: `${year}-05-01`, title: "A munka ünnepe", type: "ünnep" },
+      { date: `${year}-08-20`, title: "Szent István nap", type: "ünnep" },
+      { date: `${year}-10-23`, title: "Nemzeti ünnep (1956-os forradalom)", type: "ünnep" },
+      { date: `${year}-11-01`, title: "Mindenszentek", type: "ünnep" },
+      { date: `${year}-12-25`, title: "Karácsony", type: "ünnep" },
+      { date: `${year}-12-26`, title: "Karácsony másnapja", type: "ünnep" },
+    ];
+
+    // Húsvét számítása (Meeus/Jones/Butcher algoritmus)
+    const calculateEaster = (y) => {
+      const a = y % 19;
+      const b = Math.floor(y / 100);
+      const c = y % 100;
+      const d = Math.floor(b / 4);
+      const e = b % 4;
+      const f = Math.floor((b + 8) / 25);
+      const g = Math.floor((b - f + 1) / 3);
+      const h = (19 * a + b - d - g + 15) % 30;
+      const i = Math.floor(c / 4);
+      const k = c % 4;
+      const l = (32 + 2 * e + 2 * i - h - k) % 7;
+      const m = Math.floor((a + 11 * h + 22 * l) / 451);
+      const month = Math.floor((h + l - 7 * m + 114) / 31);
+      const day = ((h + l - 7 * m + 114) % 31) + 1;
+      return new Date(y, month - 1, day);
+    };
+
+    const easter = calculateEaster(year);
+
+    // Nagypéntek (húsvét - 2 nap)
+    const goodFriday = new Date(easter);
+    goodFriday.setDate(goodFriday.getDate() - 2);
+
+    // Húsvéthétfő (húsvét + 1 nap)
+    const easterMonday = new Date(easter);
+    easterMonday.setDate(easterMonday.getDate() + 1);
+
+    // Pünkösdhétfő (húsvét + 50 nap)
+    const whitMonday = new Date(easter);
+    whitMonday.setDate(whitMonday.getDate() + 50);
+
+    const movingHolidays = [
+      { date: goodFriday.toISOString().split("T")[0], title: "Nagypéntek", type: "ünnep" },
+      { date: easter.toISOString().split("T")[0], title: "Húsvétvasárnap", type: "ünnep" },
+      { date: easterMonday.toISOString().split("T")[0], title: "Húsvéthétfő", type: "ünnep" },
+      { date: whitMonday.toISOString().split("T")[0], title: "Pünkösdhétfő", type: "ünnep" },
+    ];
+
+    return [...fixedHolidays, ...movingHolidays];
+  };
+
+  const importHungarianHolidays = async () => {
+    const currentYear = new Date().getFullYear();
+    const holidays = [
+      ...getHungarianHolidays(currentYear),
+      ...getHungarianHolidays(currentYear + 1),
+    ];
+
+    // Ellenőrizzük, hogy mely ünnepek vannak már hozzáadva
+    const existingHolidayDates = new Set(
+      data.tasks
+        .filter((t) => t.category === "ünnep")
+        .map((t) => t.dueDate?.split("T")[0])
+    );
+
+    const newHolidays = holidays.filter(
+      (h) => !existingHolidayDates.has(h.date)
+    );
+
+    if (newHolidays.length === 0) {
+      alert("Minden ünnep már hozzá van adva a naptárhoz!");
+      return;
+    }
+
+    const newTasks = newHolidays.map((holiday, idx) => ({
+      id: Date.now() + idx,
+      title: holiday.title,
+      dueDate: holiday.date,
+      time: null,
+      allDay: true,
+      category: "ünnep",
+      description: "Magyar állami ünnep",
+      completed: false,
+      assignedTo: null,
+      recurring: { enabled: false },
+    }));
+
+    const newData = {
+      ...data,
+      tasks: [...data.tasks, ...newTasks],
+    };
+
+    setData(newData);
+    await saveUserData(newData);
+    alert(`${newTasks.length} ünnep importálva a naptárba!`);
   };
 
   const updateSettings = (newSettings) => {
@@ -10917,10 +11301,10 @@ const FamilyOrganizerApp = () => {
         <div className="p-4 border-b border-gray-200 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
           <div>
             <h3 className="font-semibold text-gray-800">
-              Családon kívüli kapcsolatok
+              További családi és baráti kapcsolatok
             </h3>
             <p className="text-sm text-gray-600">
-              A család modul részeként kezelt távolabbi rokonok és barátok
+              Távolabbi rokonok, barátok és ismerősök nyilvántartása
             </p>
           </div>
           <button
@@ -13936,6 +14320,14 @@ const FamilyOrganizerApp = () => {
                 Esemény
               </button>
               <button
+                onClick={importHungarianHolidays}
+                className="px-4 py-2 bg-orange-600 text-white rounded-lg hover:bg-orange-700 font-medium flex items-center gap-2"
+                title="Magyar ünnepek importálása"
+              >
+                <Download size={18} />
+                Ünnepek
+              </button>
+              <button
                 onClick={() =>
                   setCalendarView(calendarView === "month" ? "week" : "month")
                 }
@@ -14040,15 +14432,22 @@ const FamilyOrganizerApp = () => {
                       <div className="space-y-1">
                         {dayEvents.slice(0, 3).map((event) => {
                           const Icon = event.icon;
+                          const originalTask = data.tasks?.find(t => t.id === event.id);
                           return (
                             <div
                               key={event.id}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                if (originalTask) {
+                                  openEventModal(originalTask, true);
+                                }
+                              }}
                               className={`${
                                 event.color
-                              } text-white text-xs p-1 rounded flex items-center gap-1 ${
+                              } text-white text-xs p-1 rounded flex items-center gap-1 cursor-pointer hover:opacity-80 ${
                                 event.completed ? "opacity-50 line-through" : ""
                               }`}
-                              title={event.title}
+                              title={`${event.title} - Kattints a szerkesztéshez`}
                             >
                               <Icon size={12} />
                               <span className="truncate">{event.title}</span>
@@ -14202,14 +14601,22 @@ const FamilyOrganizerApp = () => {
                       ) : (
                         dayEvents.map((event) => {
                           const Icon = event.icon;
+                          const originalTask = data.tasks?.find(t => t.id === event.id);
                           return (
                             <div
                               key={event.id}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                if (originalTask) {
+                                  openEventModal(originalTask, true);
+                                }
+                              }}
                               className={`${
                                 event.color
-                              } text-white text-xs p-2 rounded ${
+                              } text-white text-xs p-2 rounded cursor-pointer hover:opacity-80 ${
                                 event.completed ? "opacity-50" : ""
                               }`}
+                              title="Kattints a szerkesztéshez"
                             >
                               <div className="flex items-center gap-2 mb-1">
                                 <Icon size={14} />
@@ -14581,6 +14988,84 @@ const FamilyOrganizerApp = () => {
             </p>
           )}
 
+          {/* Függő meghívások a felhasználó számára */}
+          {pendingInvitations.length > 0 && (
+            <div className="border-t pt-4 space-y-3">
+              <p className="text-sm text-gray-600 flex items-center gap-2">
+                <Bell size={16} className="text-orange-500" />
+                Függő meghívások ({pendingInvitations.length})
+              </p>
+              <div className="space-y-2">
+                {pendingInvitations.map((invite) => (
+                  <div
+                    key={invite.id}
+                    className="p-3 bg-orange-50 border border-orange-200 rounded-lg"
+                  >
+                    <p className="text-sm font-medium text-gray-800">
+                      Meghívás: {invite.invitedByEmail}
+                    </p>
+                    <p className="text-xs text-gray-600">
+                      Család: {invite.familyId?.substring(0, 8)}...
+                    </p>
+                    <div className="flex gap-2 mt-2">
+                      <button
+                        onClick={() => acceptInvitation(invite)}
+                        className="flex-1 px-3 py-1 text-sm bg-green-600 text-white rounded hover:bg-green-700"
+                      >
+                        Elfogadás
+                      </button>
+                      <button
+                        onClick={() => declineInvitation(invite)}
+                        className="flex-1 px-3 py-1 text-sm bg-red-600 text-white rounded hover:bg-red-700"
+                      >
+                        Elutasítás
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Függő csatlakozási kérelmek az admin számára */}
+          {isAdmin && pendingJoinRequests.length > 0 && (
+            <div className="border-t pt-4 space-y-3">
+              <p className="text-sm text-gray-600 flex items-center gap-2">
+                <Bell size={16} className="text-blue-500" />
+                Függő csatlakozási kérelmek ({pendingJoinRequests.length})
+              </p>
+              <div className="space-y-2">
+                {pendingJoinRequests.map((request) => (
+                  <div
+                    key={request.id}
+                    className="p-3 bg-blue-50 border border-blue-200 rounded-lg"
+                  >
+                    <p className="text-sm font-medium text-gray-800">
+                      {request.nickname || request.email}
+                    </p>
+                    <p className="text-xs text-gray-600">
+                      {request.email} - {new Date(request.createdAt).toLocaleDateString("hu-HU")}
+                    </p>
+                    <div className="flex gap-2 mt-2">
+                      <button
+                        onClick={() => approveJoinRequest(request)}
+                        className="flex-1 px-3 py-1 text-sm bg-green-600 text-white rounded hover:bg-green-700"
+                      >
+                        Jóváhagyás
+                      </button>
+                      <button
+                        onClick={() => rejectJoinRequest(request)}
+                        className="flex-1 px-3 py-1 text-sm bg-red-600 text-white rounded hover:bg-red-700"
+                      >
+                        Elutasítás
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
           <div className="border-t pt-4 space-y-3">
             <p className="text-sm text-gray-600">Csatlakozás családhoz</p>
             <div className="flex flex-col sm:flex-row gap-2">
@@ -14596,14 +15081,14 @@ const FamilyOrganizerApp = () => {
                 disabled={isJoinRequesting}
                 className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50"
               >
-                {isJoinRequesting ? "Csatlakozás..." : "Csatlakozás"}
+                {isJoinRequesting ? "Kérelem küldése..." : "Csatlakozási kérelem"}
               </button>
             </div>
             {joinRequestMessage && (
               <p className="text-xs text-gray-600">{joinRequestMessage}</p>
             )}
             <p className="text-xs text-gray-500">
-              A csatlakozás azonnali, nem szükséges admin jóváhagyás.
+              A csatlakozáshoz az admin jóváhagyása szükséges.
             </p>
           </div>
 
@@ -20976,11 +21461,16 @@ const FamilyOrganizerApp = () => {
       {/* Event Modal */}
       {showEventModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-lg shadow-xl max-w-md w-full p-6">
+          <div className="bg-white rounded-lg shadow-xl max-w-md w-full p-6 max-h-[90vh] overflow-y-auto">
             <div className="flex justify-between items-center mb-4">
-              <h3 className="text-xl font-bold text-gray-800">Új esemény</h3>
+              <h3 className="text-xl font-bold text-gray-800">
+                {editingEvent ? "Esemény szerkesztése" : "Új esemény"}
+              </h3>
               <button
-                onClick={() => setShowEventModal(false)}
+                onClick={() => {
+                  setShowEventModal(false);
+                  setEditingEvent(null);
+                }}
                 className="text-gray-500 hover:text-gray-700"
               >
                 <X size={24} />
@@ -21004,19 +21494,66 @@ const FamilyOrganizerApp = () => {
 
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Dátum *
+                  Kezdő dátum *
                 </label>
                 <input
                   type="date"
                   value={formData.date || ""}
-                  onChange={(e) =>
-                    setFormData({ ...formData, date: e.target.value })
-                  }
+                  onChange={(e) => {
+                    const newDate = e.target.value;
+                    const newFormData = { ...formData, date: newDate };
+                    // Ha van időtartam, számoljuk újra a befejező dátumot
+                    if (formData.duration) {
+                      newFormData.endDate = calculateEndDateFromDuration(newDate, formData.duration);
+                    }
+                    setFormData(newFormData);
+                  }}
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg"
                 />
               </div>
 
-              {/* ÚJ RÉSZ - Egész napos checkbox */}
+              {/* Időtartam és befejező dátum */}
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Időtartam (nap)
+                  </label>
+                  <input
+                    type="number"
+                    min="1"
+                    value={formData.duration || ""}
+                    onChange={(e) => {
+                      const duration = e.target.value;
+                      const endDate = duration && formData.date
+                        ? calculateEndDateFromDuration(formData.date, duration)
+                        : "";
+                      setFormData({ ...formData, duration, endDate });
+                    }}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+                    placeholder="1"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Befejező dátum
+                  </label>
+                  <input
+                    type="date"
+                    value={formData.endDate || ""}
+                    onChange={(e) => {
+                      const endDate = e.target.value;
+                      const duration = endDate && formData.date
+                        ? calculateDurationFromDates(formData.date, endDate)
+                        : "";
+                      setFormData({ ...formData, endDate, duration });
+                    }}
+                    min={formData.date || ""}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+                  />
+                </div>
+              </div>
+
+              {/* Egész napos checkbox */}
               <div className="flex items-center gap-2">
                 <input
                   type="checkbox"
@@ -21035,11 +21572,11 @@ const FamilyOrganizerApp = () => {
                 </label>
               </div>
 
-              {/* ÚJ RÉSZ - Időpont mező */}
+              {/* Időpont mező */}
               {!formData.allDay && (
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Időpont
+                    Kezdő időpont
                   </label>
                   <input
                     type="time"
@@ -21067,6 +21604,7 @@ const FamilyOrganizerApp = () => {
                   <option value="feladat">Feladat</option>
                   <option value="találkozó">Találkozó</option>
                   <option value="emlékeztető">Emlékeztető</option>
+                  <option value="ünnep">Ünnep</option>
                 </select>
               </div>
 
@@ -21086,8 +21624,19 @@ const FamilyOrganizerApp = () => {
               </div>
             </div>
             <div className="mt-6 flex gap-3">
+              {editingEvent && (
+                <button
+                  onClick={() => deleteEvent(editingEvent.id)}
+                  className="px-4 py-3 bg-red-600 text-white rounded-lg hover:bg-red-700"
+                >
+                  <Trash2 size={18} />
+                </button>
+              )}
               <button
-                onClick={() => setShowEventModal(false)}
+                onClick={() => {
+                  setShowEventModal(false);
+                  setEditingEvent(null);
+                }}
                 className="flex-1 px-4 py-3 border border-gray-300 rounded-lg hover:bg-gray-50"
               >
                 Mégse
@@ -21096,7 +21645,7 @@ const FamilyOrganizerApp = () => {
                 onClick={saveEvent}
                 className="flex-1 px-4 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
               >
-                Mentés
+                {editingEvent ? "Módosítás" : "Létrehozás"}
               </button>
             </div>
           </div>
