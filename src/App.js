@@ -118,7 +118,7 @@ const getDefaultData = () => ({
   notifications: [],
   devices: [],
   shoppingList: [],
-  weeklyNotes: [], // ÚJ - heti jegyzetek
+  weeklyNotes: [], // ÚJ - heti jegyzet
   subscriptions: [],
   finances: {
     loans: [],
