@@ -420,6 +420,9 @@ const FamilyOrganizerApp = () => {
   const [pendingJoinRequests, setPendingJoinRequests] = useState([]);
   const [pendingInvitations, setPendingInvitations] = useState([]);
   const [showJoinRequestsModal, setShowJoinRequestsModal] = useState(false);
+  const [addMemberUserId, setAddMemberUserId] = useState("");
+  const [addMemberEmail, setAddMemberEmail] = useState("");
+  const [showAddMemberForm, setShowAddMemberForm] = useState(false);
 
   // Calendar states - ÚJ
   const [calendarView, setCalendarView] = useState("month"); // 'month' vagy 'week'
@@ -1235,74 +1238,37 @@ const FamilyOrganizerApp = () => {
         return;
       }
 
-      // Ellenőrizzük, hogy van-e már függő kérelem ettől a felhasználótól
-      const existingRequests = familyData.joinRequests || [];
-      const hasPendingRequest = existingRequests.some(
-        (req) => req.userId === currentUser.uid && req.status === "pending"
-      );
-
-      if (hasPendingRequest) {
-        setJoinRequestMessage("Már van függő csatlakozási kérelmed ehhez a családhoz.");
-        setIsJoinRequesting(false);
-        return;
-      }
-
-      // Csatlakozási kérelem létrehozása a family dokumentumban
-      const trimmedNickname = settings.nickname?.trim();
-      const newRequest = {
-        id: Date.now().toString(),
-        userId: currentUser.uid,
-        email: currentUser.email || "unknown",
-        nickname: trimmedNickname || null,
-        status: "pending",
-        createdAt: new Date().toISOString(),
-      };
-
+      // Csatlakozási kérelem mentése a user dokumentumba
       await setDoc(
-        familyDocRef,
+        doc(db, "users", currentUser.uid),
         {
-          joinRequests: [...existingRequests, newRequest],
+          pendingFamilyJoin: {
+            familyId: trimmedId,
+            requestedAt: new Date().toISOString(),
+            email: currentUser.email,
+            nickname: settings.nickname?.trim() || null,
+          }
         },
         { merge: true }
       );
 
-      setJoinRequestMessage("Csatlakozási kérelem elküldve! Az admin jóváhagyására vár.");
+      setJoinRequestMessage(
+        "Csatlakozási kérelmed elküldve! Kérd meg a család adminját, hogy adjon hozzá az email címeddel: " + currentUser.email
+      );
       setJoinFamilyId("");
     } catch (error) {
       console.error("Csatlakozási hiba:", error);
       setJoinRequestMessage(
-        "Nem sikerült elküldeni a kérelmet. Ellenőrizd az azonosítót és próbáld újra."
+        "Nem sikerült elküldeni a kérelmet. Próbáld újra később."
       );
     } finally {
       setIsJoinRequesting(false);
     }
   };
 
-  // Függő csatlakozási kérelmek lekérése (admin számára)
+  // Függő csatlakozási kérelmek - jelenleg nem használt (azonnali csatlakozás)
   const fetchPendingJoinRequests = async () => {
-    if (!data.familyId || !currentUser) return;
-
-    const familyMembers = data.members || [];
-    const isAdmin = familyMembers.some(
-      (member) => member.userId === currentUser?.uid && member.role === "admin"
-    );
-
-    if (!isAdmin) return;
-
-    try {
-      const familyDocRef = doc(db, "families", data.familyId);
-      const familySnap = await getDoc(familyDocRef);
-
-      if (familySnap.exists()) {
-        const familyData = familySnap.data();
-        const requests = (familyData.joinRequests || []).filter(
-          (req) => req.status === "pending"
-        );
-        setPendingJoinRequests(requests);
-      }
-    } catch (error) {
-      console.error("Kérelmek lekérési hiba:", error);
-    }
+    setPendingJoinRequests([]);
   };
 
   // Függő meghívások lekérése (felhasználó számára)
@@ -1568,6 +1534,60 @@ const FamilyOrganizerApp = () => {
     } catch (error) {
       console.error("Tag eltávolítási hiba:", error);
       alert("Nem sikerült eltávolítani a tagot.");
+    }
+  };
+
+  // Új tag hozzáadása email cím és felhasználó ID alapján
+  const addMemberToFamily = async (userIdToAdd, emailToAdd, nicknameToAdd = null) => {
+    if (!data.familyId || !currentUser) return;
+
+    const familyMembers = data.members || [];
+    const isAdmin = familyMembers.some(
+      (member) => member.userId === currentUser.uid && member.role === "admin"
+    );
+
+    if (!isAdmin) {
+      alert("Csak admin adhat hozzá új tagot.");
+      return;
+    }
+
+    const alreadyMember = familyMembers.some(
+      (member) => member.userId === userIdToAdd || member.email === emailToAdd
+    );
+
+    if (alreadyMember) {
+      alert("Ez a felhasználó már tagja a családnak.");
+      return;
+    }
+
+    try {
+      const updatedMembers = [
+        ...familyMembers,
+        {
+          userId: userIdToAdd,
+          email: emailToAdd,
+          nickname: nicknameToAdd || null,
+          role: "member",
+          joinedAt: new Date().toISOString(),
+        },
+      ];
+
+      await setDoc(
+        doc(db, "families", data.familyId),
+        { members: updatedMembers },
+        { merge: true }
+      );
+
+      await setDoc(
+        doc(db, "users", userIdToAdd),
+        { familyId: data.familyId, pendingFamilyJoin: null },
+        { merge: true }
+      );
+
+      alert(`${emailToAdd} sikeresen hozzáadva a családhoz!`);
+    } catch (error) {
+      console.error("Tag hozzáadási hiba:", error);
+      alert("Nem sikerült hozzáadni a tagot.");
     }
   };
 
@@ -14949,6 +14969,28 @@ const FamilyOrganizerApp = () => {
         <p className="text-xs text-gray-500 mt-2">
           A beceneved megjelenhet a családtagok listájában és a kérésekben.
         </p>
+
+        {/* Felhasználói azonosító megjelenítése - családhoz csatlakozáshoz szükséges */}
+        <div className="mt-4 pt-4 border-t border-gray-200">
+          <p className="text-sm text-gray-600 mb-2">Felhasználói azonosító</p>
+          <div className="flex items-center gap-2">
+            <code className="flex-1 text-xs bg-gray-100 p-2 rounded font-mono break-all">
+              {currentUser?.uid || "Nem elérhető"}
+            </code>
+            <button
+              onClick={() => {
+                navigator.clipboard.writeText(currentUser?.uid || "");
+                alert("Azonosító másolva!");
+              }}
+              className="px-3 py-2 text-xs bg-gray-200 rounded hover:bg-gray-300"
+            >
+              Másolás
+            </button>
+          </div>
+          <p className="text-xs text-gray-500 mt-1">
+            Ezt az azonosítót és az email címedet küldd el a család adminjának a csatlakozáshoz.
+          </p>
+        </div>
       </div>
       <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
         <div className="flex items-center gap-3 mb-4">
@@ -15141,7 +15183,69 @@ const FamilyOrganizerApp = () => {
           </div>
 
           <div className="border-t pt-4 space-y-3">
-            <p className="text-sm text-gray-600">Család tagjai</p>
+            <div className="flex items-center justify-between">
+              <p className="text-sm text-gray-600">Család tagjai</p>
+              {isAdmin && data.familyId && (
+                <button
+                  onClick={() => setShowAddMemberForm(!showAddMemberForm)}
+                  className="text-xs px-3 py-1 bg-green-600 text-white rounded hover:bg-green-700 flex items-center gap-1"
+                >
+                  <Plus size={14} />
+                  Tag hozzáadása
+                </button>
+              )}
+            </div>
+
+            {/* Új tag hozzáadása form */}
+            {isAdmin && showAddMemberForm && (
+              <div className="p-3 bg-green-50 border border-green-200 rounded-lg space-y-2">
+                <p className="text-xs text-gray-600">
+                  Add meg a csatlakozni kívánó felhasználó adatait (a felhasználó ID-t a Beállítások oldalon láthatja):
+                </p>
+                <input
+                  type="text"
+                  value={addMemberUserId}
+                  onChange={(e) => setAddMemberUserId(e.target.value)}
+                  placeholder="Felhasználó ID"
+                  className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg"
+                />
+                <input
+                  type="email"
+                  value={addMemberEmail}
+                  onChange={(e) => setAddMemberEmail(e.target.value)}
+                  placeholder="Email cím"
+                  className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg"
+                />
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => {
+                      if (addMemberUserId && addMemberEmail) {
+                        addMemberToFamily(addMemberUserId, addMemberEmail);
+                        setAddMemberUserId("");
+                        setAddMemberEmail("");
+                        setShowAddMemberForm(false);
+                      } else {
+                        alert("Kérlek töltsd ki mindkét mezőt!");
+                      }
+                    }}
+                    className="flex-1 px-3 py-2 text-sm bg-green-600 text-white rounded hover:bg-green-700"
+                  >
+                    Hozzáadás
+                  </button>
+                  <button
+                    onClick={() => {
+                      setShowAddMemberForm(false);
+                      setAddMemberUserId("");
+                      setAddMemberEmail("");
+                    }}
+                    className="px-3 py-2 text-sm border border-gray-300 rounded hover:bg-gray-50"
+                  >
+                    Mégse
+                  </button>
+                </div>
+              </div>
+            )}
+
             {familyUsers.length === 0 ? (
               <p className="text-xs text-gray-500">Nincs megjeleníthető tag.</p>
             ) : (
