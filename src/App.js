@@ -1149,16 +1149,27 @@ const FamilyOrganizerApp = () => {
     }
 
     try {
-      const inviteDoc = await addDoc(collection(db, "invitations"), {
-        familyId: data.familyId,
+      // Meghívás tárolása a család dokumentumban
+      const familyDocRef = doc(db, "families", data.familyId);
+      const familySnap = await getDoc(familyDocRef);
+      const familyData = familySnap.exists() ? familySnap.data() : {};
+      const existingInvitations = familyData.invitations || [];
+
+      const newInvitation = {
+        id: Date.now().toString(),
         invitedEmail: inviteEmail,
         invitedBy: currentUser.uid,
         invitedByEmail: currentUser.email,
         role: inviteRole,
-        type: "email_invite",
         status: "pending",
         createdAt: new Date().toISOString(),
-      });
+      };
+
+      await setDoc(
+        familyDocRef,
+        { invitations: [...existingInvitations, newInvitation] },
+        { merge: true }
+      );
 
       alert(`Meghívó elküldve: ${inviteEmail}`);
       setShowInviteModal(false);
@@ -1166,7 +1177,7 @@ const FamilyOrganizerApp = () => {
 
       const subject = encodeURIComponent("Családi meghívó");
       const body = encodeURIComponent(
-        `Szia!\n\nMeghívtalak a családi szervezőbe. A család azonosítója:\n${data.familyId}\n\nLépj be, menj a Beállítások > Család kezelése részhez, add meg az azonosítót és csatlakozz.\n\nMeghívó azonosító: ${inviteDoc.id}\n`
+        `Szia!\n\nMeghívtalak a családi szervezőbe. A család azonosítója:\n${data.familyId}\n\nLépj be, menj a Beállítások > Család kezelése részhez, add meg az azonosítót és csatlakozz.\n`
       );
       window.location.href = `mailto:${inviteEmail}?subject=${subject}&body=${body}`;
     } catch (error) {
@@ -1208,6 +1219,7 @@ const FamilyOrganizerApp = () => {
 
       if (!familySnap.exists()) {
         setJoinRequestMessage("Nem található ilyen családazonosító.");
+        setIsJoinRequesting(false);
         return;
       }
 
@@ -1219,33 +1231,40 @@ const FamilyOrganizerApp = () => {
 
       if (alreadyMember) {
         setJoinRequestMessage("Már tagja vagy ennek a családnak.");
+        setIsJoinRequesting(false);
         return;
       }
 
       // Ellenőrizzük, hogy van-e már függő kérelem ettől a felhasználótól
-      const existingRequestQuery = query(
-        collection(db, "joinRequests"),
-        where("userId", "==", currentUser.uid),
-        where("familyId", "==", trimmedId),
-        where("status", "==", "pending")
+      const existingRequests = familyData.joinRequests || [];
+      const hasPendingRequest = existingRequests.some(
+        (req) => req.userId === currentUser.uid && req.status === "pending"
       );
-      const existingRequests = await getDocs(existingRequestQuery);
 
-      if (!existingRequests.empty) {
+      if (hasPendingRequest) {
         setJoinRequestMessage("Már van függő csatlakozási kérelmed ehhez a családhoz.");
+        setIsJoinRequesting(false);
         return;
       }
 
-      // Csatlakozási kérelem létrehozása
+      // Csatlakozási kérelem létrehozása a family dokumentumban
       const trimmedNickname = settings.nickname?.trim();
-      await addDoc(collection(db, "joinRequests"), {
-        familyId: trimmedId,
+      const newRequest = {
+        id: Date.now().toString(),
         userId: currentUser.uid,
         email: currentUser.email || "unknown",
         nickname: trimmedNickname || null,
         status: "pending",
         createdAt: new Date().toISOString(),
-      });
+      };
+
+      await setDoc(
+        familyDocRef,
+        {
+          joinRequests: [...existingRequests, newRequest],
+        },
+        { merge: true }
+      );
 
       setJoinRequestMessage("Csatlakozási kérelem elküldve! Az admin jóváhagyására vár.");
       setJoinFamilyId("");
@@ -1271,47 +1290,36 @@ const FamilyOrganizerApp = () => {
     if (!isAdmin) return;
 
     try {
-      const requestsQuery = query(
-        collection(db, "joinRequests"),
-        where("familyId", "==", data.familyId),
-        where("status", "==", "pending")
-      );
-      const requestsSnap = await getDocs(requestsQuery);
-      const requests = requestsSnap.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
-      }));
-      setPendingJoinRequests(requests);
+      const familyDocRef = doc(db, "families", data.familyId);
+      const familySnap = await getDoc(familyDocRef);
+
+      if (familySnap.exists()) {
+        const familyData = familySnap.data();
+        const requests = (familyData.joinRequests || []).filter(
+          (req) => req.status === "pending"
+        );
+        setPendingJoinRequests(requests);
+      }
     } catch (error) {
       console.error("Kérelmek lekérési hiba:", error);
     }
   };
 
   // Függő meghívások lekérése (felhasználó számára)
+  // A meghívásokat a családok dokumentumaiban tároljuk az invitations mezőben
+  // Ez egyszerűsített megoldás - a valós alkalmazásban külön collection lenne
   const fetchPendingInvitations = async () => {
-    if (!currentUser) return;
-
-    try {
-      const invitesQuery = query(
-        collection(db, "invitations"),
-        where("invitedEmail", "==", currentUser.email),
-        where("status", "==", "pending")
-      );
-      const invitesSnap = await getDocs(invitesQuery);
-      const invites = invitesSnap.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
-      }));
-      setPendingInvitations(invites);
-    } catch (error) {
-      console.error("Meghívások lekérési hiba:", error);
-    }
+    // Egyszerűsített implementáció - a felhasználó a családkód megadásával csatlakozik
+    // és az admin jóváhagyja a kérelmét
+    setPendingInvitations([]);
   };
 
   // Csatlakozási kérelem jóváhagyása
   const approveJoinRequest = async (request) => {
+    if (!data.familyId) return;
+
     try {
-      const familyDocRef = doc(db, "families", request.familyId);
+      const familyDocRef = doc(db, "families", data.familyId);
       const familySnap = await getDoc(familyDocRef);
 
       if (!familySnap.exists()) {
@@ -1321,7 +1329,9 @@ const FamilyOrganizerApp = () => {
 
       const familyData = familySnap.data();
       const members = familyData.members || [];
+      const joinRequests = familyData.joinRequests || [];
 
+      // Új tag hozzáadása
       const updatedMembers = [
         ...members,
         {
@@ -1333,22 +1343,23 @@ const FamilyOrganizerApp = () => {
         },
       ];
 
+      // Kérelem státuszának frissítése
+      const updatedRequests = joinRequests.map((req) =>
+        req.id === request.id
+          ? { ...req, status: "approved", approvedAt: new Date().toISOString() }
+          : req
+      );
+
       await setDoc(
         familyDocRef,
-        { members: updatedMembers },
+        { members: updatedMembers, joinRequests: updatedRequests },
         { merge: true }
       );
 
+      // User familyId frissítése
       await setDoc(
         doc(db, "users", request.userId),
-        { familyId: request.familyId },
-        { merge: true }
-      );
-
-      // Kérelem státuszának frissítése
-      await setDoc(
-        doc(db, "joinRequests", request.id),
-        { status: "approved", approvedAt: new Date().toISOString() },
+        { familyId: data.familyId },
         { merge: true }
       );
 
@@ -1362,10 +1373,30 @@ const FamilyOrganizerApp = () => {
 
   // Csatlakozási kérelem elutasítása
   const rejectJoinRequest = async (request) => {
+    if (!data.familyId) return;
+
     try {
+      const familyDocRef = doc(db, "families", data.familyId);
+      const familySnap = await getDoc(familyDocRef);
+
+      if (!familySnap.exists()) {
+        alert("A család nem található.");
+        return;
+      }
+
+      const familyData = familySnap.data();
+      const joinRequests = familyData.joinRequests || [];
+
+      // Kérelem státuszának frissítése
+      const updatedRequests = joinRequests.map((req) =>
+        req.id === request.id
+          ? { ...req, status: "rejected", rejectedAt: new Date().toISOString() }
+          : req
+      );
+
       await setDoc(
-        doc(db, "joinRequests", request.id),
-        { status: "rejected", rejectedAt: new Date().toISOString() },
+        familyDocRef,
+        { joinRequests: updatedRequests },
         { merge: true }
       );
 
@@ -1392,6 +1423,7 @@ const FamilyOrganizerApp = () => {
       const members = familyData.members || [];
       const trimmedNickname = settings.nickname?.trim();
 
+      // Új tag hozzáadása
       const updatedMembers = [
         ...members,
         {
@@ -1409,16 +1441,21 @@ const FamilyOrganizerApp = () => {
         { merge: true }
       );
 
-      await setDoc(
-        doc(db, "users", currentUser.uid),
-        { familyId: invitation.familyId },
-        { merge: true }
+      // User familyId és meghívás státusz frissítése
+      const userDocRef = doc(db, "users", currentUser.uid);
+      const userSnap = await getDoc(userDocRef);
+      const userData = userSnap.exists() ? userSnap.data() : {};
+      const pendingInvitations = userData.pendingInvitations || [];
+
+      const updatedInvitations = pendingInvitations.map((inv) =>
+        inv.id === invitation.id
+          ? { ...inv, status: "accepted", acceptedAt: new Date().toISOString() }
+          : inv
       );
 
-      // Meghívás státuszának frissítése
       await setDoc(
-        doc(db, "invitations", invitation.id),
-        { status: "accepted", acceptedAt: new Date().toISOString() },
+        userDocRef,
+        { familyId: invitation.familyId, pendingInvitations: updatedInvitations },
         { merge: true }
       );
 
@@ -1433,9 +1470,20 @@ const FamilyOrganizerApp = () => {
   // Meghívás elutasítása
   const declineInvitation = async (invitation) => {
     try {
+      const userDocRef = doc(db, "users", currentUser.uid);
+      const userSnap = await getDoc(userDocRef);
+      const userData = userSnap.exists() ? userSnap.data() : {};
+      const pendingInvitations = userData.pendingInvitations || [];
+
+      const updatedInvitations = pendingInvitations.map((inv) =>
+        inv.id === invitation.id
+          ? { ...inv, status: "declined", declinedAt: new Date().toISOString() }
+          : inv
+      );
+
       await setDoc(
-        doc(db, "invitations", invitation.id),
-        { status: "declined", declinedAt: new Date().toISOString() },
+        userDocRef,
+        { pendingInvitations: updatedInvitations },
         { merge: true }
       );
 
