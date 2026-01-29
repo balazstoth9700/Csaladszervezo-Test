@@ -1591,6 +1591,42 @@ const FamilyOrganizerApp = () => {
     }
   };
 
+  // Duplikált adatok tisztítása - törli a personalData-t a user dokumentumból
+  const cleanupDuplicateData = async () => {
+    if (!currentUser) {
+      alert("Be kell jelentkezned!");
+      return;
+    }
+
+    if (!data.familyId) {
+      alert("Ez a funkció csak családban lévő felhasználóknak szükséges.");
+      return;
+    }
+
+    const confirmed = window.confirm(
+      "Ez a művelet törli a duplikált adatokat a felhasználói profilodból.\n\n" +
+      "A megosztott családi adatok (számlák, stb.) a családi dokumentumban maradnak.\n\n" +
+      "Biztosan folytatod?"
+    );
+
+    if (!confirmed) return;
+
+    try {
+      const userDocRef = doc(db, "users", currentUser.uid);
+      await setDoc(
+        userDocRef,
+        { personalData: null },
+        { merge: true }
+      );
+
+      alert("Duplikált adatok sikeresen törölve! Az oldal újratöltődik.");
+      window.location.reload();
+    } catch (error) {
+      console.error("Tisztítási hiba:", error);
+      alert("Hiba történt a tisztítás során.");
+    }
+  };
+
   const normalizeShareConfig = (shareConfig) => {
     const defaultConfig = getDefaultShareConfig();
     return {
@@ -15336,7 +15372,17 @@ const FamilyOrganizerApp = () => {
           )}
 
           {data.familyId && (
-            <div className="border-t pt-4">
+            <div className="border-t pt-4 space-y-3">
+              <button
+                onClick={cleanupDuplicateData}
+                className="w-full flex items-center justify-center gap-2 bg-orange-600 text-white px-4 py-3 rounded-lg hover:bg-orange-700"
+              >
+                <RefreshCw size={20} />
+                Duplikált adatok törlése
+              </button>
+              <p className="text-xs text-gray-500 text-center">
+                Ha duplikált számlák jelennek meg a pénzügyeknél, használd ezt a gombot.
+              </p>
               <button
                 onClick={leaveFamily}
                 className="w-full flex items-center justify-center gap-2 bg-red-600 text-white px-4 py-3 rounded-lg hover:bg-red-700"
