@@ -2011,16 +2011,33 @@ const FamilyOrganizerApp = () => {
         );
       }
 
-      // Mindig mentsük a user dokumentumot a privateData-val
+      // User dokumentum mentése - csak ha van settings vagy nincs family
       const userDocRef = doc(db, "users", currentUser.uid);
       const userUpdateData = {
         familyId: newData.familyId || null,
-        personalData: privateData,
       };
-      // Ha van settings, azt is mentsük
+
+      // Settings mindig mentődjön ha van
       if (newData.settings) {
         userUpdateData.settings = newData.settings;
       }
+
+      // PersonalData csak akkor mentődjön, ha nincs családban,
+      // vagy ha vannak ténylegesen privát adatok (isShared === false)
+      if (!newData.familyId) {
+        // Nincs családban - minden adat privát
+        userUpdateData.personalData = privateData;
+      } else {
+        // Családban van - csak a ténylegesen privát adatokat mentjük
+        // (ahol isShared === false van beállítva)
+        const hasPrivateFinances = privateData.finances?.accounts?.some(
+          (acc) => acc.isShared === false
+        );
+        if (hasPrivateFinances) {
+          userUpdateData.personalData = privateData;
+        }
+      }
+
       await setDoc(userDocRef, userUpdateData, { merge: true });
 
       console.log("✅ Firebase mentés sikeres!");
