@@ -1579,13 +1579,10 @@ const FamilyOrganizerApp = () => {
         { merge: true }
       );
 
-      await setDoc(
-        doc(db, "users", userIdToAdd),
-        { familyId: data.familyId, pendingFamilyJoin: null },
-        { merge: true }
-      );
+      // Megjegyzés: A familyId beállítását az új tag saját maga végzi el
+      // a következő bejelentkezéskor (loadUserData automatikusan felismeri)
 
-      alert(`${emailToAdd} sikeresen hozzáadva a családhoz!`);
+      alert(`${emailToAdd} sikeresen hozzáadva a családhoz!\n\nAz új tagnak be kell jelentkeznie, hogy lássa a családot.`);
     } catch (error) {
       console.error("Tag hozzáadási hiba:", error);
       alert("Nem sikerült hozzáadni a tagot.");
@@ -1772,6 +1769,37 @@ const FamilyOrganizerApp = () => {
 
           setSettings(userData.settings);
           localStorage.setItem("userSettings", JSON.stringify(userData.settings));
+
+          // Ha nincs familyId, ellenőrizzük, hogy a felhasználó tagja-e valamelyik családnak
+          // Ez kezeli azt az esetet, amikor az admin hozzáadta a tagot, de a familyId nem lett beállítva
+          if (!userData.familyId) {
+            try {
+              const familiesQuery = query(collection(db, "families"));
+              const familiesSnap = await getDocs(familiesQuery);
+
+              for (const familyDoc of familiesSnap.docs) {
+                const familyData = familyDoc.data();
+                const members = familyData.members || [];
+                const isMember = members.some(
+                  (member) => member.userId === userId || member.email === currentUser?.email
+                );
+
+                if (isMember) {
+                  console.log("🔍 Család találva ahol tag:", familyDoc.id);
+                  // Beállítjuk a familyId-t a user dokumentumban
+                  await setDoc(
+                    userDocRef,
+                    { familyId: familyDoc.id },
+                    { merge: true }
+                  );
+                  // A snapshot újra lefut a familyId beállítása után
+                  return;
+                }
+              }
+            } catch (error) {
+              console.error("Család keresési hiba:", error);
+            }
+          }
 
           if (userData.familyId) {
             console.log("👨‍👩‍👧 familyId található:", userData.familyId);
