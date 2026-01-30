@@ -1573,14 +1573,14 @@ const FamilyOrganizerApp = () => {
         },
       ];
 
-      await setDoc(
-        doc(db, "families", data.familyId),
-        { members: updatedMembers },
-        { merge: true }
-      );
+      // saveUserData-t használjuk, ami már engedélyezett a Firebase rules által
+      const newData = {
+        ...data,
+        members: updatedMembers,
+      };
 
-      // Megjegyzés: A familyId beállítását az új tag saját maga végzi el
-      // a következő bejelentkezéskor (loadUserData automatikusan felismeri)
+      setData(newData);
+      await saveUserData(newData);
 
       alert(`${emailToAdd} sikeresen hozzáadva a családhoz!\n\nAz új tagnak be kell jelentkeznie, hogy lássa a családot.`);
     } catch (error) {
