@@ -1234,7 +1234,21 @@ const FamilyOrganizerApp = () => {
       );
 
       if (alreadyMember) {
-        setJoinRequestMessage("Már tagja vagy ennek a családnak.");
+        // Admin már hozzáadta - állítsuk be a familyId-t a felhasználó dokumentumában
+        try {
+          await setDoc(
+            doc(db, "users", currentUser.uid),
+            { familyId: trimmedId },
+            { merge: true }
+          );
+          setJoinRequestMessage("Sikeresen csatlakoztál a családhoz! Az oldal újratöltődik...");
+          setTimeout(() => {
+            window.location.reload();
+          }, 1500);
+        } catch (error) {
+          console.error("FamilyId beállítási hiba:", error);
+          setJoinRequestMessage("Hiba történt a csatlakozás véglegesítésekor.");
+        }
         setIsJoinRequesting(false);
         return;
       }
