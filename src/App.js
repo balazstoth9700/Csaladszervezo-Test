@@ -125,10 +125,7 @@ const getDefaultData = () => ({
     savingGoals: [],
     investments: [],
     transactions: [],
-    accounts: [
-      // ÚJ
-      { id: 1, name: "Főszámla", type: "bank", subaccounts: [] },
-    ],
+    accounts: [],
   },
   chatMessages: [],
   familyId: null,
@@ -275,14 +272,18 @@ const normalizeFinances = (source) => {
 
   const accounts = Array.isArray(source?.accounts)
     ? source.accounts
-    : finances.accounts;
+    : Array.isArray(source?.finances?.accounts)
+      ? source.finances.accounts
+      : [];
   const transactions = Array.isArray(source?.transactions)
     ? source.transactions
-    : finances.transactions;
+    : Array.isArray(source?.finances?.transactions)
+      ? source.finances.transactions
+      : [];
 
   return {
     ...finances,
-    accounts: Array.isArray(accounts) ? accounts : defaultFinances.accounts,
+    accounts: Array.isArray(accounts) ? accounts : [],
     transactions: Array.isArray(transactions) ? transactions : [],
   };
 };
