@@ -17782,7 +17782,8 @@ const FamilyOrganizerApp = () => {
         </p>
 
         <div className="space-y-2">
-          {(settings.moduleOrder || getModules().map((m) => m.id))
+          {getModules()
+            .map((m) => m.id)
             .filter((id) => id !== "beallitasok")
             .map((moduleId, index, array) => {
               const modules = getModules();
