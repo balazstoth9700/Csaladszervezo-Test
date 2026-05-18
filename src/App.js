@@ -586,6 +586,28 @@ const FamilyOrganizerApp = () => {
   });
   const [budgetViewMode, setBudgetViewMode] = useState("month");
 
+  // Élő árfolyamok (HUF-ban kifejezve, hány Ft egy egység)
+  const [exchangeRates, setExchangeRates] = useState(() => {
+    try {
+      const cached = localStorage.getItem("exchangeRates");
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        if (parsed && parsed.fetchedAt) return parsed.rates;
+      }
+    } catch (e) {}
+    return { HUF: 1, EUR: 400, USD: 370 };
+  });
+  const [exchangeRatesFetchedAt, setExchangeRatesFetchedAt] = useState(() => {
+    try {
+      const cached = localStorage.getItem("exchangeRates");
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        return parsed.fetchedAt || null;
+      }
+    } catch (e) {}
+    return null;
+  });
+
   // Házvásárlás statek
   const [selectedHazvasarlasProject, setSelectedHazvasarlasProject] = useState(null);
   const [hazvasarlasTab, setHazvasarlasTab] = useState("attekintes");
@@ -605,6 +627,10 @@ const FamilyOrganizerApp = () => {
   const [editingHazContact, setEditingHazContact] = useState(null);
   const [showHazDocumentModal, setShowHazDocumentModal] = useState(false);
   const [propertyComparisonIds, setPropertyComparisonIds] = useState([]);
+  const [showHazFinancingSourceModal, setShowHazFinancingSourceModal] = useState(false);
+  const [editingHazFinancingSource, setEditingHazFinancingSource] = useState(null);
+  const [showHazScenarioModal, setShowHazScenarioModal] = useState(false);
+  const [editingHazScenario, setEditingHazScenario] = useState(null);
 
   // Family temp statek
 
@@ -6540,6 +6566,7 @@ const FamilyOrganizerApp = () => {
         category: "streaming",
         monthlyPrice: 0,
         currency: "HUF",
+        frequency: "monthly",
         billingDate: "",
         trialEnd: "",
         contractEnd: "", // ÚJ
@@ -7159,6 +7186,57 @@ const FamilyOrganizerApp = () => {
     setSelectedHome(null);
   };
 
+  // MNB / ECB középárfolyam lekérdezése
+  // A Frankfurter.app az EKB napi középárfolyamát adja vissza, CORS-engedélyezve.
+  // Az MNB referencia árfolyamai gyakorlatilag megegyeznek ezzel.
+  const fetchExchangeRates = async (silent = false) => {
+    try {
+      const res = await fetch("https://api.frankfurter.app/latest?base=HUF&symbols=EUR,USD");
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const json = await res.json();
+      // A Frankfurter rates[EUR] = "egy HUF-ért hány EUR" — fordítva kell.
+      const newRates = {
+        HUF: 1,
+        EUR: 1 / (json.rates?.EUR || 0.0025),
+        USD: 1 / (json.rates?.USD || 0.0027),
+      };
+      setExchangeRates(newRates);
+      const fetchedAt = new Date().toISOString();
+      setExchangeRatesFetchedAt(fetchedAt);
+      try {
+        localStorage.setItem(
+          "exchangeRates",
+          JSON.stringify({ rates: newRates, fetchedAt })
+        );
+      } catch (e) {}
+      if (!silent) {
+        alert(
+          `Árfolyamok frissítve (${json.date}):\n` +
+          `1 EUR = ${Math.round(newRates.EUR)} Ft\n` +
+          `1 USD = ${Math.round(newRates.USD)} Ft`
+        );
+      }
+      return newRates;
+    } catch (error) {
+      console.warn("Árfolyam letöltési hiba:", error);
+      if (!silent) {
+        alert(
+          "Nem sikerült letölteni az árfolyamokat. Tartalék árfolyamok használatban."
+        );
+      }
+      return null;
+    }
+  };
+
+  // Naponta egyszer frissítsük az árfolyamokat
+  useEffect(() => {
+    const last = exchangeRatesFetchedAt ? new Date(exchangeRatesFetchedAt) : null;
+    const aDayMs = 24 * 60 * 60 * 1000;
+    if (!last || Date.now() - last.getTime() > aDayMs) {
+      fetchExchangeRates(true);
+    }
+  }, []); // eslint-disable-line
+
   // === PÉNZÜGYI FORMÁZÓ FÜGGVÉNYEK ===
   const formatCurrency = (amount, currency = "HUF") => {
     const symbols = { HUF: "Ft", EUR: "€", USD: "$" };
@@ -7170,9 +7248,30 @@ const FamilyOrganizerApp = () => {
       : `${symbols[currency]} ${formatted}`;
   };
 
-  const convertToHUF = (amount, currency) => {
-    const rates = { HUF: 1, EUR: 400, USD: 370 };
-    return amount * rates[currency];
+  const convertToHUF = (amount, currency, rateOverride = null) => {
+    if (!amount) return 0;
+    if (currency === "HUF" || !currency) return parseFloat(amount);
+    const fallback = { HUF: 1, EUR: 400, USD: 370 };
+    const rates = rateOverride || exchangeRates || fallback;
+    const rate = rates[currency] || fallback[currency] || 1;
+    return parseFloat(amount) * rate;
+  };
+
+  // Előfizetési gyakoriság → havi átszámítás
+  const SUBSCRIPTION_FREQUENCIES = {
+    weekly: { label: "Heti", monthly: 4.333 },
+    monthly: { label: "Havi", monthly: 1 },
+    quarterly: { label: "Negyedéves", monthly: 1 / 3 },
+    semiannual: { label: "Féléves", monthly: 1 / 6 },
+    annual: { label: "Éves", monthly: 1 / 12 },
+  };
+
+  // Előfizetés effektív havi költsége forintban (gyakoriság + valuta figyelembe vételével)
+  const getSubscriptionMonthlyHUF = (sub) => {
+    const price = parseFloat(sub.monthlyPrice) || 0;
+    const freq = sub.frequency || "monthly";
+    const factor = SUBSCRIPTION_FREQUENCIES[freq]?.monthly || 1;
+    return convertToHUF(price, sub.currency || "HUF") * factor;
   };
 
   const deleteDevice = async (deviceId) => {
@@ -7584,57 +7683,87 @@ const FamilyOrganizerApp = () => {
   // Google Calendar szinkronizálás
   const syncGoogleCalendar = async (email) => {
     try {
-      const response = await fetch(
-        `${NETLIFY_FUNCTIONS_URL}/.netlify/functions/sync-google-calendar`,
-        {
+      const url = `${NETLIFY_FUNCTIONS_URL}/.netlify/functions/sync-google-calendar`;
+      console.log("[syncGoogleCalendar] POST", url, "email:", email);
+
+      let response;
+      try {
+        response = await fetch(url, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ email, userId: currentUser.uid }),
-        }
+        });
+      } catch (networkErr) {
+        throw new Error(
+          `Nem sikerült elérni a szinkron szolgáltatást (${networkErr.message}). ` +
+          `Ellenőrizd, hogy a Netlify functions URL helyes-e és van internet kapcsolat.`
+        );
+      }
+
+      let result;
+      const responseText = await response.text();
+      try {
+        result = JSON.parse(responseText);
+      } catch (parseErr) {
+        throw new Error(
+          `A szerver nem JSON választ küldött (HTTP ${response.status}). ` +
+          `Részlet: ${responseText.substring(0, 200)}`
+        );
+      }
+
+      if (!response.ok || result.error) {
+        throw new Error(
+          `Google Calendar szinkron hiba (HTTP ${response.status}): ` +
+          (result.error || result.message || "Ismeretlen szerverhiba") +
+          (result.details ? `\nRészlet: ${result.details}` : "")
+        );
+      }
+
+      if (!result.success) {
+        throw new Error("A szerver válaszában nem volt success flag.");
+      }
+
+      // Események konvertálása
+      const convertedEvents = (result.events || []).map((event) => ({
+        id: `gcal-${event.id}`,
+        title: event.summary || "(Név nélküli esemény)",
+        dueDate: event.start.dateTime || event.start.date,
+        time: event.start.dateTime
+          ? new Date(event.start.dateTime).toTimeString().slice(0, 5)
+          : null,
+        allDay: !event.start.dateTime,
+        category: "google-calendar",
+        description: event.description || "",
+        location: event.location || "",
+        completed: false,
+        source: "google-calendar",
+        googleCalendarAccount: email,
+        htmlLink: event.htmlLink,
+      }));
+
+      // Meglévő események frissítése
+      const filteredTasks = (data.tasks || []).filter(
+        (task) =>
+          !(
+            task.source === "google-calendar" &&
+            task.googleCalendarAccount === email
+          )
       );
 
-      const result = await response.json();
+      const newData = {
+        ...data,
+        tasks: [...filteredTasks, ...convertedEvents],
+      };
 
-      if (result.success) {
-        // Események konvertálása
-        const convertedEvents = result.events.map((event) => ({
-          id: `gcal-${event.id}`,
-          title: event.summary || "(Név nélküli esemény)",
-          dueDate: event.start.dateTime || event.start.date,
-          time: event.start.dateTime
-            ? new Date(event.start.dateTime).toTimeString().slice(0, 5)
-            : null,
-          allDay: !event.start.dateTime,
-          category: "google-calendar",
-          description: event.description || "",
-          location: event.location || "",
-          completed: false,
-          source: "google-calendar",
-          googleCalendarAccount: email,
-          htmlLink: event.htmlLink,
-        }));
+      setData(newData);
+      await saveUserData(newData);
 
-        // Meglévő események frissítése
-        const filteredTasks = data.tasks.filter(
-          (task) =>
-            !(
-              task.source === "google-calendar" &&
-              task.googleCalendarAccount === email
-            )
-        );
-
-        const newData = {
-          ...data,
-          tasks: [...filteredTasks, ...convertedEvents],
-        };
-
-        setData(newData);
-        await saveUserData(newData);
-
-        return result.count;
-      }
+      console.log(
+        `[syncGoogleCalendar] Sikeres szinkron: ${result.count} esemény`
+      );
+      return result.count;
     } catch (error) {
-      console.error("Error syncing calendar:", error);
+      console.error("[syncGoogleCalendar] Hiba:", error);
       throw error;
     }
   };
@@ -7724,13 +7853,10 @@ const FamilyOrganizerApp = () => {
     );
 
     if (enabledAccounts.length === 0) {
-      alert("Nincs aktív Google Calendar fiók!");
-      return;
-    }
-
-    if (!googleApiLoaded) {
       alert(
-        "Google API még betöltés alatt van. Kérlek próbáld újra pár másodperc múlva."
+        "Nincs aktív Google Calendar fiók!\n\n" +
+        "1. A Beállítások → Google fiókok résznél csatolj egy fiókot\n" +
+        "2. Engedélyezd a szinkronizációt a fiókhoz"
       );
       return;
     }
@@ -14374,6 +14500,7 @@ const FamilyOrganizerApp = () => {
     const tabs = [
       { id: "attekintes", name: "Áttekintés", icon: BarChart3 },
       { id: "opciok", name: "Opciók", icon: Search },
+      { id: "finanszirozas", name: "Finanszírozás", icon: Wallet },
       { id: "idovonal", name: "Idővonal", icon: Calendar },
       { id: "koltsegvetes", name: "Költségvetés", icon: DollarSign },
       { id: "szobak", name: "Szobák & Berendezés", icon: Package },
@@ -14476,6 +14603,8 @@ const FamilyOrganizerApp = () => {
               renderHazvasarlasOverview(project)}
             {hazvasarlasTab === "opciok" &&
               renderHazvasarlasOptions(project)}
+            {hazvasarlasTab === "finanszirozas" &&
+              renderHazvasarlasFinancing(project)}
             {hazvasarlasTab === "idovonal" &&
               renderHazvasarlasTimeline(project)}
             {hazvasarlasTab === "koltsegvetes" &&
@@ -15625,6 +15754,672 @@ const FamilyOrganizerApp = () => {
     );
   };
 
+  // === FINANSZÍROZÁS TERV ===
+  const FINANCING_SOURCE_TYPES = {
+    "Készpénz": { kind: "equity", color: "bg-green-50 text-green-700" },
+    "Bankszámla": { kind: "equity", color: "bg-green-50 text-green-700" },
+    "Állampapír": { kind: "equity", color: "bg-emerald-50 text-emerald-700" },
+    "Ingatlan": { kind: "equity", color: "bg-blue-50 text-blue-700" },
+    "Ajándék/Családi": { kind: "equity", color: "bg-purple-50 text-purple-700" },
+    "Babaváró": { kind: "loan", color: "bg-pink-50 text-pink-700" },
+    "CSOK / Támogatott hitel": { kind: "loan", color: "bg-orange-50 text-orange-700" },
+    "Piaci hitel": { kind: "loan", color: "bg-red-50 text-red-700" },
+    "Egyéb hitel": { kind: "loan", color: "bg-red-50 text-red-700" },
+  };
+
+  // Annuitás havi törlesztő számítás (összeg, éves kamat %, futamidő évek)
+  const calcAnnuityPayment = (principal, annualRatePct, years) => {
+    const p = parseFloat(principal) || 0;
+    const r = (parseFloat(annualRatePct) || 0) / 100 / 12;
+    const n = (parseFloat(years) || 0) * 12;
+    if (!p || !n) return 0;
+    if (!r) return p / n;
+    return (p * r * Math.pow(1 + r, n)) / (Math.pow(1 + r, n) - 1);
+  };
+
+  // Tartozás x hónap után
+  const calcRemainingBalance = (principal, annualRatePct, years, monthsPaid) => {
+    const p = parseFloat(principal) || 0;
+    const r = (parseFloat(annualRatePct) || 0) / 100 / 12;
+    const n = (parseFloat(years) || 0) * 12;
+    const m = parseFloat(monthsPaid) || 0;
+    if (!p || !n) return p;
+    if (m >= n) return 0;
+    if (!r) return p - (p / n) * m;
+    const pmt = (p * r * Math.pow(1 + r, n)) / (Math.pow(1 + r, n) - 1);
+    return p * Math.pow(1 + r, m) - (pmt * (Math.pow(1 + r, m) - 1)) / r;
+  };
+
+  // Maradék hónapok új előtörlesztés után (azonos havi törlesztővel)
+  const calcMonthsAfterPrepay = (balance, monthlyPayment, annualRatePct) => {
+    const b = parseFloat(balance) || 0;
+    const pmt = parseFloat(monthlyPayment) || 0;
+    const r = (parseFloat(annualRatePct) || 0) / 100 / 12;
+    if (b <= 0) return 0;
+    if (!pmt) return Infinity;
+    if (!r) return Math.ceil(b / pmt);
+    if (pmt <= b * r) return Infinity;
+    return Math.ceil(Math.log(pmt / (pmt - b * r)) / Math.log(1 + r));
+  };
+
+  const renderHazvasarlasFinancing = (project) => {
+    const plan = project.financingPlan || { sources: [], scenarios: [] };
+    const sources = plan.sources || [];
+    const scenarios = plan.scenarios || [];
+
+    const equitySources = sources.filter(
+      (s) => (FINANCING_SOURCE_TYPES[s.type]?.kind || "equity") === "equity"
+    );
+    const loanSources = sources.filter(
+      (s) => FINANCING_SOURCE_TYPES[s.type]?.kind === "loan"
+    );
+
+    const totalEquity = equitySources
+      .filter((s) => s.status !== "suspended")
+      .reduce((sum, s) => sum + (parseFloat(s.amount) || 0), 0);
+    const totalLoans = loanSources.reduce(
+      (sum, s) => sum + (parseFloat(s.amount) || 0),
+      0
+    );
+    const totalAmount = totalEquity + totalLoans;
+    const targetGap = (project.plannedBudget || 0) - totalAmount;
+
+    // Aktív havi törlesztők (szüneteltetett kihagyva)
+    const activeMonthly = sources
+      .filter((s) => s.status !== "suspended")
+      .reduce(
+        (sum, s) => sum + (parseFloat(s.monthlyPayment) || 0),
+        0
+      );
+
+    // "Első évi" havi törlesztők (firstYearPayment ha van, különben monthlyPayment)
+    const firstYearMonthly = sources
+      .filter((s) => s.status !== "suspended" && s.status !== "afterEvent")
+      .reduce((sum, s) => {
+        const p =
+          s.firstYearPayment != null && s.firstYearPayment !== ""
+            ? parseFloat(s.firstYearPayment)
+            : parseFloat(s.monthlyPayment) || 0;
+        return sum + (p || 0);
+      }, 0);
+
+    return (
+      <div className="space-y-4">
+        {/* Összegzések */}
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          <div className="bg-green-50 border border-green-200 rounded-lg p-3">
+            <div className="text-xs text-green-600">Önerő</div>
+            <div className="text-lg font-bold text-green-800">
+              {totalEquity.toLocaleString()} Ft
+            </div>
+          </div>
+          <div className="bg-red-50 border border-red-200 rounded-lg p-3">
+            <div className="text-xs text-red-600">Hitelek</div>
+            <div className="text-lg font-bold text-red-800">
+              {totalLoans.toLocaleString()} Ft
+            </div>
+          </div>
+          <div className="bg-indigo-50 border border-indigo-200 rounded-lg p-3">
+            <div className="text-xs text-indigo-600">Összesen</div>
+            <div className="text-lg font-bold text-indigo-800">
+              {totalAmount.toLocaleString()} Ft
+            </div>
+            {project.plannedBudget > 0 && (
+              <div
+                className={`text-xs mt-1 ${
+                  targetGap > 0
+                    ? "text-orange-600"
+                    : targetGap < 0
+                    ? "text-blue-600"
+                    : "text-green-600"
+                }`}
+              >
+                {targetGap > 0
+                  ? `Hiányzik: ${targetGap.toLocaleString()} Ft`
+                  : targetGap < 0
+                  ? `Többlet: ${Math.abs(targetGap).toLocaleString()} Ft`
+                  : "Pontosan a keret"}
+              </div>
+            )}
+          </div>
+          <div className="bg-orange-50 border border-orange-200 rounded-lg p-3">
+            <div className="text-xs text-orange-600">Havi törlesztő (alap)</div>
+            <div className="text-lg font-bold text-orange-800">
+              {Math.round(activeMonthly).toLocaleString()} Ft
+            </div>
+            {firstYearMonthly !== activeMonthly && (
+              <div className="text-xs text-gray-600 mt-1">
+                Első évben: {Math.round(firstYearMonthly).toLocaleString()} Ft
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Önerő szekció */}
+        <div className="bg-white rounded-lg border border-gray-200">
+          <div className="p-3 border-b border-gray-200 flex justify-between items-center">
+            <h3 className="font-semibold text-gray-800">Önerő forrásai</h3>
+            <button
+              onClick={() => {
+                setEditingHazFinancingSource(null);
+                setFormData({
+                  type: "Készpénz",
+                  name: "",
+                  amount: "",
+                  notes: "",
+                  status: "active",
+                });
+                setShowHazFinancingSourceModal(true);
+              }}
+              className="px-3 py-1 bg-green-600 text-white rounded text-sm flex items-center gap-1"
+            >
+              <Plus size={14} /> Új önerő
+            </button>
+          </div>
+          {equitySources.length === 0 ? (
+            <p className="text-sm text-gray-500 italic p-4">
+              Még nincs önerő forrás.
+            </p>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead className="bg-gray-50">
+                  <tr>
+                    <th className="text-left p-2">Típus</th>
+                    <th className="text-left p-2">Megnevezés</th>
+                    <th className="text-right p-2">Összeg</th>
+                    <th className="text-left p-2">Megjegyzés</th>
+                    <th className="p-2"></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {equitySources.map((s) => (
+                    <tr key={s.id} className="border-t hover:bg-gray-50">
+                      <td className="p-2">
+                        <span
+                          className={`px-2 py-0.5 rounded text-xs ${
+                            FINANCING_SOURCE_TYPES[s.type]?.color ||
+                            "bg-gray-100"
+                          }`}
+                        >
+                          {s.type}
+                        </span>
+                      </td>
+                      <td className="p-2 font-medium">{s.name}</td>
+                      <td className="p-2 text-right font-semibold">
+                        {(parseFloat(s.amount) || 0).toLocaleString()} Ft
+                      </td>
+                      <td className="p-2 text-xs text-gray-600">
+                        {s.notes}
+                        {s.status === "suspended" && (
+                          <span className="ml-1 px-1 bg-yellow-100 text-yellow-700 rounded">
+                            Szüneteltetve
+                          </span>
+                        )}
+                      </td>
+                      <td className="p-2">
+                        <div className="flex gap-1 justify-end">
+                          <button
+                            onClick={() => {
+                              setEditingHazFinancingSource(s);
+                              setFormData({ ...s });
+                              setShowHazFinancingSourceModal(true);
+                            }}
+                            className="text-blue-600 hover:bg-blue-50 p-1 rounded"
+                          >
+                            <Edit2 size={14} />
+                          </button>
+                          <button
+                            onClick={() =>
+                              updateHazvasarlasProject(project.id, (p) => ({
+                                ...p,
+                                financingPlan: {
+                                  ...(p.financingPlan || {}),
+                                  sources: (
+                                    p.financingPlan?.sources || []
+                                  ).filter((x) => x.id !== s.id),
+                                },
+                              }))
+                            }
+                            className="text-red-600 hover:bg-red-50 p-1 rounded"
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+
+        {/* Hitelek szekció */}
+        <div className="bg-white rounded-lg border border-gray-200">
+          <div className="p-3 border-b border-gray-200 flex justify-between items-center">
+            <h3 className="font-semibold text-gray-800">Hitelek</h3>
+            <button
+              onClick={() => {
+                setEditingHazFinancingSource(null);
+                setFormData({
+                  type: "Piaci hitel",
+                  name: "",
+                  amount: "",
+                  monthlyPayment: "",
+                  termYears: "",
+                  thm: "",
+                  firstYearPayment: "",
+                  notes: "",
+                  status: "active",
+                });
+                setShowHazFinancingSourceModal(true);
+              }}
+              className="px-3 py-1 bg-red-600 text-white rounded text-sm flex items-center gap-1"
+            >
+              <Plus size={14} /> Új hitel
+            </button>
+          </div>
+          {loanSources.length === 0 ? (
+            <p className="text-sm text-gray-500 italic p-4">
+              Még nincs hitel.
+            </p>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead className="bg-gray-50">
+                  <tr>
+                    <th className="text-left p-2">Típus</th>
+                    <th className="text-left p-2">Megnevezés</th>
+                    <th className="text-right p-2">Összeg</th>
+                    <th className="text-right p-2">Havi törlesztő</th>
+                    <th className="text-right p-2">Futamidő</th>
+                    <th className="text-right p-2">THM</th>
+                    <th className="text-left p-2">Megjegyzés</th>
+                    <th className="p-2"></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {loanSources.map((s) => {
+                    const calcPmt = calcAnnuityPayment(
+                      s.amount,
+                      s.thm,
+                      s.termYears
+                    );
+                    const hasPmt = parseFloat(s.monthlyPayment) > 0;
+                    return (
+                      <tr key={s.id} className="border-t hover:bg-gray-50">
+                        <td className="p-2">
+                          <span
+                            className={`px-2 py-0.5 rounded text-xs ${
+                              FINANCING_SOURCE_TYPES[s.type]?.color ||
+                              "bg-gray-100"
+                            }`}
+                          >
+                            {s.type}
+                          </span>
+                        </td>
+                        <td className="p-2 font-medium">{s.name}</td>
+                        <td className="p-2 text-right font-semibold">
+                          {(parseFloat(s.amount) || 0).toLocaleString()} Ft
+                        </td>
+                        <td className="p-2 text-right">
+                          {hasPmt
+                            ? `${(parseFloat(s.monthlyPayment) || 0).toLocaleString()} Ft`
+                            : calcPmt > 0
+                            ? `≈ ${Math.round(calcPmt).toLocaleString()} Ft`
+                            : "—"}
+                          {s.firstYearPayment && (
+                            <div className="text-xs text-blue-600">
+                              1. év: {parseFloat(s.firstYearPayment).toLocaleString()} Ft
+                            </div>
+                          )}
+                        </td>
+                        <td className="p-2 text-right">
+                          {s.termYears ? `${s.termYears} év` : "—"}
+                        </td>
+                        <td className="p-2 text-right">
+                          {s.thm ? `${s.thm}%` : "—"}
+                        </td>
+                        <td className="p-2 text-xs text-gray-600">
+                          {s.notes}
+                          {s.status === "suspended" && (
+                            <span className="ml-1 px-1 bg-yellow-100 text-yellow-700 rounded">
+                              Szüneteltetve
+                            </span>
+                          )}
+                        </td>
+                        <td className="p-2">
+                          <div className="flex gap-1 justify-end">
+                            <button
+                              onClick={() => {
+                                setEditingHazFinancingSource(s);
+                                setFormData({ ...s });
+                                setShowHazFinancingSourceModal(true);
+                              }}
+                              className="text-blue-600 hover:bg-blue-50 p-1 rounded"
+                            >
+                              <Edit2 size={14} />
+                            </button>
+                            <button
+                              onClick={() =>
+                                updateHazvasarlasProject(project.id, (p) => ({
+                                  ...p,
+                                  financingPlan: {
+                                    ...(p.financingPlan || {}),
+                                    sources: (
+                                      p.financingPlan?.sources || []
+                                    ).filter((x) => x.id !== s.id),
+                                  },
+                                }))
+                              }
+                              className="text-red-600 hover:bg-red-50 p-1 rounded"
+                            >
+                              <Trash2 size={14} />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                  <tr className="border-t bg-gray-50 font-semibold">
+                    <td className="p-2" colSpan={2}>
+                      Összesen
+                    </td>
+                    <td className="p-2 text-right">
+                      {totalLoans.toLocaleString()} Ft
+                    </td>
+                    <td className="p-2 text-right">
+                      {Math.round(
+                        loanSources
+                          .filter((s) => s.status !== "suspended")
+                          .reduce(
+                            (sum, s) =>
+                              sum +
+                              (parseFloat(s.monthlyPayment) ||
+                                calcAnnuityPayment(s.amount, s.thm, s.termYears)),
+                            0
+                          )
+                      ).toLocaleString()}{" "}
+                      Ft
+                    </td>
+                    <td colSpan={4}></td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+
+        {/* Sablon gombok */}
+        {sources.length === 0 && (
+          <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3">
+            <p className="text-sm text-yellow-900 font-medium mb-2">
+              Gyors kezdés sablonokkal:
+            </p>
+            <div className="flex flex-wrap gap-2">
+              <button
+                onClick={() =>
+                  updateHazvasarlasProject(project.id, (p) => ({
+                    ...p,
+                    financingPlan: {
+                      sources: [
+                        { id: Date.now(), type: "Állampapír", name: "Önerő — Állampapír", amount: 0, status: "active" },
+                        { id: Date.now()+1, type: "Készpénz", name: "Önerő — Megtakarítás", amount: 0, status: "active" },
+                        { id: Date.now()+2, type: "Ajándék/Családi", name: "Önerő — Családi", amount: 0, status: "active" },
+                        { id: Date.now()+3, type: "Babaváró", name: "Babaváró hitel", amount: 0, termYears: 20, thm: 0, status: "active" },
+                        { id: Date.now()+4, type: "CSOK / Támogatott hitel", name: "CSOK", amount: 0, termYears: 25, thm: 3.1, status: "active" },
+                        { id: Date.now()+5, type: "Piaci hitel", name: "Piaci jelzáloghitel", amount: 0, termYears: 15, thm: 6.72, status: "active" },
+                      ],
+                      scenarios: (p.financingPlan?.scenarios || []),
+                    },
+                  }))
+                }
+                className="px-3 py-1 bg-indigo-600 text-white rounded text-xs"
+              >
+                Teljes csomag (állampapír + babaváró + CSOK + piaci)
+              </button>
+              <button
+                onClick={() =>
+                  updateHazvasarlasProject(project.id, (p) => ({
+                    ...p,
+                    financingPlan: {
+                      sources: [
+                        { id: Date.now(), type: "Készpénz", name: "Önerő", amount: 0, status: "active" },
+                        { id: Date.now()+1, type: "Piaci hitel", name: "Piaci jelzáloghitel", amount: 0, termYears: 20, thm: 6.5, status: "active" },
+                      ],
+                      scenarios: (p.financingPlan?.scenarios || []),
+                    },
+                  }))
+                }
+                className="px-3 py-1 bg-indigo-600 text-white rounded text-xs"
+              >
+                Egyszerű (önerő + piaci hitel)
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Szcenáriók (Lakás eladás utáni előtörlesztés stb.) */}
+        <div className="bg-white rounded-lg border border-gray-200">
+          <div className="p-3 border-b border-gray-200 flex justify-between items-center">
+            <h3 className="font-semibold text-gray-800">
+              Szcenáriók / Előtörlesztések
+            </h3>
+            <button
+              onClick={() => {
+                setEditingHazScenario(null);
+                setFormData({
+                  name: "",
+                  description: "",
+                  adjustments: [],
+                });
+                setShowHazScenarioModal(true);
+              }}
+              className="px-3 py-1 bg-indigo-600 text-white rounded text-sm flex items-center gap-1"
+            >
+              <Plus size={14} /> Új szcenárió
+            </button>
+          </div>
+          {scenarios.length === 0 ? (
+            <p className="text-sm text-gray-500 italic p-4">
+              Például: "Régi lakás eladása után 30M Ft előtörlesztés a piaci
+              hitelbe (1% díj)". Hozz létre egy szcenáriót, hogy lásd a
+              fennmaradó hiteleket és új törlesztőket.
+            </p>
+          ) : (
+            <div className="divide-y divide-gray-200">
+              {scenarios.map((sc) => {
+                // Hatás kiszámítása: minden hitelhez nézzük az igazítást
+                const adjustedSources = sources.map((s) => {
+                  const adj = (sc.adjustments || []).find(
+                    (a) => a.sourceId === s.id
+                  );
+                  if (!adj) return s;
+                  const principal = parseFloat(s.amount) || 0;
+                  const prepay = parseFloat(adj.amount) || 0;
+                  const newBalance = Math.max(0, principal - prepay);
+                  let newMonthly = parseFloat(s.monthlyPayment) || 0;
+                  let newMonths = null;
+                  if (newBalance > 0 && newMonthly > 0) {
+                    newMonths = calcMonthsAfterPrepay(
+                      newBalance,
+                      newMonthly,
+                      s.thm
+                    );
+                  } else if (newBalance > 0 && s.termYears && s.thm != null) {
+                    newMonthly = calcAnnuityPayment(
+                      newBalance,
+                      s.thm,
+                      s.termYears
+                    );
+                  }
+                  return {
+                    ...s,
+                    _adjusted: true,
+                    _newBalance: newBalance,
+                    _newMonthly: newMonthly,
+                    _newMonths: newMonths,
+                    _adjFee: adj.fee,
+                  };
+                });
+
+                const totalRemainingLoans = adjustedSources
+                  .filter(
+                    (s) =>
+                      FINANCING_SOURCE_TYPES[s.type]?.kind === "loan" &&
+                      s.status !== "suspended"
+                  )
+                  .reduce((sum, s) => sum + (s._adjusted ? s._newBalance : parseFloat(s.amount) || 0), 0);
+                const totalNewMonthly = adjustedSources
+                  .filter(
+                    (s) =>
+                      FINANCING_SOURCE_TYPES[s.type]?.kind === "loan" &&
+                      s.status !== "suspended"
+                  )
+                  .reduce(
+                    (sum, s) =>
+                      sum +
+                      (s._adjusted
+                        ? s._newMonthly
+                        : parseFloat(s.monthlyPayment) || 0),
+                    0
+                  );
+                const totalPrepay = (sc.adjustments || []).reduce(
+                  (s, a) => s + (parseFloat(a.amount) || 0),
+                  0
+                );
+                const totalFees = (sc.adjustments || []).reduce(
+                  (s, a) => s + (parseFloat(a.fee) || 0),
+                  0
+                );
+
+                return (
+                  <div key={sc.id} className="p-3">
+                    <div className="flex justify-between items-start mb-2">
+                      <div>
+                        <h4 className="font-semibold text-gray-800">
+                          {sc.name}
+                        </h4>
+                        {sc.description && (
+                          <p className="text-xs text-gray-500">
+                            {sc.description}
+                          </p>
+                        )}
+                      </div>
+                      <div className="flex gap-1">
+                        <button
+                          onClick={() => {
+                            setEditingHazScenario(sc);
+                            setFormData({ ...sc });
+                            setShowHazScenarioModal(true);
+                          }}
+                          className="text-blue-600 hover:bg-blue-50 p-1 rounded"
+                        >
+                          <Edit2 size={14} />
+                        </button>
+                        <button
+                          onClick={() =>
+                            updateHazvasarlasProject(project.id, (p) => ({
+                              ...p,
+                              financingPlan: {
+                                ...(p.financingPlan || {}),
+                                scenarios: (
+                                  p.financingPlan?.scenarios || []
+                                ).filter((x) => x.id !== sc.id),
+                              },
+                            }))
+                          }
+                          className="text-red-600 hover:bg-red-50 p-1 rounded"
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs mb-2">
+                      <div className="bg-blue-50 border border-blue-200 rounded p-2">
+                        <div className="text-blue-600">Előtörlesztés össz.</div>
+                        <div className="font-bold">
+                          {totalPrepay.toLocaleString()} Ft
+                        </div>
+                      </div>
+                      <div className="bg-orange-50 border border-orange-200 rounded p-2">
+                        <div className="text-orange-600">Díjak</div>
+                        <div className="font-bold">
+                          {totalFees.toLocaleString()} Ft
+                        </div>
+                      </div>
+                      <div className="bg-red-50 border border-red-200 rounded p-2">
+                        <div className="text-red-600">Maradék hitelek</div>
+                        <div className="font-bold">
+                          {Math.round(totalRemainingLoans).toLocaleString()} Ft
+                        </div>
+                      </div>
+                      <div className="bg-green-50 border border-green-200 rounded p-2">
+                        <div className="text-green-600">Új havi törlesztő</div>
+                        <div className="font-bold">
+                          {Math.round(totalNewMonthly).toLocaleString()} Ft
+                        </div>
+                      </div>
+                    </div>
+
+                    {(sc.adjustments || []).length > 0 && (
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-xs">
+                          <thead className="bg-gray-50">
+                            <tr>
+                              <th className="text-left p-1">Forrás</th>
+                              <th className="text-right p-1">Eredeti</th>
+                              <th className="text-right p-1">Előtörlesztés</th>
+                              <th className="text-right p-1">Új tartozás</th>
+                              <th className="text-right p-1">Új törlesztő</th>
+                              <th className="text-right p-1">Új futamidő</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {adjustedSources
+                              .filter((s) => s._adjusted)
+                              .map((s) => (
+                                <tr key={s.id} className="border-t">
+                                  <td className="p-1">{s.name}</td>
+                                  <td className="p-1 text-right">
+                                    {(parseFloat(s.amount) || 0).toLocaleString()} Ft
+                                  </td>
+                                  <td className="p-1 text-right text-blue-600">
+                                    -
+                                    {(
+                                      parseFloat(s.amount) - s._newBalance
+                                    ).toLocaleString()}{" "}
+                                    Ft
+                                  </td>
+                                  <td className="p-1 text-right font-semibold">
+                                    {Math.round(s._newBalance).toLocaleString()} Ft
+                                  </td>
+                                  <td className="p-1 text-right">
+                                    {Math.round(s._newMonthly).toLocaleString()} Ft
+                                  </td>
+                                  <td className="p-1 text-right">
+                                    {s._newMonths && isFinite(s._newMonths)
+                                      ? `${s._newMonths} hó`
+                                      : "—"}
+                                  </td>
+                                </tr>
+                              ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  };
+
   const shoppingUnits = ["db", "csomag", "liter", "kg", "ml", "g"];
 
   const renderBevasarlas = () => {
@@ -16089,9 +16884,9 @@ const FamilyOrganizerApp = () => {
       return acc;
     }, {});
 
-    // Összegzések
+    // Összegzések (gyakoriság + valuta normalizálva HUF/hó)
     const totalMonthly = activeSubscriptions.reduce(
-      (sum, s) => sum + (parseFloat(s.monthlyPrice) || 0),
+      (sum, s) => sum + getSubscriptionMonthlyHUF(s),
       0
     );
     const totalYearly = totalMonthly * 12;
@@ -16111,16 +16906,34 @@ const FamilyOrganizerApp = () => {
             <h2 className="text-2xl font-bold text-gray-800">Előfizetések</h2>
             <p className="text-sm text-gray-600">
               Állandó előfizetések nyilvántartása
+              {exchangeRatesFetchedAt && (
+                <span className="ml-2 text-xs">
+                  • Árfolyam:{" "}
+                  {new Date(exchangeRatesFetchedAt).toLocaleDateString("hu-HU")}{" "}
+                  ({Math.round(exchangeRates.EUR)} Ft/€,{" "}
+                  {Math.round(exchangeRates.USD)} Ft/$)
+                </span>
+              )}
             </p>
           </div>
-          <button
-            onClick={() => openSubscriptionModal()}
-            className="flex items-center gap-2 bg-blue-600 text-white px-6 py-3 rounded-lg hover:bg-blue-700 shadow-md active:scale-95 transition-transform"
-          >
-            <Plus size={20} />
-            <span className="hidden sm:inline">Új előfizetés</span>
-            <span className="sm:hidden">Új</span>
-          </button>
+          <div className="flex gap-2">
+            <button
+              onClick={() => fetchExchangeRates(false)}
+              className="flex items-center gap-2 bg-gray-100 text-gray-700 px-4 py-3 rounded-lg hover:bg-gray-200 text-sm"
+              title="Árfolyamok frissítése (EKB középárfolyam)"
+            >
+              <RefreshCw size={16} />
+              <span className="hidden md:inline">Árfolyam</span>
+            </button>
+            <button
+              onClick={() => openSubscriptionModal()}
+              className="flex items-center gap-2 bg-blue-600 text-white px-6 py-3 rounded-lg hover:bg-blue-700 shadow-md active:scale-95 transition-transform"
+            >
+              <Plus size={20} />
+              <span className="hidden sm:inline">Új előfizetés</span>
+              <span className="sm:hidden">Új</span>
+            </button>
+          </div>
         </div>
 
         {/* Összesítés */}
@@ -16210,7 +17023,7 @@ const FamilyOrganizerApp = () => {
           Object.entries(groupedByCategory).map(([catKey, subs]) => {
             const category = categories[catKey];
             const categoryTotal = subs.reduce(
-              (sum, s) => sum + (parseFloat(s.monthlyPrice) || 0),
+              (sum, s) => sum + getSubscriptionMonthlyHUF(s),
               0
             );
 
@@ -16285,8 +17098,29 @@ const FamilyOrganizerApp = () => {
                           </div>
                           <div className="flex flex-wrap items-center gap-3 text-sm text-gray-600 mt-1">
                             <span className="font-semibold text-blue-600">
-                              {parseFloat(sub.monthlyPrice).toLocaleString()}{" "}
-                              Ft/hó
+                              {formatCurrency(
+                                parseFloat(sub.monthlyPrice) || 0,
+                                sub.currency || "HUF"
+                              )}
+                              /{(SUBSCRIPTION_FREQUENCIES[sub.frequency || "monthly"]?.label || "Havi").toLowerCase().includes("é") ? "év" : (sub.frequency || "monthly") === "weekly" ? "hét" : (sub.frequency || "monthly") === "quarterly" ? "negyedév" : (sub.frequency || "monthly") === "semiannual" ? "félév" : "hó"}
+                              {sub.currency && sub.currency !== "HUF" && (
+                                <span className="text-xs text-gray-500 ml-1">
+                                  (≈{" "}
+                                  {Math.round(
+                                    getSubscriptionMonthlyHUF(sub)
+                                  ).toLocaleString()}{" "}
+                                  Ft/hó)
+                                </span>
+                              )}
+                              {(sub.frequency || "monthly") !== "monthly" && sub.currency === "HUF" && (
+                                <span className="text-xs text-gray-500 ml-1">
+                                  (≈{" "}
+                                  {Math.round(
+                                    getSubscriptionMonthlyHUF(sub)
+                                  ).toLocaleString()}{" "}
+                                  Ft/hó)
+                                </span>
+                              )}
                             </span>
                             {nextBilling && (
                               <>
@@ -17782,7 +18616,8 @@ const FamilyOrganizerApp = () => {
         </p>
 
         <div className="space-y-2">
-          {(settings.moduleOrder || getModules().map((m) => m.id))
+          {getModules()
+            .map((m) => m.id)
             .filter((id) => id !== "beallitasok")
             .map((moduleId, index, array) => {
               const modules = getModules();
@@ -22177,7 +23012,7 @@ const FamilyOrganizerApp = () => {
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Havi díj (Ft) *
+                    Díj *
                   </label>
                   <input
                     type="number"
@@ -22229,6 +23064,40 @@ const FamilyOrganizerApp = () => {
                     placeholder="15"
                   />
                 </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Számlázási gyakoriság
+                </label>
+                <select
+                  value={formData.frequency || "monthly"}
+                  onChange={(e) =>
+                    setFormData({ ...formData, frequency: e.target.value })
+                  }
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                >
+                  {Object.entries(SUBSCRIPTION_FREQUENCIES).map(([k, v]) => (
+                    <option key={k} value={k}>
+                      {v.label}
+                    </option>
+                  ))}
+                </select>
+                {formData.currency && formData.currency !== "HUF" && formData.monthlyPrice && (
+                  <p className="text-xs text-gray-500 mt-1">
+                    ≈{" "}
+                    {Math.round(
+                      convertToHUF(
+                        parseFloat(formData.monthlyPrice) || 0,
+                        formData.currency
+                      )
+                    ).toLocaleString()}{" "}
+                    Ft a jelenlegi árfolyamon
+                    {exchangeRatesFetchedAt && (
+                      <> ({new Date(exchangeRatesFetchedAt).toLocaleDateString("hu-HU")})</>
+                    )}
+                  </p>
+                )}
               </div>
 
               <div>
@@ -29140,6 +30009,440 @@ const FamilyOrganizerApp = () => {
                   );
                   setShowHazContactModal(false);
                   setEditingHazContact(null);
+                  setFormData({});
+                }}
+                className="flex-1 px-4 py-3 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700"
+              >
+                Mentés
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Finanszírozási forrás modal */}
+      {showHazFinancingSourceModal && selectedHazvasarlasProject && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50 overflow-y-auto">
+          <div className="bg-white rounded-lg shadow-xl max-w-lg w-full p-6 my-8 max-h-[90vh] overflow-y-auto">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-xl font-bold text-gray-800">
+                {editingHazFinancingSource
+                  ? "Finanszírozási forrás"
+                  : "Új finanszírozási forrás"}
+              </h3>
+              <button
+                onClick={() => setShowHazFinancingSourceModal(false)}
+                className="text-gray-500 hover:text-gray-700"
+              >
+                <X size={24} />
+              </button>
+            </div>
+            <div className="space-y-3">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Típus *
+                </label>
+                <select
+                  value={formData.type || "Készpénz"}
+                  onChange={(e) =>
+                    setFormData({ ...formData, type: e.target.value })
+                  }
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg"
+                >
+                  <optgroup label="Önerő">
+                    {Object.entries(FINANCING_SOURCE_TYPES)
+                      .filter(([, v]) => v.kind === "equity")
+                      .map(([k]) => (
+                        <option key={k} value={k}>
+                          {k}
+                        </option>
+                      ))}
+                  </optgroup>
+                  <optgroup label="Hitel">
+                    {Object.entries(FINANCING_SOURCE_TYPES)
+                      .filter(([, v]) => v.kind === "loan")
+                      .map(([k]) => (
+                        <option key={k} value={k}>
+                          {k}
+                        </option>
+                      ))}
+                  </optgroup>
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Megnevezés *
+                </label>
+                <input
+                  type="text"
+                  value={formData.name || ""}
+                  onChange={(e) =>
+                    setFormData({ ...formData, name: e.target.value })
+                  }
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg"
+                  placeholder="pl. Önerő — Babaváró"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Összeg (Ft) *
+                </label>
+                <input
+                  type="number"
+                  value={formData.amount || ""}
+                  onChange={(e) =>
+                    setFormData({ ...formData, amount: e.target.value })
+                  }
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg"
+                />
+              </div>
+              {FINANCING_SOURCE_TYPES[formData.type || ""]?.kind === "loan" && (
+                <>
+                  <div className="grid grid-cols-3 gap-3">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        Havi törlesztő (Ft)
+                      </label>
+                      <input
+                        type="number"
+                        value={formData.monthlyPayment || ""}
+                        onChange={(e) =>
+                          setFormData({
+                            ...formData,
+                            monthlyPayment: e.target.value,
+                          })
+                        }
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+                        placeholder="auto"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        Futamidő (év)
+                      </label>
+                      <input
+                        type="number"
+                        value={formData.termYears || ""}
+                        onChange={(e) =>
+                          setFormData({
+                            ...formData,
+                            termYears: e.target.value,
+                          })
+                        }
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        THM (%)
+                      </label>
+                      <input
+                        type="number"
+                        step="0.01"
+                        value={formData.thm || ""}
+                        onChange={(e) =>
+                          setFormData({ ...formData, thm: e.target.value })
+                        }
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+                      />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Eltérő törlesztő az első évben (Ft)
+                    </label>
+                    <input
+                      type="number"
+                      value={formData.firstYearPayment || ""}
+                      onChange={(e) =>
+                        setFormData({
+                          ...formData,
+                          firstYearPayment: e.target.value,
+                        })
+                      }
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg"
+                      placeholder="pl. CSOK kamattámogatás miatt"
+                    />
+                    {formData.amount && formData.thm && formData.termYears && (
+                      <p className="text-xs text-gray-500 mt-1">
+                        Számolt havi törlesztő:{" "}
+                        {Math.round(
+                          calcAnnuityPayment(
+                            formData.amount,
+                            formData.thm,
+                            formData.termYears
+                          )
+                        ).toLocaleString()}{" "}
+                        Ft
+                      </p>
+                    )}
+                  </div>
+                </>
+              )}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Státusz
+                </label>
+                <select
+                  value={formData.status || "active"}
+                  onChange={(e) =>
+                    setFormData({ ...formData, status: e.target.value })
+                  }
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg"
+                >
+                  <option value="active">Aktív</option>
+                  <option value="suspended">Szüneteltetve</option>
+                  <option value="afterEvent">Csak esemény után aktív</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Megjegyzés
+                </label>
+                <textarea
+                  rows="2"
+                  value={formData.notes || ""}
+                  onChange={(e) =>
+                    setFormData({ ...formData, notes: e.target.value })
+                  }
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg"
+                />
+              </div>
+            </div>
+            <div className="mt-6 flex gap-3">
+              <button
+                onClick={() => setShowHazFinancingSourceModal(false)}
+                className="flex-1 px-4 py-3 border border-gray-300 rounded-lg hover:bg-gray-50"
+              >
+                Mégse
+              </button>
+              <button
+                onClick={async () => {
+                  if (!formData.name || !formData.type) {
+                    alert("Megnevezés és típus kötelező!");
+                    return;
+                  }
+                  await updateHazvasarlasProject(
+                    selectedHazvasarlasProject.id,
+                    (p) => {
+                      const item = {
+                        ...formData,
+                        id: editingHazFinancingSource?.id || Date.now(),
+                      };
+                      const existing = p.financingPlan?.sources || [];
+                      const sources = editingHazFinancingSource
+                        ? existing.map((x) =>
+                            x.id === editingHazFinancingSource.id ? item : x
+                          )
+                        : [...existing, item];
+                      return {
+                        ...p,
+                        financingPlan: {
+                          ...(p.financingPlan || {}),
+                          sources,
+                          scenarios: p.financingPlan?.scenarios || [],
+                        },
+                      };
+                    }
+                  );
+                  setShowHazFinancingSourceModal(false);
+                  setEditingHazFinancingSource(null);
+                  setFormData({});
+                }}
+                className="flex-1 px-4 py-3 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700"
+              >
+                Mentés
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Szcenárió modal */}
+      {showHazScenarioModal && selectedHazvasarlasProject && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50 overflow-y-auto">
+          <div className="bg-white rounded-lg shadow-xl max-w-2xl w-full p-6 my-8 max-h-[90vh] overflow-y-auto">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-xl font-bold text-gray-800">
+                {editingHazScenario ? "Szcenárió" : "Új szcenárió"}
+              </h3>
+              <button
+                onClick={() => setShowHazScenarioModal(false)}
+                className="text-gray-500 hover:text-gray-700"
+              >
+                <X size={24} />
+              </button>
+            </div>
+            <div className="space-y-3">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Szcenárió neve *
+                </label>
+                <input
+                  type="text"
+                  value={formData.name || ""}
+                  onChange={(e) =>
+                    setFormData({ ...formData, name: e.target.value })
+                  }
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg"
+                  placeholder="pl. Lakás eladás után előtörlesztés"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Leírás
+                </label>
+                <textarea
+                  rows="2"
+                  value={formData.description || ""}
+                  onChange={(e) =>
+                    setFormData({ ...formData, description: e.target.value })
+                  }
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg"
+                />
+              </div>
+
+              <div>
+                <div className="flex justify-between items-center mb-2">
+                  <label className="block text-sm font-medium text-gray-700">
+                    Hatások (előtörlesztések hitelekbe)
+                  </label>
+                  <button
+                    onClick={() =>
+                      setFormData({
+                        ...formData,
+                        adjustments: [
+                          ...(formData.adjustments || []),
+                          {
+                            id: Date.now(),
+                            sourceId: "",
+                            amount: "",
+                            fee: "",
+                          },
+                        ],
+                      })
+                    }
+                    className="text-sm text-blue-600 hover:underline"
+                  >
+                    + Új előtörlesztés
+                  </button>
+                </div>
+                {(formData.adjustments || []).length === 0 ? (
+                  <p className="text-xs text-gray-500 italic">
+                    Adj hozzá hitel-előtörlesztéseket a szcenárióhoz, hogy
+                    láthasd a hatást a fennmaradó tartozásra és törlesztőre.
+                  </p>
+                ) : (
+                  <div className="space-y-2">
+                    {(formData.adjustments || []).map((a, idx) => (
+                      <div
+                        key={a.id}
+                        className="grid grid-cols-12 gap-2 bg-gray-50 p-2 rounded"
+                      >
+                        <select
+                          value={a.sourceId || ""}
+                          onChange={(e) => {
+                            const adjs = [...(formData.adjustments || [])];
+                            adjs[idx] = {
+                              ...adjs[idx],
+                              sourceId: parseInt(e.target.value, 10),
+                            };
+                            setFormData({ ...formData, adjustments: adjs });
+                          }}
+                          className="col-span-5 px-2 py-1 border border-gray-300 rounded text-sm"
+                        >
+                          <option value="">— hitel kiválasztása —</option>
+                          {(
+                            selectedHazvasarlasProject.financingPlan
+                              ?.sources || []
+                          )
+                            .filter(
+                              (s) =>
+                                FINANCING_SOURCE_TYPES[s.type]?.kind === "loan"
+                            )
+                            .map((s) => (
+                              <option key={s.id} value={s.id}>
+                                {s.name}
+                              </option>
+                            ))}
+                        </select>
+                        <input
+                          type="number"
+                          placeholder="Összeg (Ft)"
+                          value={a.amount || ""}
+                          onChange={(e) => {
+                            const adjs = [...(formData.adjustments || [])];
+                            adjs[idx] = { ...adjs[idx], amount: e.target.value };
+                            setFormData({ ...formData, adjustments: adjs });
+                          }}
+                          className="col-span-3 px-2 py-1 border border-gray-300 rounded text-sm"
+                        />
+                        <input
+                          type="number"
+                          placeholder="Díj (Ft)"
+                          value={a.fee || ""}
+                          onChange={(e) => {
+                            const adjs = [...(formData.adjustments || [])];
+                            adjs[idx] = { ...adjs[idx], fee: e.target.value };
+                            setFormData({ ...formData, adjustments: adjs });
+                          }}
+                          className="col-span-3 px-2 py-1 border border-gray-300 rounded text-sm"
+                        />
+                        <button
+                          onClick={() => {
+                            const adjs = (formData.adjustments || []).filter(
+                              (_, i) => i !== idx
+                            );
+                            setFormData({ ...formData, adjustments: adjs });
+                          }}
+                          className="col-span-1 text-red-600 hover:bg-red-50 rounded"
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+            <div className="mt-6 flex gap-3">
+              <button
+                onClick={() => setShowHazScenarioModal(false)}
+                className="flex-1 px-4 py-3 border border-gray-300 rounded-lg hover:bg-gray-50"
+              >
+                Mégse
+              </button>
+              <button
+                onClick={async () => {
+                  if (!formData.name) {
+                    alert("Szcenárió név kötelező!");
+                    return;
+                  }
+                  await updateHazvasarlasProject(
+                    selectedHazvasarlasProject.id,
+                    (p) => {
+                      const item = {
+                        ...formData,
+                        id: editingHazScenario?.id || Date.now(),
+                      };
+                      const existing = p.financingPlan?.scenarios || [];
+                      const scenarios = editingHazScenario
+                        ? existing.map((x) =>
+                            x.id === editingHazScenario.id ? item : x
+                          )
+                        : [...existing, item];
+                      return {
+                        ...p,
+                        financingPlan: {
+                          ...(p.financingPlan || {}),
+                          sources: p.financingPlan?.sources || [],
+                          scenarios,
+                        },
+                      };
+                    }
+                  );
+                  setShowHazScenarioModal(false);
+                  setEditingHazScenario(null);
                   setFormData({});
                 }}
                 className="flex-1 px-4 py-3 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700"
