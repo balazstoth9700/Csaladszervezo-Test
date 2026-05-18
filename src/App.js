@@ -133,6 +133,9 @@ const getDefaultData = () => ({
   pets: [],
   recipes: [],
   weeklyMenu: [],
+  budgets: [],
+  recurringFinances: [],
+  hazvasarlasProjects: [],
   settings: {
     nickname: "",
     activeModules: [
@@ -148,6 +151,7 @@ const getDefaultData = () => ({
       "rendelesek",
       "elofizetesek",
       "penzugyek",
+      "hazvasarlas",
       "chat",
       "kisallatok",
       "receptek",
@@ -165,6 +169,7 @@ const getDefaultData = () => ({
       "rendelesek",
       "elofizetesek",
       "penzugyek",
+      "hazvasarlas",
       "chat",
       "kisallatok",
       "receptek",
@@ -246,6 +251,9 @@ const SHAREABLE_SECTIONS = [
   { key: "pets", label: "Kisállatok" },
   { key: "recipes", label: "Receptek" },
   { key: "weeklyMenu", label: "Heti menü" },
+  { key: "budgets", label: "Költségvetések" },
+  { key: "recurringFinances", label: "Ismétlődő bevételek/kiadások" },
+  { key: "hazvasarlasProjects", label: "Házvásárlás" },
 ];
 
 const getDefaultShareConfig = () => ({
@@ -546,6 +554,57 @@ const FamilyOrganizerApp = () => {
   const [tempReading, setTempReading] = useState({ date: "", value: "" });
   const [showAllUtilities, setShowAllUtilities] = useState({});
   const [showQuickUtilityModal, setShowQuickUtilityModal] = useState(false);
+  const [showExpiredVignettes, setShowExpiredVignettes] = useState({});
+  const [showUtilityScheduleModal, setShowUtilityScheduleModal] = useState(false);
+  const [editingUtilitySchedule, setEditingUtilitySchedule] = useState(null);
+  const [tempUtilitySchedule, setTempUtilitySchedule] = useState({
+    name: "",
+    provider: "",
+    billingDay: 15,
+    frequency: "havi",
+    reminderDaysBefore: 3,
+    portalUrl: "",
+    notes: "",
+  });
+  const [showPrepaymentModal, setShowPrepaymentModal] = useState(false);
+  const [selectedLoanForPrepay, setSelectedLoanForPrepay] = useState(null);
+  const [prepaymentForm, setPrepaymentForm] = useState({
+    amount: "",
+    mode: "shortenTerm",
+  });
+  const [showRecurringFinanceModal, setShowRecurringFinanceModal] = useState(false);
+  const [editingRecurringFinance, setEditingRecurringFinance] = useState(null);
+  const [recurringForm, setRecurringForm] = useState({
+    type: "expense",
+    name: "",
+    amount: "",
+    category: "",
+    frequency: "monthly",
+    startDate: new Date().toISOString().split("T")[0],
+    account: "",
+    notes: "",
+  });
+  const [budgetViewMode, setBudgetViewMode] = useState("month");
+
+  // Házvásárlás statek
+  const [selectedHazvasarlasProject, setSelectedHazvasarlasProject] = useState(null);
+  const [hazvasarlasTab, setHazvasarlasTab] = useState("attekintes");
+  const [showHazvasarlasProjectModal, setShowHazvasarlasProjectModal] = useState(false);
+  const [showPropertyOptionModal, setShowPropertyOptionModal] = useState(false);
+  const [editingPropertyOption, setEditingPropertyOption] = useState(null);
+  const [showPropertyDetailModal, setShowPropertyDetailModal] = useState(null);
+  const [showHazTimelineModal, setShowHazTimelineModal] = useState(false);
+  const [editingHazTimeline, setEditingHazTimeline] = useState(null);
+  const [showHazCostModal, setShowHazCostModal] = useState(false);
+  const [editingHazCost, setEditingHazCost] = useState(null);
+  const [showHazRoomModal, setShowHazRoomModal] = useState(false);
+  const [editingHazRoom, setEditingHazRoom] = useState(null);
+  const [showHazFurnitureModal, setShowHazFurnitureModal] = useState(false);
+  const [editingHazFurniture, setEditingHazFurniture] = useState(null);
+  const [showHazContactModal, setShowHazContactModal] = useState(false);
+  const [editingHazContact, setEditingHazContact] = useState(null);
+  const [showHazDocumentModal, setShowHazDocumentModal] = useState(false);
+  const [propertyComparisonIds, setPropertyComparisonIds] = useState([]);
 
   // Family temp statek
 
@@ -4257,6 +4316,126 @@ const FamilyOrganizerApp = () => {
       homeId: home.id,
     });
     setShowQuickUtilityModal(true);
+  };
+
+  // === REZSI ÉRTESÍTŐ IDŐZÍTÉSEK ===
+  const openUtilityScheduleModal = (home, schedule = null) => {
+    setSelectedHome(home);
+    if (schedule) {
+      setEditingUtilitySchedule(schedule);
+      setTempUtilitySchedule({ ...schedule });
+    } else {
+      setEditingUtilitySchedule(null);
+      setTempUtilitySchedule({
+        name: "",
+        provider: "",
+        billingDay: 15,
+        frequency: "havi",
+        reminderDaysBefore: 3,
+        portalUrl: "",
+        notes: "",
+      });
+    }
+    setShowUtilityScheduleModal(true);
+  };
+
+  const saveUtilitySchedule = async () => {
+    if (!tempUtilitySchedule.name || !tempUtilitySchedule.billingDay) {
+      alert("Kérlek add meg a rezsi nevét és a számlázási napot!");
+      return;
+    }
+    const newData = { ...data };
+    const homeIndex = newData.homes.findIndex(
+      (h) => h.id === selectedHome.id
+    );
+    if (homeIndex === -1) return;
+    if (!newData.homes[homeIndex].utilitySchedules) {
+      newData.homes[homeIndex].utilitySchedules = [];
+    }
+    const schedule = {
+      ...tempUtilitySchedule,
+      billingDay: parseInt(tempUtilitySchedule.billingDay, 10),
+      reminderDaysBefore:
+        parseInt(tempUtilitySchedule.reminderDaysBefore, 10) || 3,
+      id: editingUtilitySchedule?.id || Date.now(),
+    };
+    if (editingUtilitySchedule) {
+      newData.homes[homeIndex].utilitySchedules = newData.homes[
+        homeIndex
+      ].utilitySchedules.map((s) =>
+        s.id === editingUtilitySchedule.id ? schedule : s
+      );
+    } else {
+      newData.homes[homeIndex].utilitySchedules.push(schedule);
+    }
+    setData(newData);
+    await saveUserData(newData);
+    setShowUtilityScheduleModal(false);
+    setEditingUtilitySchedule(null);
+  };
+
+  const deleteUtilitySchedule = async (home, scheduleId) => {
+    const newData = { ...data };
+    const homeIndex = newData.homes.findIndex((h) => h.id === home.id);
+    if (homeIndex === -1) return;
+    newData.homes[homeIndex].utilitySchedules = (
+      newData.homes[homeIndex].utilitySchedules || []
+    ).filter((s) => s.id !== scheduleId);
+    setData(newData);
+    await saveUserData(newData);
+  };
+
+  const getNextBillingDate = (schedule) => {
+    if (!schedule || !schedule.billingDay) return null;
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const day = parseInt(schedule.billingDay, 10);
+    const frequency = schedule.frequency || "havi";
+    const monthsByFreq = {
+      havi: 1,
+      "2-havi": 2,
+      negyedéves: 3,
+      féléves: 6,
+      éves: 12,
+    };
+    const monthStep = monthsByFreq[frequency] || 1;
+
+    // Az utolsó számlázási dátumtól (vagy a kezdéstől) lépkedünk a jövőbe.
+    let anchor;
+    if (schedule.lastBilledOn) {
+      anchor = new Date(schedule.lastBilledOn);
+    } else {
+      anchor = new Date(today.getFullYear(), today.getMonth(), day);
+      if (anchor < today) {
+        anchor.setMonth(anchor.getMonth() + monthStep);
+      }
+      return anchor;
+    }
+
+    let next = new Date(
+      anchor.getFullYear(),
+      anchor.getMonth() + monthStep,
+      day
+    );
+    while (next < today) {
+      next.setMonth(next.getMonth() + monthStep);
+    }
+    return next;
+  };
+
+  const markUtilityScheduleChecked = async (home, scheduleId) => {
+    const newData = { ...data };
+    const homeIndex = newData.homes.findIndex((h) => h.id === home.id);
+    if (homeIndex === -1) return;
+    newData.homes[homeIndex].utilitySchedules = (
+      newData.homes[homeIndex].utilitySchedules || []
+    ).map((s) =>
+      s.id === scheduleId
+        ? { ...s, lastBilledOn: new Date().toISOString() }
+        : s
+    );
+    setData(newData);
+    await saveUserData(newData);
   };
 
   const deleteHome = async (homeId) => {
@@ -8712,6 +8891,38 @@ const FamilyOrganizerApp = () => {
       });
     });
 
+    // Rezsi értesítők (rezsi értesítő időzítések)
+    data.homes.forEach((home) => {
+      home.utilitySchedules?.forEach((sch) => {
+        const next = getNextBillingDate(sch);
+        if (!next) return;
+        const reminderDays = parseInt(sch.reminderDaysBefore, 10) || 3;
+        const triggerDate = new Date(next.getTime());
+        triggerDate.setDate(triggerDate.getDate() - reminderDays);
+        if (today >= triggerDate && today <= next) {
+          const periodKey = `${next.getFullYear()}-${next.getMonth() + 1}`;
+          const relatedId = `utility-schedule-${home.id}-${sch.id}-${periodKey}`;
+          const existing = data.notifications?.find(
+            (n) => n.relatedId === relatedId
+          );
+          if (!existing) {
+            newNotifications.push({
+              id: Date.now() + Math.random(),
+              type: "utility",
+              title: "Rezsi ellenőrzés",
+              message: `${home.name} - ${sch.name}${
+                sch.provider ? ` (${sch.provider})` : ""
+              } esedékes: ${next.toLocaleDateString("hu-HU")}`,
+              date: next.toISOString(),
+              read: false,
+              relatedId,
+              createdAt: new Date().toISOString(),
+            });
+          }
+        }
+      });
+    });
+
     // Mérőóra leolvasási emlékeztetők
     data.homes.forEach((home) => {
       home.meters?.forEach((meter) => {
@@ -9924,6 +10135,137 @@ const FamilyOrganizerApp = () => {
                   </div>
                 )}
               </div>
+              {/* Rezsi értesítők / Számlázási időzítések */}
+              <div className="p-4 border-t border-gray-200 bg-blue-50/30">
+                <div className="flex items-center justify-between mb-3">
+                  <h4 className="font-semibold text-gray-800 flex items-center gap-2">
+                    <Bell size={18} />
+                    Rezsi értesítők
+                  </h4>
+                  <button
+                    onClick={() => openUtilityScheduleModal(home)}
+                    className="px-3 py-2 text-sm bg-blue-600 text-white rounded hover:bg-blue-700 flex items-center gap-1 shadow-sm transition-all active:scale-95"
+                  >
+                    <Plus size={16} />
+                    Új értesítő
+                  </button>
+                </div>
+                {home.utilitySchedules && home.utilitySchedules.length > 0 ? (
+                  <div className="grid gap-2">
+                    {home.utilitySchedules.map((sch) => {
+                      const next = getNextBillingDate(sch);
+                      const today = new Date();
+                      today.setHours(0, 0, 0, 0);
+                      const daysUntil = next
+                        ? Math.ceil(
+                            (next.getTime() - today.getTime()) /
+                              (1000 * 60 * 60 * 24)
+                          )
+                        : null;
+                      const reminderDays =
+                        parseInt(sch.reminderDaysBefore, 10) || 3;
+                      const isDueSoon =
+                        daysUntil !== null && daysUntil <= reminderDays;
+                      return (
+                        <div
+                          key={sch.id}
+                          className={`bg-white p-3 rounded-lg shadow-sm border ${
+                            isDueSoon
+                              ? "border-orange-400"
+                              : "border-gray-200"
+                          }`}
+                        >
+                          <div className="flex justify-between items-start gap-2">
+                            <div className="flex-1 min-w-0">
+                              <div className="font-semibold text-gray-800 truncate">
+                                {sch.name}
+                                {sch.provider && (
+                                  <span className="text-sm text-gray-500 ml-2">
+                                    ({sch.provider})
+                                  </span>
+                                )}
+                              </div>
+                              <div className="text-xs text-gray-600 mt-1">
+                                {sch.frequency} • Minden hó {sch.billingDay}.
+                                napján
+                              </div>
+                              {next && (
+                                <div
+                                  className={`text-sm mt-1 font-medium ${
+                                    isDueSoon
+                                      ? "text-orange-700"
+                                      : "text-gray-700"
+                                  }`}
+                                >
+                                  Következő:{" "}
+                                  {next.toLocaleDateString("hu-HU")}
+                                  {daysUntil >= 0 && (
+                                    <span className="ml-2 text-xs">
+                                      ({daysUntil === 0
+                                        ? "ma"
+                                        : `${daysUntil} nap múlva`})
+                                    </span>
+                                  )}
+                                </div>
+                              )}
+                              {sch.portalUrl && (
+                                <a
+                                  href={sch.portalUrl}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="text-xs text-blue-600 hover:underline mt-1 inline-block break-all"
+                                >
+                                  Szolgáltató felülete →
+                                </a>
+                              )}
+                              {sch.notes && (
+                                <div className="text-xs text-gray-500 mt-1 italic">
+                                  {sch.notes}
+                                </div>
+                              )}
+                            </div>
+                            <div className="flex flex-col gap-1">
+                              <button
+                                onClick={() =>
+                                  markUtilityScheduleChecked(home, sch.id)
+                                }
+                                className="px-2 py-1 text-xs bg-green-600 text-white rounded hover:bg-green-700"
+                                title="Megnézve, ugrás a következő számlázási időszakra"
+                              >
+                                <Check size={14} />
+                              </button>
+                              <button
+                                onClick={() =>
+                                  openUtilityScheduleModal(home, sch)
+                                }
+                                className="p-1 text-blue-600 hover:bg-blue-50 rounded"
+                              >
+                                <Edit2 size={14} />
+                              </button>
+                              <button
+                                onClick={() =>
+                                  deleteUtilitySchedule(home, sch.id)
+                                }
+                                className="p-1 text-red-600 hover:bg-red-50 rounded"
+                              >
+                                <Trash2 size={14} />
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <div className="text-center py-4 bg-white rounded-lg border border-dashed border-gray-300">
+                    <p className="text-sm text-gray-500">
+                      Adj hozzá rezsiket (áram, gáz, víz, közös költség…) hogy
+                      időben figyelmeztessen, mikor kell megnézned a szolgáltató
+                      portálját.
+                    </p>
+                  </div>
+                )}
+              </div>
               {/* Karbantartások - MINDIG LÁTHATÓ */}
               <div className="p-4 border-t border-gray-200">
                 {/* FEJLÉC GYORSGOMBBAL - MINDIG LÁTHATÓ */}
@@ -10342,60 +10684,122 @@ const FamilyOrganizerApp = () => {
             )}
 
             {/* Matricák */}
-            {vehicle.vignettes && vehicle.vignettes.length > 0 && (
-              <div className="p-4 border-t border-gray-200 bg-green-50">
-                <h4 className="font-semibold text-gray-800 mb-3 text-sm flex items-center gap-2">
-                  <span>🎫</span> Matricák
-                </h4>
-                <div className="grid gap-2">
-                  {vehicle.vignettes.map((vig, idx) => {
-                    const validUntil = new Date(vig.validUntil);
-                    const today = new Date();
-                    const isExpiringSoon =
-                      validUntil <=
-                      new Date(today.getTime() + 30 * 24 * 60 * 60 * 1000);
-                    const isExpired = validUntil < today;
+            {vehicle.vignettes && vehicle.vignettes.length > 0 && (() => {
+              const today = new Date();
+              const allVignettes = vehicle.vignettes;
+              // A lejárt matrica akkor "felváltott", ha van újabb (azonos típus+ország),
+              // amelynek validUntil-ja későbbi.
+              const isReplaced = (vig) => {
+                const vigUntil = new Date(vig.validUntil);
+                if (vigUntil >= today) return false;
+                return allVignettes.some(
+                  (other) =>
+                    other !== vig &&
+                    other.type === vig.type &&
+                    other.country === vig.country &&
+                    new Date(other.validUntil) > vigUntil
+                );
+              };
+              const activeVignettes = allVignettes.filter((v) => !isReplaced(v));
+              const archivedVignettes = allVignettes.filter((v) => isReplaced(v));
+              const showArchived = showExpiredVignettes[vehicle.id];
 
-                    return (
-                      <div
-                        key={idx}
-                        className={`bg-white p-3 rounded-lg shadow-sm ${
-                          isExpired
-                            ? "border-2 border-red-500"
-                            : isExpiringSoon
-                            ? "border-2 border-orange-500"
-                            : ""
-                        }`}
+              return (
+                <div className="p-4 border-t border-gray-200 bg-green-50">
+                  <div className="flex justify-between items-center mb-3">
+                    <h4 className="font-semibold text-gray-800 text-sm flex items-center gap-2">
+                      <span>🎫</span> Matricák
+                    </h4>
+                    {archivedVignettes.length > 0 && (
+                      <button
+                        onClick={() =>
+                          setShowExpiredVignettes({
+                            ...showExpiredVignettes,
+                            [vehicle.id]: !showArchived,
+                          })
+                        }
+                        className="text-xs text-blue-600 hover:text-blue-700 font-medium"
                       >
-                        <div className="flex justify-between items-center mb-1">
-                          <span className="font-semibold text-gray-800">
-                            {vig.type} - {vig.country}
-                          </span>
-                          {vig.price && (
-                            <span className="text-sm text-gray-600">
-                              {vig.price} Ft
+                        {showArchived
+                          ? "Felváltott matricák elrejtése"
+                          : `${archivedVignettes.length} felváltott megtekintése`}
+                      </button>
+                    )}
+                  </div>
+                  <div className="grid gap-2">
+                    {activeVignettes.map((vig, idx) => {
+                      const validUntil = new Date(vig.validUntil);
+                      const isExpiringSoon =
+                        validUntil <=
+                        new Date(today.getTime() + 30 * 24 * 60 * 60 * 1000);
+                      const isExpired = validUntil < today;
+
+                      return (
+                        <div
+                          key={vig.id || idx}
+                          className={`bg-white p-3 rounded-lg shadow-sm ${
+                            isExpired
+                              ? "border-2 border-red-500"
+                              : isExpiringSoon
+                              ? "border-2 border-orange-500"
+                              : ""
+                          }`}
+                        >
+                          <div className="flex justify-between items-center mb-1">
+                            <span className="font-semibold text-gray-800">
+                              {vig.type} - {vig.country}
                             </span>
+                            {vig.price && (
+                              <span className="text-sm text-gray-600">
+                                {vig.price} Ft
+                              </span>
+                            )}
+                          </div>
+                          <div className="text-xs text-gray-600">
+                            {new Date(vig.validFrom).toLocaleDateString("hu-HU")}{" "}
+                            - {validUntil.toLocaleDateString("hu-HU")}
+                          </div>
+                          {(isExpired || isExpiringSoon) && (
+                            <div
+                              className={`text-xs font-semibold mt-1 ${
+                                isExpired ? "text-red-600" : "text-orange-600"
+                              }`}
+                            >
+                              {isExpired ? "⚠️ LEJÁRT!" : "⚠️ Hamarosan lejár!"}
+                            </div>
                           )}
                         </div>
-                        <div className="text-xs text-gray-600">
-                          {new Date(vig.validFrom).toLocaleDateString("hu-HU")}{" "}
-                          - {validUntil.toLocaleDateString("hu-HU")}
-                        </div>
-                        {(isExpired || isExpiringSoon) && (
+                      );
+                    })}
+                    {showArchived &&
+                      archivedVignettes.map((vig, idx) => {
+                        const validUntil = new Date(vig.validUntil);
+                        return (
                           <div
-                            className={`text-xs font-semibold mt-1 ${
-                              isExpired ? "text-red-600" : "text-orange-600"
-                            }`}
+                            key={`arch-${vig.id || idx}`}
+                            className="bg-gray-50 p-3 rounded-lg shadow-sm opacity-70"
                           >
-                            {isExpired ? "⚠️ LEJÁRT!" : "⚠️ Hamarosan lejár!"}
+                            <div className="flex justify-between items-center mb-1">
+                              <span className="font-medium text-gray-600">
+                                {vig.type} - {vig.country}
+                              </span>
+                              <span className="text-xs text-gray-500">
+                                Felváltva
+                              </span>
+                            </div>
+                            <div className="text-xs text-gray-500">
+                              {new Date(vig.validFrom).toLocaleDateString(
+                                "hu-HU"
+                              )}{" "}
+                              - {validUntil.toLocaleDateString("hu-HU")}
+                            </div>
                           </div>
-                        )}
-                      </div>
-                    );
-                  })}
+                        );
+                      })}
+                  </div>
                 </div>
-              </div>
-            )}
+              );
+            })()}
 
             {/* Szervíz történet */}
             {vehicle.serviceHistory && vehicle.serviceHistory.length > 0 && (
@@ -13339,6 +13743,21 @@ const FamilyOrganizerApp = () => {
                       </div>
                       <div className="flex gap-2">
                         <button
+                          onClick={() => {
+                            setSelectedLoanForPrepay(loan);
+                            setPrepaymentForm({
+                              amount: "",
+                              mode: "shortenTerm",
+                            });
+                            setShowPrepaymentModal(true);
+                          }}
+                          className="px-3 py-2 text-sm bg-orange-600 text-white rounded hover:bg-orange-700 flex items-center gap-1"
+                          title="Előtörlesztés kalkulátor"
+                        >
+                          <TrendingDown size={16} />
+                          <span className="hidden sm:inline">Előtörlesztés</span>
+                        </button>
+                        <button
                           onClick={() => openLoanModal(loan)}
                           className="p-2 text-blue-600 hover:bg-blue-50 rounded"
                         >
@@ -13604,6 +14023,1604 @@ const FamilyOrganizerApp = () => {
             </div>
           )}
         </div>
+      </div>
+    );
+  };
+
+  // ====================================================
+  // HÁZVÁSÁRLÁS MODUL - segédfüggvények
+  // ====================================================
+  const HAZ_PROJECT_TYPES = {
+    used: { label: "Használt lakás/ház", icon: "🏠", color: "blue" },
+    new: { label: "Új lakás/ház", icon: "🏡", color: "green" },
+    build: { label: "Építkezés", icon: "🚧", color: "orange" },
+  };
+
+  const HAZ_PROJECT_STATUSES = {
+    planning: "Tervezés",
+    searching: "Keresés",
+    negotiating: "Tárgyalás",
+    buying: "Vásárlás folyamatban",
+    owned: "Megvásárolva",
+    renovating: "Felújítás",
+    completed: "Befejezve",
+  };
+
+  const HAZ_DEFAULT_PHASES = {
+    used: [
+      { phase: "preparation", name: "Pénzügyi előkészítés (önerő, hitel)" },
+      { phase: "search", name: "Ingatlankeresés, megtekintések" },
+      { phase: "financing", name: "Hitel előminősítés / igénylés" },
+      { phase: "contract", name: "Adásvételi előszerződés, foglaló" },
+      { phase: "contract", name: "Tulajdoni lap, terhek ellenőrzése" },
+      { phase: "contract", name: "Ügyvédi szerződés véglegesítése" },
+      { phase: "closing", name: "Bank folyósítás / kifizetés" },
+      { phase: "closing", name: "Földhivatali bejegyzés" },
+      { phase: "moving", name: "Birtokbavétel és kulcsátadás" },
+      { phase: "moving", name: "Közmű átírás" },
+      { phase: "renovation", name: "Felújítás (opcionális)" },
+      { phase: "furnishing", name: "Berendezés, költözés" },
+    ],
+    new: [
+      { phase: "preparation", name: "Pénzügyi előkészítés" },
+      { phase: "search", name: "Új lakásprojekt kiválasztása" },
+      { phase: "financing", name: "Hitel + CSOK/Babaváró igénylés" },
+      { phase: "contract", name: "Foglalási szerződés" },
+      { phase: "contract", name: "Adásvételi szerződés" },
+      { phase: "closing", name: "Részletek kifizetése (építés ütemében)" },
+      { phase: "closing", name: "Műszaki átadás-átvétel" },
+      { phase: "moving", name: "Birtokbavétel" },
+      { phase: "moving", name: "Közmű igénylés" },
+      { phase: "furnishing", name: "Berendezés" },
+    ],
+    build: [
+      { phase: "preparation", name: "Telekvásárlás" },
+      { phase: "preparation", name: "Tervezés, építész kiválasztása" },
+      { phase: "preparation", name: "Engedélyezési terv" },
+      { phase: "preparation", name: "Építési engedély" },
+      { phase: "financing", name: "Hitel + CSOK + ÁFA visszaigénylés" },
+      { phase: "contract", name: "Kivitelező kiválasztása" },
+      { phase: "contract", name: "Generál kivitelezői szerződés" },
+      { phase: "closing", name: "Alapozás" },
+      { phase: "closing", name: "Falazás, födém" },
+      { phase: "closing", name: "Tetőszerkezet" },
+      { phase: "closing", name: "Nyílászárók" },
+      { phase: "closing", name: "Gépészet (víz, fűtés, villany)" },
+      { phase: "closing", name: "Belső szakipari munkák" },
+      { phase: "closing", name: "Burkolatok" },
+      { phase: "closing", name: "Műszaki átadás" },
+      { phase: "closing", name: "Használatbavételi engedély" },
+      { phase: "furnishing", name: "Berendezés, kerítés, kert" },
+    ],
+  };
+
+  const HAZ_DEFAULT_COSTS = {
+    used: [
+      { category: "Vételár", description: "Ingatlan vételára" },
+      { category: "Vagyonszerzési illeték", description: "4% (vagy CSOK-os mentesség)" },
+      { category: "Ügyvédi díj", description: "Általában 0.5-1%" },
+      { category: "Közjegyzői díj", description: "Tartozáselismerő okirat" },
+      { category: "Földhivatali díj", description: "Bejegyzési illeték" },
+      { category: "Energetikai tanúsítvány", description: "" },
+      { category: "Értékbecslés", description: "Banki, ha hiteles" },
+      { category: "Bank kezelési díj", description: "Folyósítási, közvetítői" },
+      { category: "Költözés", description: "" },
+      { category: "Felújítás", description: "" },
+      { category: "Berendezés", description: "" },
+    ],
+    new: [
+      { category: "Vételár", description: "Ingatlan vételára (ÁFA-val)" },
+      { category: "Illeték", description: "ÁFA visszatérítéssel csökkenthető" },
+      { category: "Ügyvédi díj", description: "" },
+      { category: "Közjegyzői díj", description: "" },
+      { category: "Földhivatali díj", description: "" },
+      { category: "Bank díjak", description: "" },
+      { category: "Költözés", description: "" },
+      { category: "Berendezés", description: "" },
+    ],
+    build: [
+      { category: "Telekár", description: "" },
+      { category: "Tervezés", description: "Építész, statikus, gépész" },
+      { category: "Engedélyek", description: "Építési, használatbavételi" },
+      { category: "Anyagköltség", description: "Falazó, tetőanyag, stb." },
+      { category: "Munkadíj", description: "Kivitelezői díj" },
+      { category: "Gépészet", description: "Víz, fűtés, villany" },
+      { category: "Nyílászárók", description: "" },
+      { category: "Burkolatok", description: "" },
+      { category: "Műszaki ellenőr", description: "" },
+      { category: "Közmű bekötés", description: "" },
+      { category: "Kert, kerítés", description: "" },
+      { category: "Berendezés", description: "" },
+    ],
+  };
+
+  const updateHazvasarlasProject = async (projectId, updater) => {
+    const newData = { ...data };
+    newData.hazvasarlasProjects = (newData.hazvasarlasProjects || []).map((p) =>
+      p.id === projectId ? updater(p) : p
+    );
+    setData(newData);
+    await saveUserData(newData);
+    // Frissítjük a kiválasztott projektet is, ha ő van nyitva.
+    if (selectedHazvasarlasProject?.id === projectId) {
+      const updated = newData.hazvasarlasProjects.find(
+        (p) => p.id === projectId
+      );
+      setSelectedHazvasarlasProject(updated);
+    }
+  };
+
+  const createHazvasarlasProject = async (project) => {
+    const newProject = {
+      id: Date.now(),
+      name: project.name,
+      type: project.type || "used",
+      status: project.status || "planning",
+      description: project.description || "",
+      startDate: project.startDate || new Date().toISOString().split("T")[0],
+      targetMoveInDate: project.targetMoveInDate || "",
+      plannedBudget: parseFloat(project.plannedBudget) || 0,
+      notes: project.notes || "",
+      options: [],
+      selectedOptionId: null,
+      timeline: (HAZ_DEFAULT_PHASES[project.type || "used"] || []).map(
+        (p, idx) => ({
+          id: Date.now() + idx,
+          phase: p.phase,
+          name: p.name,
+          dueDate: "",
+          completed: false,
+          completedDate: null,
+          notes: "",
+        })
+      ),
+      costs: (HAZ_DEFAULT_COSTS[project.type || "used"] || []).map(
+        (c, idx) => ({
+          id: Date.now() + 1000 + idx,
+          category: c.category,
+          description: c.description,
+          plannedAmount: 0,
+          actualAmount: 0,
+          paid: false,
+          paymentDate: "",
+          vendor: "",
+        })
+      ),
+      rooms: [],
+      furniture: [],
+      documents: [],
+      contacts: [],
+      createdAt: new Date().toISOString(),
+    };
+    const newData = { ...data };
+    newData.hazvasarlasProjects = [
+      ...(newData.hazvasarlasProjects || []),
+      newProject,
+    ];
+    setData(newData);
+    await saveUserData(newData);
+    setSelectedHazvasarlasProject(newProject);
+    return newProject;
+  };
+
+  const deleteHazvasarlasProject = async (projectId) => {
+    const newData = { ...data };
+    newData.hazvasarlasProjects = (newData.hazvasarlasProjects || []).filter(
+      (p) => p.id !== projectId
+    );
+    setData(newData);
+    await saveUserData(newData);
+    if (selectedHazvasarlasProject?.id === projectId) {
+      setSelectedHazvasarlasProject(null);
+    }
+  };
+
+  const renderHazvasarlas = () => {
+    const projects = data.hazvasarlasProjects || [];
+
+    // Ha nincs kiválasztott projekt: projektek listája / létrehozás
+    if (!selectedHazvasarlasProject) {
+      return (
+        <div className="space-y-6 p-4 md:p-6">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div>
+              <h2 className="text-2xl font-bold text-gray-800 flex items-center gap-2">
+                <Home size={28} className="text-indigo-600" />
+                Házvásárlás / Építkezés
+              </h2>
+              <p className="text-sm text-gray-600 mt-1">
+                Tervezés a folyamat legelejétől a berendezésig.
+              </p>
+            </div>
+            <button
+              onClick={() => {
+                setEditingItem(null);
+                setFormData({
+                  name: "",
+                  type: "used",
+                  plannedBudget: "",
+                  targetMoveInDate: "",
+                  startDate: new Date().toISOString().split("T")[0],
+                });
+                setShowHazvasarlasProjectModal(true);
+              }}
+              className="flex items-center gap-2 bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700"
+            >
+              <Plus size={20} />
+              Új projekt
+            </button>
+          </div>
+
+          {projects.length === 0 ? (
+            <div className="bg-white rounded-lg border-2 border-dashed border-gray-300 p-8 text-center">
+              <Home size={48} className="mx-auto text-gray-400 mb-3" />
+              <h3 className="font-semibold text-gray-800 mb-2">
+                Még nincs házvásárlási projekt
+              </h3>
+              <p className="text-sm text-gray-600 mb-4">
+                Hozz létre egy projektet, válaszd ki, hogy használt ingatlant
+                vennél, új lakást vagy építkezni szeretnél, és vezetlek végig a
+                folyamaton: pénzügyek, opciók, határidők, költségek, berendezés.
+              </p>
+              <button
+                onClick={() => {
+                  setEditingItem(null);
+                  setFormData({
+                    name: "",
+                    type: "used",
+                    plannedBudget: "",
+                    targetMoveInDate: "",
+                    startDate: new Date().toISOString().split("T")[0],
+                  });
+                  setShowHazvasarlasProjectModal(true);
+                }}
+                className="bg-indigo-600 text-white px-6 py-3 rounded-lg hover:bg-indigo-700"
+              >
+                Első projekt létrehozása
+              </button>
+            </div>
+          ) : (
+            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+              {projects.map((p) => {
+                const typeMeta = HAZ_PROJECT_TYPES[p.type] || HAZ_PROJECT_TYPES.used;
+                const completedTasks = (p.timeline || []).filter(
+                  (t) => t.completed
+                ).length;
+                const totalTasks = (p.timeline || []).length;
+                const progress = totalTasks
+                  ? Math.round((completedTasks / totalTasks) * 100)
+                  : 0;
+                const totalPlanned = (p.costs || []).reduce(
+                  (s, c) => s + (parseFloat(c.plannedAmount) || 0),
+                  0
+                );
+                const totalActual = (p.costs || []).reduce(
+                  (s, c) => s + (parseFloat(c.actualAmount) || 0),
+                  0
+                );
+                return (
+                  <div
+                    key={p.id}
+                    onClick={() => {
+                      setSelectedHazvasarlasProject(p);
+                      setHazvasarlasTab("attekintes");
+                    }}
+                    className="bg-white rounded-lg shadow-sm border border-gray-200 p-4 cursor-pointer hover:shadow-md hover:border-indigo-300 transition"
+                  >
+                    <div className="flex items-start justify-between mb-3">
+                      <div className="flex items-center gap-2">
+                        <span className="text-2xl">{typeMeta.icon}</span>
+                        <div>
+                          <h3 className="font-semibold text-gray-800">
+                            {p.name}
+                          </h3>
+                          <p className="text-xs text-gray-500">
+                            {typeMeta.label}
+                          </p>
+                        </div>
+                      </div>
+                      <span className="text-xs bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">
+                        {HAZ_PROJECT_STATUSES[p.status] || p.status}
+                      </span>
+                    </div>
+                    <div className="mb-2">
+                      <div className="flex justify-between text-xs text-gray-600 mb-1">
+                        <span>Folyamat</span>
+                        <span>
+                          {completedTasks}/{totalTasks} ({progress}%)
+                        </span>
+                      </div>
+                      <div className="w-full bg-gray-200 rounded-full h-2">
+                        <div
+                          className="bg-indigo-500 h-2 rounded-full"
+                          style={{ width: `${progress}%` }}
+                        />
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2 text-xs text-gray-600 mt-3">
+                      <div>
+                        <div>Tervezett</div>
+                        <div className="font-semibold text-gray-800">
+                          {p.plannedBudget?.toLocaleString() || 0} Ft
+                        </div>
+                      </div>
+                      <div>
+                        <div>Költött</div>
+                        <div className="font-semibold text-gray-800">
+                          {totalActual.toLocaleString()} Ft
+                        </div>
+                      </div>
+                    </div>
+                    {p.targetMoveInDate && (
+                      <div className="text-xs text-gray-500 mt-2">
+                        Cél beköltözés:{" "}
+                        {new Date(p.targetMoveInDate).toLocaleDateString(
+                          "hu-HU"
+                        )}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    // Projekt nézet kiválasztott projekttel
+    const project = selectedHazvasarlasProject;
+    const typeMeta = HAZ_PROJECT_TYPES[project.type] || HAZ_PROJECT_TYPES.used;
+    const tabs = [
+      { id: "attekintes", name: "Áttekintés", icon: BarChart3 },
+      { id: "opciok", name: "Opciók", icon: Search },
+      { id: "idovonal", name: "Idővonal", icon: Calendar },
+      { id: "koltsegvetes", name: "Költségvetés", icon: DollarSign },
+      { id: "szobak", name: "Szobák & Berendezés", icon: Package },
+      { id: "kapcsolatok", name: "Kapcsolatok", icon: Users },
+      { id: "dokumentumok", name: "Dokumentumok", icon: Upload },
+    ];
+
+    return (
+      <div className="space-y-4 p-4 md:p-6">
+        {/* Fejléc */}
+        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="flex items-center gap-3">
+              <button
+                onClick={() => setSelectedHazvasarlasProject(null)}
+                className="p-2 text-gray-600 hover:bg-gray-100 rounded"
+              >
+                <ArrowLeft size={20} />
+              </button>
+              <span className="text-3xl">{typeMeta.icon}</span>
+              <div>
+                <h2 className="text-xl font-bold text-gray-800">
+                  {project.name}
+                </h2>
+                <p className="text-sm text-gray-600">
+                  {typeMeta.label} •{" "}
+                  {HAZ_PROJECT_STATUSES[project.status] || project.status}
+                </p>
+              </div>
+            </div>
+            <div className="flex gap-2">
+              <select
+                value={project.status}
+                onChange={(e) =>
+                  updateHazvasarlasProject(project.id, (p) => ({
+                    ...p,
+                    status: e.target.value,
+                  }))
+                }
+                className="px-3 py-2 border border-gray-300 rounded-lg text-sm"
+              >
+                {Object.entries(HAZ_PROJECT_STATUSES).map(([k, v]) => (
+                  <option key={k} value={k}>
+                    {v}
+                  </option>
+                ))}
+              </select>
+              <button
+                onClick={() => {
+                  setEditingItem(project);
+                  setFormData({ ...project });
+                  setShowHazvasarlasProjectModal(true);
+                }}
+                className="p-2 text-blue-600 hover:bg-blue-50 rounded"
+              >
+                <Edit2 size={18} />
+              </button>
+              <button
+                onClick={() => {
+                  if (
+                    window.confirm(
+                      `Biztosan törlöd a "${project.name}" projektet? Ez visszavonhatatlan.`
+                    )
+                  ) {
+                    deleteHazvasarlasProject(project.id);
+                  }
+                }}
+                className="p-2 text-red-600 hover:bg-red-50 rounded"
+              >
+                <Trash2 size={18} />
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {/* Tab fülek */}
+        <div className="bg-white rounded-lg shadow-sm border border-gray-200">
+          <div className="flex overflow-x-auto border-b border-gray-200">
+            {tabs.map((t) => {
+              const Icon = t.icon;
+              const active = hazvasarlasTab === t.id;
+              return (
+                <button
+                  key={t.id}
+                  onClick={() => setHazvasarlasTab(t.id)}
+                  className={`flex items-center gap-2 px-4 py-3 text-sm font-medium whitespace-nowrap border-b-2 transition ${
+                    active
+                      ? "border-indigo-600 text-indigo-600"
+                      : "border-transparent text-gray-600 hover:text-gray-800"
+                  }`}
+                >
+                  <Icon size={16} />
+                  {t.name}
+                </button>
+              );
+            })}
+          </div>
+          <div className="p-4">
+            {hazvasarlasTab === "attekintes" &&
+              renderHazvasarlasOverview(project)}
+            {hazvasarlasTab === "opciok" &&
+              renderHazvasarlasOptions(project)}
+            {hazvasarlasTab === "idovonal" &&
+              renderHazvasarlasTimeline(project)}
+            {hazvasarlasTab === "koltsegvetes" &&
+              renderHazvasarlasBudget(project)}
+            {hazvasarlasTab === "szobak" && renderHazvasarlasRooms(project)}
+            {hazvasarlasTab === "kapcsolatok" &&
+              renderHazvasarlasContacts(project)}
+            {hazvasarlasTab === "dokumentumok" &&
+              renderHazvasarlasDocuments(project)}
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  const renderHazvasarlasOverview = (project) => {
+    const completedTasks = (project.timeline || []).filter(
+      (t) => t.completed
+    ).length;
+    const totalTasks = (project.timeline || []).length;
+    const progress = totalTasks
+      ? Math.round((completedTasks / totalTasks) * 100)
+      : 0;
+    const totalPlanned = (project.costs || []).reduce(
+      (s, c) => s + (parseFloat(c.plannedAmount) || 0),
+      0
+    );
+    const totalActual = (project.costs || []).reduce(
+      (s, c) => s + (parseFloat(c.actualAmount) || 0),
+      0
+    );
+    const budgetUsed = project.plannedBudget
+      ? Math.round((totalActual / project.plannedBudget) * 100)
+      : 0;
+    const upcomingTasks = (project.timeline || [])
+      .filter((t) => !t.completed && t.dueDate)
+      .sort((a, b) => new Date(a.dueDate) - new Date(b.dueDate))
+      .slice(0, 5);
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const targetDate = project.targetMoveInDate
+      ? new Date(project.targetMoveInDate)
+      : null;
+    const daysToTarget = targetDate
+      ? Math.ceil((targetDate - today) / (1000 * 60 * 60 * 24))
+      : null;
+    const selectedOpt = (project.options || []).find(
+      (o) => o.id === project.selectedOptionId
+    );
+
+    return (
+      <div className="space-y-4">
+        {project.description && (
+          <p className="text-gray-700">{project.description}</p>
+        )}
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          <div className="bg-indigo-50 border border-indigo-200 rounded-lg p-3">
+            <div className="text-xs text-indigo-600">Folyamat</div>
+            <div className="text-2xl font-bold text-indigo-800">
+              {progress}%
+            </div>
+            <div className="text-xs text-gray-600 mt-1">
+              {completedTasks}/{totalTasks} feladat
+            </div>
+          </div>
+          <div className="bg-green-50 border border-green-200 rounded-lg p-3">
+            <div className="text-xs text-green-600">Tervezett költség</div>
+            <div className="text-lg font-bold text-green-800">
+              {totalPlanned.toLocaleString()} Ft
+            </div>
+            <div className="text-xs text-gray-600 mt-1">
+              keret: {(project.plannedBudget || 0).toLocaleString()} Ft
+            </div>
+          </div>
+          <div className="bg-orange-50 border border-orange-200 rounded-lg p-3">
+            <div className="text-xs text-orange-600">Tényleges költés</div>
+            <div className="text-lg font-bold text-orange-800">
+              {totalActual.toLocaleString()} Ft
+            </div>
+            <div className="text-xs text-gray-600 mt-1">
+              {budgetUsed}% a keretből
+            </div>
+          </div>
+          <div className="bg-purple-50 border border-purple-200 rounded-lg p-3">
+            <div className="text-xs text-purple-600">Beköltözés</div>
+            <div className="text-lg font-bold text-purple-800">
+              {targetDate
+                ? targetDate.toLocaleDateString("hu-HU")
+                : "Nincs megadva"}
+            </div>
+            {daysToTarget !== null && (
+              <div className="text-xs text-gray-600 mt-1">
+                {daysToTarget > 0
+                  ? `${daysToTarget} nap múlva`
+                  : daysToTarget === 0
+                  ? "Ma"
+                  : `${Math.abs(daysToTarget)} napja elmúlt`}
+              </div>
+            )}
+          </div>
+        </div>
+
+        {selectedOpt && (
+          <div className="bg-white border border-indigo-200 rounded-lg p-4">
+            <h3 className="font-semibold text-gray-800 mb-2 flex items-center gap-2">
+              <CheckCircle size={18} className="text-indigo-600" />
+              Kiválasztott ingatlan
+            </h3>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
+              <div>
+                <div className="text-gray-600">Cím</div>
+                <div className="font-medium">{selectedOpt.address || "—"}</div>
+              </div>
+              <div>
+                <div className="text-gray-600">Ár</div>
+                <div className="font-medium">
+                  {(parseFloat(selectedOpt.price) || 0).toLocaleString()} Ft
+                </div>
+              </div>
+              <div>
+                <div className="text-gray-600">Alapterület</div>
+                <div className="font-medium">
+                  {selectedOpt.area || "—"} m²
+                </div>
+              </div>
+              <div>
+                <div className="text-gray-600">Szobaszám</div>
+                <div className="font-medium">{selectedOpt.rooms || "—"}</div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        <div className="bg-white border border-gray-200 rounded-lg p-4">
+          <h3 className="font-semibold text-gray-800 mb-3">
+            Közelgő határidők
+          </h3>
+          {upcomingTasks.length === 0 ? (
+            <p className="text-sm text-gray-500">
+              Nincs közelgő határidő. Az Idővonal fülön állíts be dátumokat.
+            </p>
+          ) : (
+            <div className="space-y-2">
+              {upcomingTasks.map((t) => {
+                const d = new Date(t.dueDate);
+                const days = Math.ceil(
+                  (d - today) / (1000 * 60 * 60 * 24)
+                );
+                return (
+                  <div
+                    key={t.id}
+                    className="flex justify-between items-center p-2 bg-gray-50 rounded"
+                  >
+                    <span className="text-sm text-gray-800">{t.name}</span>
+                    <span
+                      className={`text-sm font-medium ${
+                        days < 0
+                          ? "text-red-600"
+                          : days <= 7
+                          ? "text-orange-600"
+                          : "text-gray-600"
+                      }`}
+                    >
+                      {d.toLocaleDateString("hu-HU")}
+                      {days >= 0 ? ` (${days} nap)` : " (lejárt)"}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
+        {project.notes && (
+          <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
+            <h3 className="font-semibold text-gray-800 mb-2">Jegyzetek</h3>
+            <p className="text-sm text-gray-700 whitespace-pre-wrap">
+              {project.notes}
+            </p>
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  const renderHazvasarlasOptions = (project) => {
+    const options = project.options || [];
+    const comparison = options.filter((o) =>
+      propertyComparisonIds.includes(o.id)
+    );
+
+    return (
+      <div className="space-y-4">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h3 className="font-semibold text-gray-800">
+            Megnézhető ingatlanok ({options.length})
+          </h3>
+          <div className="flex gap-2">
+            {comparison.length >= 2 && (
+              <button
+                onClick={() => setShowPropertyDetailModal({ compare: true })}
+                className="px-3 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 text-sm flex items-center gap-1"
+              >
+                <BarChart3 size={16} />
+                Összehasonlítás ({comparison.length})
+              </button>
+            )}
+            <button
+              onClick={() => {
+                setEditingPropertyOption(null);
+                setFormData({
+                  address: "",
+                  price: "",
+                  area: "",
+                  rooms: "",
+                  condition: "",
+                  yearBuilt: "",
+                  pros: [],
+                  cons: [],
+                  scores: {
+                    location: 3,
+                    condition: 3,
+                    value: 3,
+                    size: 3,
+                  },
+                  photos: [],
+                  floorPlans: [],
+                  links: [],
+                  status: "considering",
+                });
+                setShowPropertyOptionModal(true);
+              }}
+              className="px-3 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 text-sm flex items-center gap-1"
+            >
+              <Plus size={16} />
+              Új opció
+            </button>
+          </div>
+        </div>
+
+        {options.length === 0 ? (
+          <div className="text-center py-8 text-gray-500 border-2 border-dashed border-gray-300 rounded-lg">
+            <Search size={32} className="mx-auto mb-2 text-gray-400" />
+            <p>Még nincs hozzáadott ingatlan opció.</p>
+            <p className="text-xs mt-1">
+              Add hozzá az ingatlanokat, hogy össze tudd hasonlítani őket.
+            </p>
+          </div>
+        ) : (
+          <div className="grid gap-4 md:grid-cols-2">
+            {options.map((opt) => {
+              const isSelected = project.selectedOptionId === opt.id;
+              const inComparison = propertyComparisonIds.includes(opt.id);
+              const scores = opt.scores || {};
+              const avgScore =
+                Object.values(scores).reduce((s, v) => s + (v || 0), 0) /
+                Math.max(1, Object.values(scores).length);
+              const pricePerM2 =
+                opt.area && opt.price
+                  ? Math.round(
+                      parseFloat(opt.price) / parseFloat(opt.area)
+                    )
+                  : null;
+              return (
+                <div
+                  key={opt.id}
+                  className={`bg-white rounded-lg shadow-sm border-2 p-4 ${
+                    isSelected
+                      ? "border-indigo-500"
+                      : "border-gray-200"
+                  } ${opt.status === "rejected" ? "opacity-60" : ""}`}
+                >
+                  <div className="flex items-start justify-between mb-2">
+                    <div className="flex-1 min-w-0">
+                      <h4 className="font-semibold text-gray-800 truncate">
+                        {opt.address || "Cím nélkül"}
+                      </h4>
+                      <p className="text-xs text-gray-500">
+                        {opt.condition || "—"}
+                        {opt.yearBuilt && ` • ${opt.yearBuilt}`}
+                      </p>
+                    </div>
+                    {isSelected && (
+                      <span className="text-xs bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">
+                        Kiválasztott
+                      </span>
+                    )}
+                  </div>
+                  {opt.photos && opt.photos.length > 0 && (
+                    <div className="flex gap-1 mb-2 overflow-x-auto">
+                      {opt.photos.slice(0, 4).map((p, i) => (
+                        <img
+                          key={i}
+                          src={p}
+                          alt=""
+                          className="h-20 w-20 object-cover rounded"
+                        />
+                      ))}
+                    </div>
+                  )}
+                  <div className="grid grid-cols-2 gap-2 text-sm mb-2">
+                    <div>
+                      <div className="text-xs text-gray-500">Ár</div>
+                      <div className="font-semibold">
+                        {(parseFloat(opt.price) || 0).toLocaleString()} Ft
+                      </div>
+                    </div>
+                    <div>
+                      <div className="text-xs text-gray-500">Alapterület</div>
+                      <div className="font-semibold">{opt.area || "—"} m²</div>
+                    </div>
+                    <div>
+                      <div className="text-xs text-gray-500">Szobaszám</div>
+                      <div className="font-semibold">{opt.rooms || "—"}</div>
+                    </div>
+                    <div>
+                      <div className="text-xs text-gray-500">Ár / m²</div>
+                      <div className="font-semibold">
+                        {pricePerM2
+                          ? `${pricePerM2.toLocaleString()} Ft`
+                          : "—"}
+                      </div>
+                    </div>
+                  </div>
+                  {Object.keys(scores).length > 0 && (
+                    <div className="text-xs text-gray-600 mb-2">
+                      Átlag pontszám: <b>{avgScore.toFixed(1)}/5</b>
+                    </div>
+                  )}
+                  {opt.floorPlans && opt.floorPlans.length > 0 && (
+                    <div className="text-xs text-blue-600 mb-2">
+                      📐 {opt.floorPlans.length} alaprajz
+                    </div>
+                  )}
+                  <div className="flex flex-wrap gap-2 mt-3">
+                    <button
+                      onClick={() => {
+                        setEditingPropertyOption(opt);
+                        setFormData({ ...opt });
+                        setShowPropertyOptionModal(true);
+                      }}
+                      className="text-xs px-2 py-1 bg-blue-100 text-blue-700 rounded hover:bg-blue-200"
+                    >
+                      Szerkesztés
+                    </button>
+                    <button
+                      onClick={() => {
+                        if (inComparison) {
+                          setPropertyComparisonIds(
+                            propertyComparisonIds.filter((id) => id !== opt.id)
+                          );
+                        } else {
+                          setPropertyComparisonIds([
+                            ...propertyComparisonIds,
+                            opt.id,
+                          ]);
+                        }
+                      }}
+                      className={`text-xs px-2 py-1 rounded ${
+                        inComparison
+                          ? "bg-purple-600 text-white"
+                          : "bg-gray-100 text-gray-700 hover:bg-gray-200"
+                      }`}
+                    >
+                      {inComparison
+                        ? "✓ Összehasonlításhoz"
+                        : "+ Összehasonlítás"}
+                    </button>
+                    {!isSelected && (
+                      <button
+                        onClick={() =>
+                          updateHazvasarlasProject(project.id, (p) => ({
+                            ...p,
+                            selectedOptionId: opt.id,
+                          }))
+                        }
+                        className="text-xs px-2 py-1 bg-green-100 text-green-700 rounded hover:bg-green-200"
+                      >
+                        Kiválasztás
+                      </button>
+                    )}
+                    <button
+                      onClick={() =>
+                        updateHazvasarlasProject(project.id, (p) => ({
+                          ...p,
+                          options: (p.options || []).filter(
+                            (o) => o.id !== opt.id
+                          ),
+                          selectedOptionId:
+                            p.selectedOptionId === opt.id
+                              ? null
+                              : p.selectedOptionId,
+                        }))
+                      }
+                      className="text-xs px-2 py-1 bg-red-100 text-red-700 rounded hover:bg-red-200 ml-auto"
+                    >
+                      <Trash2 size={12} />
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        {/* Összehasonlító táblázat */}
+        {showPropertyDetailModal?.compare && comparison.length >= 2 && (
+          <div
+            className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4"
+            onClick={() => setShowPropertyDetailModal(null)}
+          >
+            <div
+              className="bg-white rounded-lg shadow-xl max-w-5xl w-full max-h-[90vh] overflow-auto p-6"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex justify-between items-center mb-4">
+                <h3 className="text-xl font-bold text-gray-800">
+                  Ingatlan opciók összehasonlítása
+                </h3>
+                <button
+                  onClick={() => setShowPropertyDetailModal(null)}
+                  className="text-gray-500 hover:text-gray-700"
+                >
+                  <X size={24} />
+                </button>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b">
+                      <th className="text-left p-2">Szempont</th>
+                      {comparison.map((opt) => (
+                        <th key={opt.id} className="text-left p-2">
+                          {opt.address || "—"}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {[
+                      ["Ár (Ft)", (o) => (parseFloat(o.price) || 0).toLocaleString()],
+                      ["Alapterület (m²)", (o) => o.area || "—"],
+                      ["Szobaszám", (o) => o.rooms || "—"],
+                      [
+                        "Ár / m²",
+                        (o) =>
+                          o.area && o.price
+                            ? `${Math.round(
+                                parseFloat(o.price) / parseFloat(o.area)
+                              ).toLocaleString()} Ft`
+                            : "—",
+                      ],
+                      ["Állapot", (o) => o.condition || "—"],
+                      ["Építés éve", (o) => o.yearBuilt || "—"],
+                      ["Lokáció pont", (o) => o.scores?.location ?? "—"],
+                      ["Állapot pont", (o) => o.scores?.condition ?? "—"],
+                      ["Ár/érték pont", (o) => o.scores?.value ?? "—"],
+                      ["Méret pont", (o) => o.scores?.size ?? "—"],
+                    ].map(([label, fn]) => (
+                      <tr key={label} className="border-b">
+                        <td className="p-2 font-medium text-gray-700">
+                          {label}
+                        </td>
+                        {comparison.map((o) => (
+                          <td key={o.id} className="p-2">
+                            {fn(o)}
+                          </td>
+                        ))}
+                      </tr>
+                    ))}
+                    <tr>
+                      <td className="p-2 font-medium text-gray-700 align-top">
+                        Előnyök
+                      </td>
+                      {comparison.map((o) => (
+                        <td key={o.id} className="p-2 text-xs">
+                          {(o.pros || []).join(", ") || "—"}
+                        </td>
+                      ))}
+                    </tr>
+                    <tr>
+                      <td className="p-2 font-medium text-gray-700 align-top">
+                        Hátrányok
+                      </td>
+                      {comparison.map((o) => (
+                        <td key={o.id} className="p-2 text-xs">
+                          {(o.cons || []).join(", ") || "—"}
+                        </td>
+                      ))}
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  const renderHazvasarlasTimeline = (project) => {
+    const timeline = project.timeline || [];
+    const phaseGroups = {};
+    timeline.forEach((t) => {
+      const ph = t.phase || "other";
+      if (!phaseGroups[ph]) phaseGroups[ph] = [];
+      phaseGroups[ph].push(t);
+    });
+    const phaseLabels = {
+      preparation: "Előkészítés",
+      search: "Keresés",
+      financing: "Finanszírozás",
+      contract: "Szerződéskötés",
+      closing: "Lebonyolítás",
+      moving: "Költözés",
+      renovation: "Felújítás",
+      furnishing: "Berendezés",
+      other: "Egyéb",
+    };
+
+    return (
+      <div className="space-y-4">
+        <div className="flex justify-between items-center">
+          <h3 className="font-semibold text-gray-800">Idővonal és határidők</h3>
+          <button
+            onClick={() => {
+              setEditingHazTimeline(null);
+              setFormData({
+                phase: "preparation",
+                name: "",
+                dueDate: "",
+                notes: "",
+              });
+              setShowHazTimelineModal(true);
+            }}
+            className="px-3 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 text-sm flex items-center gap-1"
+          >
+            <Plus size={16} />
+            Új feladat
+          </button>
+        </div>
+        {Object.keys(phaseGroups).length === 0 ? (
+          <p className="text-sm text-gray-500 italic">Nincs feladat.</p>
+        ) : (
+          Object.entries(phaseGroups).map(([ph, items]) => (
+            <div key={ph} className="bg-gray-50 rounded-lg p-3">
+              <h4 className="font-semibold text-gray-700 mb-2 text-sm uppercase tracking-wide">
+                {phaseLabels[ph] || ph}
+              </h4>
+              <div className="space-y-2">
+                {items.map((t) => (
+                  <div
+                    key={t.id}
+                    className={`bg-white rounded-lg p-3 border flex items-start gap-2 ${
+                      t.completed
+                        ? "border-green-300 opacity-70"
+                        : "border-gray-200"
+                    }`}
+                  >
+                    <button
+                      onClick={() =>
+                        updateHazvasarlasProject(project.id, (p) => ({
+                          ...p,
+                          timeline: (p.timeline || []).map((x) =>
+                            x.id === t.id
+                              ? {
+                                  ...x,
+                                  completed: !x.completed,
+                                  completedDate: !x.completed
+                                    ? new Date().toISOString()
+                                    : null,
+                                }
+                              : x
+                          ),
+                        }))
+                      }
+                      className={`mt-0.5 flex-shrink-0 ${
+                        t.completed ? "text-green-600" : "text-gray-400"
+                      }`}
+                    >
+                      {t.completed ? (
+                        <CheckCircle size={20} />
+                      ) : (
+                        <Circle size={20} />
+                      )}
+                    </button>
+                    <div className="flex-1 min-w-0">
+                      <div
+                        className={`font-medium ${
+                          t.completed
+                            ? "line-through text-gray-500"
+                            : "text-gray-800"
+                        }`}
+                      >
+                        {t.name}
+                      </div>
+                      {t.dueDate && (
+                        <div className="text-xs text-gray-500">
+                          Határidő:{" "}
+                          {new Date(t.dueDate).toLocaleDateString("hu-HU")}
+                        </div>
+                      )}
+                      {t.notes && (
+                        <div className="text-xs text-gray-600 italic mt-1">
+                          {t.notes}
+                        </div>
+                      )}
+                    </div>
+                    <div className="flex gap-1">
+                      <button
+                        onClick={() => {
+                          setEditingHazTimeline(t);
+                          setFormData({ ...t });
+                          setShowHazTimelineModal(true);
+                        }}
+                        className="text-blue-600 hover:bg-blue-50 p-1 rounded"
+                      >
+                        <Edit2 size={14} />
+                      </button>
+                      <button
+                        onClick={() =>
+                          updateHazvasarlasProject(project.id, (p) => ({
+                            ...p,
+                            timeline: (p.timeline || []).filter(
+                              (x) => x.id !== t.id
+                            ),
+                          }))
+                        }
+                        className="text-red-600 hover:bg-red-50 p-1 rounded"
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))
+        )}
+      </div>
+    );
+  };
+
+  const renderHazvasarlasBudget = (project) => {
+    const costs = project.costs || [];
+    const totalPlanned = costs.reduce(
+      (s, c) => s + (parseFloat(c.plannedAmount) || 0),
+      0
+    );
+    const totalActual = costs.reduce(
+      (s, c) => s + (parseFloat(c.actualAmount) || 0),
+      0
+    );
+    const totalPaid = costs
+      .filter((c) => c.paid)
+      .reduce((s, c) => s + (parseFloat(c.actualAmount) || 0), 0);
+    return (
+      <div className="space-y-4">
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
+            <div className="text-xs text-blue-600">Keret</div>
+            <div className="text-lg font-bold text-blue-800">
+              {(project.plannedBudget || 0).toLocaleString()} Ft
+            </div>
+          </div>
+          <div className="bg-green-50 border border-green-200 rounded-lg p-3">
+            <div className="text-xs text-green-600">Tervezett</div>
+            <div className="text-lg font-bold text-green-800">
+              {totalPlanned.toLocaleString()} Ft
+            </div>
+          </div>
+          <div className="bg-orange-50 border border-orange-200 rounded-lg p-3">
+            <div className="text-xs text-orange-600">Tényleges</div>
+            <div className="text-lg font-bold text-orange-800">
+              {totalActual.toLocaleString()} Ft
+            </div>
+          </div>
+          <div className="bg-purple-50 border border-purple-200 rounded-lg p-3">
+            <div className="text-xs text-purple-600">Kifizetve</div>
+            <div className="text-lg font-bold text-purple-800">
+              {totalPaid.toLocaleString()} Ft
+            </div>
+          </div>
+        </div>
+
+        <div className="flex justify-between items-center">
+          <h3 className="font-semibold text-gray-800">Költségtételek</h3>
+          <button
+            onClick={() => {
+              setEditingHazCost(null);
+              setFormData({
+                category: "",
+                description: "",
+                plannedAmount: "",
+                actualAmount: "",
+                paid: false,
+                vendor: "",
+              });
+              setShowHazCostModal(true);
+            }}
+            className="px-3 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 text-sm flex items-center gap-1"
+          >
+            <Plus size={16} />
+            Új tétel
+          </button>
+        </div>
+
+        <div className="overflow-x-auto bg-white rounded-lg border border-gray-200">
+          <table className="w-full text-sm">
+            <thead className="bg-gray-50">
+              <tr>
+                <th className="text-left p-2">Kategória</th>
+                <th className="text-left p-2 hidden md:table-cell">Leírás</th>
+                <th className="text-right p-2">Tervezett</th>
+                <th className="text-right p-2">Tényleges</th>
+                <th className="text-center p-2">Státusz</th>
+                <th className="p-2"></th>
+              </tr>
+            </thead>
+            <tbody>
+              {costs.length === 0 ? (
+                <tr>
+                  <td colSpan="6" className="text-center text-gray-500 p-4">
+                    Még nincs költségtétel.
+                  </td>
+                </tr>
+              ) : (
+                costs.map((c) => {
+                  const over =
+                    parseFloat(c.actualAmount) > parseFloat(c.plannedAmount);
+                  return (
+                    <tr key={c.id} className="border-t hover:bg-gray-50">
+                      <td className="p-2 font-medium">{c.category}</td>
+                      <td className="p-2 text-gray-600 hidden md:table-cell">
+                        {c.description || "—"}
+                      </td>
+                      <td className="p-2 text-right">
+                        {(parseFloat(c.plannedAmount) || 0).toLocaleString()} Ft
+                      </td>
+                      <td
+                        className={`p-2 text-right ${
+                          over ? "text-red-600 font-semibold" : ""
+                        }`}
+                      >
+                        {(parseFloat(c.actualAmount) || 0).toLocaleString()} Ft
+                      </td>
+                      <td className="p-2 text-center">
+                        <button
+                          onClick={() =>
+                            updateHazvasarlasProject(project.id, (p) => ({
+                              ...p,
+                              costs: (p.costs || []).map((x) =>
+                                x.id === c.id
+                                  ? {
+                                      ...x,
+                                      paid: !x.paid,
+                                      paymentDate: !x.paid
+                                        ? new Date().toISOString()
+                                        : "",
+                                    }
+                                  : x
+                              ),
+                            }))
+                          }
+                          className={`px-2 py-1 rounded text-xs ${
+                            c.paid
+                              ? "bg-green-100 text-green-700"
+                              : "bg-gray-100 text-gray-600"
+                          }`}
+                        >
+                          {c.paid ? "Kifizetve" : "Nem fizetve"}
+                        </button>
+                      </td>
+                      <td className="p-2">
+                        <div className="flex gap-1">
+                          <button
+                            onClick={() => {
+                              setEditingHazCost(c);
+                              setFormData({ ...c });
+                              setShowHazCostModal(true);
+                            }}
+                            className="text-blue-600 hover:bg-blue-50 p-1 rounded"
+                          >
+                            <Edit2 size={14} />
+                          </button>
+                          <button
+                            onClick={() =>
+                              updateHazvasarlasProject(project.id, (p) => ({
+                                ...p,
+                                costs: (p.costs || []).filter(
+                                  (x) => x.id !== c.id
+                                ),
+                              }))
+                            }
+                            className="text-red-600 hover:bg-red-50 p-1 rounded"
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    );
+  };
+
+  const renderHazvasarlasRooms = (project) => {
+    const rooms = project.rooms || [];
+    const furniture = project.furniture || [];
+    return (
+      <div className="space-y-4">
+        <div className="flex justify-between items-center">
+          <h3 className="font-semibold text-gray-800">Szobák</h3>
+          <button
+            onClick={() => {
+              setEditingHazRoom(null);
+              setFormData({ name: "", area: "", notes: "" });
+              setShowHazRoomModal(true);
+            }}
+            className="px-3 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 text-sm flex items-center gap-1"
+          >
+            <Plus size={16} />
+            Új szoba
+          </button>
+        </div>
+
+        {rooms.length === 0 ? (
+          <div className="text-center py-6 text-gray-500 border-2 border-dashed border-gray-300 rounded-lg">
+            Még nincs szoba. Hozz létre szobákat, hogy a berendezést és
+            felújítást szobánként követhesd.
+          </div>
+        ) : (
+          <div className="grid gap-3 md:grid-cols-2">
+            {rooms.map((r) => {
+              const roomItems = furniture.filter((f) => f.roomId === r.id);
+              const totalPlanned = roomItems.reduce(
+                (s, f) => s + (parseFloat(f.plannedPrice) || 0),
+                0
+              );
+              const totalActual = roomItems.reduce(
+                (s, f) => s + (parseFloat(f.actualPrice) || 0),
+                0
+              );
+              const completed = roomItems.filter(
+                (f) => f.status === "beépítve"
+              ).length;
+              return (
+                <div
+                  key={r.id}
+                  className="bg-white rounded-lg border border-gray-200 p-4"
+                >
+                  <div className="flex items-start justify-between mb-2">
+                    <div>
+                      <h4 className="font-semibold text-gray-800">{r.name}</h4>
+                      {r.area && (
+                        <p className="text-xs text-gray-500">{r.area} m²</p>
+                      )}
+                    </div>
+                    <div className="flex gap-1">
+                      <button
+                        onClick={() => {
+                          setEditingHazRoom(r);
+                          setFormData({ ...r });
+                          setShowHazRoomModal(true);
+                        }}
+                        className="text-blue-600 hover:bg-blue-50 p-1 rounded"
+                      >
+                        <Edit2 size={14} />
+                      </button>
+                      <button
+                        onClick={() =>
+                          updateHazvasarlasProject(project.id, (p) => ({
+                            ...p,
+                            rooms: (p.rooms || []).filter((x) => x.id !== r.id),
+                            furniture: (p.furniture || []).filter(
+                              (f) => f.roomId !== r.id
+                            ),
+                          }))
+                        }
+                        className="text-red-600 hover:bg-red-50 p-1 rounded"
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    </div>
+                  </div>
+                  <div className="text-xs text-gray-600 mb-2">
+                    {roomItems.length} tétel ({completed} kész) •{" "}
+                    {totalActual.toLocaleString()} /{" "}
+                    {totalPlanned.toLocaleString()} Ft
+                  </div>
+                  <div className="space-y-1 max-h-40 overflow-y-auto">
+                    {roomItems.map((f) => (
+                      <div
+                        key={f.id}
+                        className="flex justify-between items-center text-sm bg-gray-50 rounded p-2"
+                      >
+                        <div className="flex-1 min-w-0">
+                          <div className="font-medium truncate">{f.name}</div>
+                          <div className="text-xs text-gray-500">
+                            {f.status}
+                          </div>
+                        </div>
+                        <div className="text-right text-xs">
+                          <div>
+                            {(parseFloat(f.actualPrice) || 0).toLocaleString()} Ft
+                          </div>
+                          <div className="flex gap-1 mt-1">
+                            <button
+                              onClick={() => {
+                                setEditingHazFurniture(f);
+                                setFormData({ ...f });
+                                setShowHazFurnitureModal(true);
+                              }}
+                              className="text-blue-600 hover:bg-blue-50 p-0.5 rounded"
+                            >
+                              <Edit2 size={12} />
+                            </button>
+                            <button
+                              onClick={() =>
+                                updateHazvasarlasProject(project.id, (p) => ({
+                                  ...p,
+                                  furniture: (p.furniture || []).filter(
+                                    (x) => x.id !== f.id
+                                  ),
+                                }))
+                              }
+                              className="text-red-600 hover:bg-red-50 p-0.5 rounded"
+                            >
+                              <Trash2 size={12} />
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                  <button
+                    onClick={() => {
+                      setEditingHazFurniture(null);
+                      setFormData({
+                        roomId: r.id,
+                        name: "",
+                        category: "",
+                        plannedPrice: "",
+                        actualPrice: "",
+                        status: "tervezett",
+                        vendor: "",
+                        link: "",
+                      });
+                      setShowHazFurnitureModal(true);
+                    }}
+                    className="mt-2 w-full text-xs px-2 py-1 bg-indigo-100 text-indigo-700 rounded hover:bg-indigo-200 flex items-center justify-center gap-1"
+                  >
+                    <Plus size={12} />
+                    Új berendezés / tétel
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  const renderHazvasarlasContacts = (project) => {
+    const contacts = project.contacts || [];
+    return (
+      <div className="space-y-4">
+        <div className="flex justify-between items-center">
+          <h3 className="font-semibold text-gray-800">Kapcsolatok</h3>
+          <button
+            onClick={() => {
+              setEditingHazContact(null);
+              setFormData({
+                name: "",
+                role: "",
+                phone: "",
+                email: "",
+                notes: "",
+              });
+              setShowHazContactModal(true);
+            }}
+            className="px-3 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 text-sm flex items-center gap-1"
+          >
+            <Plus size={16} />
+            Új kapcsolat
+          </button>
+        </div>
+        {contacts.length === 0 ? (
+          <p className="text-sm text-gray-500 italic">
+            Add hozzá az ingatlanost, ügyvédet, hitelközvetítőt, közjegyzőt,
+            kivitelezőt stb.
+          </p>
+        ) : (
+          <div className="grid gap-3 md:grid-cols-2">
+            {contacts.map((c) => (
+              <div
+                key={c.id}
+                className="bg-white border border-gray-200 rounded-lg p-3"
+              >
+                <div className="flex justify-between items-start mb-1">
+                  <div>
+                    <div className="font-semibold text-gray-800">{c.name}</div>
+                    <div className="text-xs text-gray-500">{c.role}</div>
+                  </div>
+                  <div className="flex gap-1">
+                    <button
+                      onClick={() => {
+                        setEditingHazContact(c);
+                        setFormData({ ...c });
+                        setShowHazContactModal(true);
+                      }}
+                      className="text-blue-600 hover:bg-blue-50 p-1 rounded"
+                    >
+                      <Edit2 size={14} />
+                    </button>
+                    <button
+                      onClick={() =>
+                        updateHazvasarlasProject(project.id, (p) => ({
+                          ...p,
+                          contacts: (p.contacts || []).filter(
+                            (x) => x.id !== c.id
+                          ),
+                        }))
+                      }
+                      className="text-red-600 hover:bg-red-50 p-1 rounded"
+                    >
+                      <Trash2 size={14} />
+                    </button>
+                  </div>
+                </div>
+                {c.phone && (
+                  <a
+                    href={`tel:${c.phone}`}
+                    className="text-sm text-blue-600 block"
+                  >
+                    📞 {c.phone}
+                  </a>
+                )}
+                {c.email && (
+                  <a
+                    href={`mailto:${c.email}`}
+                    className="text-sm text-blue-600 block"
+                  >
+                    ✉️ {c.email}
+                  </a>
+                )}
+                {c.notes && (
+                  <p className="text-xs text-gray-600 italic mt-2">
+                    {c.notes}
+                  </p>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  const renderHazvasarlasDocuments = (project) => {
+    const documents = project.documents || [];
+    return (
+      <div className="space-y-4">
+        <div className="flex justify-between items-center">
+          <h3 className="font-semibold text-gray-800">Dokumentumok</h3>
+          <label className="px-3 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 text-sm flex items-center gap-1 cursor-pointer">
+            <Upload size={16} />
+            Új dokumentum
+            <input
+              type="file"
+              className="hidden"
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (!file) return;
+                const reader = new FileReader();
+                reader.onload = () => {
+                  updateHazvasarlasProject(project.id, (p) => ({
+                    ...p,
+                    documents: [
+                      ...(p.documents || []),
+                      {
+                        id: Date.now(),
+                        name: file.name,
+                        type: file.type,
+                        size: file.size,
+                        fileData: reader.result,
+                        uploadedDate: new Date().toISOString(),
+                      },
+                    ],
+                  }));
+                };
+                reader.readAsDataURL(file);
+                e.target.value = "";
+              }}
+            />
+          </label>
+        </div>
+        {documents.length === 0 ? (
+          <p className="text-sm text-gray-500 italic">
+            Tölts fel előszerződéseket, hivatalos iratokat, tervrajzokat,
+            számlákat, biztosítási kötvényeket.
+          </p>
+        ) : (
+          <div className="grid gap-2 md:grid-cols-2">
+            {documents.map((d) => (
+              <div
+                key={d.id}
+                className="bg-white border border-gray-200 rounded-lg p-3 flex items-center gap-2"
+              >
+                <Upload size={20} className="text-gray-400" />
+                <div className="flex-1 min-w-0">
+                  <a
+                    href={d.fileData}
+                    download={d.name}
+                    className="font-medium text-blue-600 hover:underline truncate block"
+                  >
+                    {d.name}
+                  </a>
+                  <div className="text-xs text-gray-500">
+                    {new Date(d.uploadedDate).toLocaleDateString("hu-HU")}
+                  </div>
+                </div>
+                <button
+                  onClick={() =>
+                    updateHazvasarlasProject(project.id, (p) => ({
+                      ...p,
+                      documents: (p.documents || []).filter(
+                        (x) => x.id !== d.id
+                      ),
+                    }))
+                  }
+                  className="text-red-600 hover:bg-red-50 p-1 rounded"
+                >
+                  <Trash2 size={14} />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
     );
   };
@@ -16624,6 +18641,7 @@ const FamilyOrganizerApp = () => {
       { id: "naptar", name: "Naptár", icon: Calendar },
       { id: "bevasarlas", name: "Bevásárlás", icon: ShoppingCart },
       { id: "penzugyek", name: "Pénzügyek", icon: DollarSign },
+      { id: "hazvasarlas", name: "Házvásárlás", icon: Home },
       { id: "rendelesek", name: "Rendelések", icon: Package },
       { id: "elofizetesek", name: "Előfizetések", icon: Repeat },
       { id: "otthon", name: "Otthon", icon: Home },
@@ -16700,6 +18718,8 @@ const FamilyOrganizerApp = () => {
         return renderReceptek();
       case "penzugyek":
         return renderPenzugyek();
+      case "hazvasarlas":
+        return renderHazvasarlas();
       case "beallitasok":
         return renderBeallitasok();
       default:
@@ -21237,6 +23257,650 @@ const FamilyOrganizerApp = () => {
           </div>
         </div>
       )}
+      {/* Budget Modal */}
+      {showBudgetModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50 overflow-y-auto">
+          <div className="bg-white rounded-lg shadow-xl max-w-2xl w-full p-6 my-8 max-h-[90vh] overflow-y-auto">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-xl font-bold text-gray-800">
+                {editingItem ? "Költségvetés szerkesztése" : "Új költségvetés"}
+              </h3>
+              <button
+                onClick={() => setShowBudgetModal(false)}
+                className="text-gray-500 hover:text-gray-700"
+              >
+                <X size={24} />
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Időszak típusa
+                  </label>
+                  <select
+                    value={formData.type || "month"}
+                    onChange={(e) =>
+                      setFormData({ ...formData, type: e.target.value })
+                    }
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500"
+                  >
+                    <option value="month">Havi</option>
+                    <option value="year">Éves</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Kezdő dátum
+                  </label>
+                  <input
+                    type="date"
+                    value={
+                      formData.startDate ||
+                      new Date().toISOString().split("T")[0]
+                    }
+                    onChange={(e) =>
+                      setFormData({ ...formData, startDate: e.target.value })
+                    }
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Teljes költségvetés (Ft) *
+                </label>
+                <input
+                  type="number"
+                  value={formData.totalBudget || ""}
+                  onChange={(e) =>
+                    setFormData({ ...formData, totalBudget: e.target.value })
+                  }
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500"
+                  placeholder="pl. 500000"
+                />
+                <p className="text-xs text-gray-500 mt-1">
+                  Az összes várható kiadás felső határa{" "}
+                  {formData.type === "year" ? "az évre" : "a hónapra"}.
+                </p>
+              </div>
+
+              <div>
+                <div className="flex justify-between items-center mb-2">
+                  <label className="block text-sm font-medium text-gray-700">
+                    Kategória limitek (opcionális)
+                  </label>
+                  <button
+                    onClick={addBudgetCategory}
+                    className="text-sm text-blue-600 hover:underline flex items-center gap-1"
+                  >
+                    <Plus size={14} /> Új kategória
+                  </button>
+                </div>
+                {(formData.categories || []).length === 0 ? (
+                  <p className="text-xs text-gray-500 italic">
+                    Add meg kategóriánkénti limiteket (pl. Élelmiszer 80 000 Ft),
+                    hogy lásd, hol szivárog a pénz.
+                  </p>
+                ) : (
+                  <div className="space-y-2">
+                    {(formData.categories || []).map((cat) => (
+                      <div
+                        key={cat.id}
+                        className="flex items-center justify-between bg-gray-50 p-2 rounded-lg"
+                      >
+                        <div>
+                          <span className="font-medium text-gray-800">
+                            {cat.name}
+                          </span>
+                          <span className="text-sm text-gray-600 ml-2">
+                            {parseFloat(cat.limit).toLocaleString()} Ft
+                          </span>
+                        </div>
+                        <button
+                          onClick={() => removeBudgetCategory(cat.id)}
+                          className="text-red-600 hover:bg-red-50 p-1 rounded"
+                        >
+                          <Trash2 size={16} />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Állandó tételek alapján ajánlás */}
+              {(data.recurringFinances || []).length > 0 && (
+                <div className="bg-blue-50 border border-blue-200 p-3 rounded-lg">
+                  <p className="text-sm text-blue-900 font-medium mb-1">
+                    Ismétlődő tételeid alapján:
+                  </p>
+                  {(() => {
+                    const monthFactor = formData.type === "year" ? 12 : 1;
+                    const freqToMonth = {
+                      monthly: 1,
+                      quarterly: 1 / 3,
+                      semiannual: 1 / 6,
+                      annual: 1 / 12,
+                      weekly: 4.33,
+                    };
+                    const monthlyExpense = (data.recurringFinances || [])
+                      .filter((r) => r.type === "expense")
+                      .reduce(
+                        (s, r) =>
+                          s +
+                          parseFloat(r.amount || 0) *
+                            (freqToMonth[r.frequency] || 1),
+                        0
+                      );
+                    const monthlyIncome = (data.recurringFinances || [])
+                      .filter((r) => r.type === "income")
+                      .reduce(
+                        (s, r) =>
+                          s +
+                          parseFloat(r.amount || 0) *
+                            (freqToMonth[r.frequency] || 1),
+                        0
+                      );
+                    return (
+                      <div className="text-sm text-blue-800 space-y-1">
+                        <div>
+                          Állandó kiadás:{" "}
+                          <b>
+                            {Math.round(
+                              monthlyExpense * monthFactor
+                            ).toLocaleString()}{" "}
+                            Ft
+                          </b>
+                        </div>
+                        <div>
+                          Állandó bevétel:{" "}
+                          <b>
+                            {Math.round(
+                              monthlyIncome * monthFactor
+                            ).toLocaleString()}{" "}
+                            Ft
+                          </b>
+                        </div>
+                        <div>
+                          Maradék állandóakra:{" "}
+                          <b>
+                            {Math.round(
+                              (monthlyIncome - monthlyExpense) * monthFactor
+                            ).toLocaleString()}{" "}
+                            Ft
+                          </b>
+                        </div>
+                      </div>
+                    );
+                  })()}
+                </div>
+              )}
+            </div>
+            <div className="mt-6 flex gap-3">
+              <button
+                onClick={() => setShowBudgetModal(false)}
+                className="flex-1 px-4 py-3 border border-gray-300 rounded-lg hover:bg-gray-50"
+              >
+                Mégse
+              </button>
+              <button
+                onClick={saveBudget}
+                className="flex-1 px-4 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700"
+              >
+                Mentés
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {/* Előtörlesztés Kalkulátor Modal */}
+      {showPrepaymentModal && selectedLoanForPrepay && (() => {
+        const loan = selectedLoanForPrepay;
+        const currentBalance = parseFloat(loan.currentBalance) || 0;
+        const monthlyPayment = parseFloat(loan.monthlyPayment) || 0;
+        const annualRate = parseFloat(loan.interestRate) || 0;
+        const monthlyRate = annualRate / 100 / 12;
+        const prepayAmount = parseFloat(prepaymentForm.amount) || 0;
+
+        // Eredeti hátralévő hónapok kiszámítása
+        const calcMonths = (balance, payment, rate) => {
+          if (balance <= 0 || payment <= 0) return 0;
+          if (rate === 0) return Math.ceil(balance / payment);
+          if (payment <= balance * rate) return Infinity;
+          return Math.ceil(
+            Math.log(payment / (payment - balance * rate)) /
+              Math.log(1 + rate)
+          );
+        };
+
+        const calcTotalInterest = (balance, payment, rate) => {
+          const months = calcMonths(balance, payment, rate);
+          if (!isFinite(months)) return Infinity;
+          return months * payment - balance;
+        };
+
+        const originalMonths = calcMonths(
+          currentBalance,
+          monthlyPayment,
+          monthlyRate
+        );
+        const originalInterest = calcTotalInterest(
+          currentBalance,
+          monthlyPayment,
+          monthlyRate
+        );
+
+        const balanceAfter = Math.max(0, currentBalance - prepayAmount);
+        let newMonths = originalMonths;
+        let newMonthly = monthlyPayment;
+        let newInterest = originalInterest;
+
+        if (prepayAmount > 0) {
+          if (prepaymentForm.mode === "shortenTerm") {
+            newMonths = calcMonths(balanceAfter, monthlyPayment, monthlyRate);
+            newMonthly = monthlyPayment;
+            newInterest = calcTotalInterest(
+              balanceAfter,
+              monthlyPayment,
+              monthlyRate
+            );
+          } else {
+            // Csökkentett törlesztő, azonos futamidő
+            newMonths = originalMonths;
+            if (originalMonths > 0 && isFinite(originalMonths)) {
+              if (monthlyRate === 0) {
+                newMonthly = balanceAfter / originalMonths;
+              } else {
+                newMonthly =
+                  (balanceAfter *
+                    monthlyRate *
+                    Math.pow(1 + monthlyRate, originalMonths)) /
+                  (Math.pow(1 + monthlyRate, originalMonths) - 1);
+              }
+            }
+            newInterest = newMonths * newMonthly - balanceAfter;
+          }
+        }
+
+        const monthsSaved = isFinite(originalMonths)
+          ? originalMonths - newMonths
+          : 0;
+        const interestSaved = isFinite(originalInterest)
+          ? originalInterest - newInterest - prepayAmount
+          : 0;
+
+        return (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50 overflow-y-auto">
+            <div className="bg-white rounded-lg shadow-xl max-w-2xl w-full p-6 my-8 max-h-[90vh] overflow-y-auto">
+              <div className="flex justify-between items-center mb-4">
+                <h3 className="text-xl font-bold text-gray-800">
+                  Előtörlesztés kalkulátor
+                </h3>
+                <button
+                  onClick={() => setShowPrepaymentModal(false)}
+                  className="text-gray-500 hover:text-gray-700"
+                >
+                  <X size={24} />
+                </button>
+              </div>
+
+              <div className="bg-gray-50 rounded-lg p-4 mb-4">
+                <p className="font-medium text-gray-800 mb-2">{loan.name}</p>
+                <div className="grid grid-cols-2 gap-3 text-sm">
+                  <div>
+                    <div className="text-gray-600">Jelenlegi tartozás</div>
+                    <div className="font-semibold">
+                      {currentBalance.toLocaleString()} Ft
+                    </div>
+                  </div>
+                  <div>
+                    <div className="text-gray-600">Havi törlesztő</div>
+                    <div className="font-semibold">
+                      {monthlyPayment.toLocaleString()} Ft
+                    </div>
+                  </div>
+                  <div>
+                    <div className="text-gray-600">Kamat</div>
+                    <div className="font-semibold">{annualRate}%</div>
+                  </div>
+                  <div>
+                    <div className="text-gray-600">Hátralévő futamidő</div>
+                    <div className="font-semibold">
+                      {isFinite(originalMonths)
+                        ? `${originalMonths} hónap`
+                        : "—"}
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Előtörlesztés összege (Ft) *
+                  </label>
+                  <input
+                    type="number"
+                    value={prepaymentForm.amount}
+                    onChange={(e) =>
+                      setPrepaymentForm({
+                        ...prepaymentForm,
+                        amount: e.target.value,
+                      })
+                    }
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-red-500"
+                    placeholder="pl. 1000000"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Előtörlesztés módja
+                  </label>
+                  <div className="grid grid-cols-2 gap-3">
+                    <button
+                      onClick={() =>
+                        setPrepaymentForm({
+                          ...prepaymentForm,
+                          mode: "shortenTerm",
+                        })
+                      }
+                      className={`p-3 rounded-lg border-2 text-sm ${
+                        prepaymentForm.mode === "shortenTerm"
+                          ? "border-red-500 bg-red-50 text-red-700 font-semibold"
+                          : "border-gray-300 text-gray-700"
+                      }`}
+                    >
+                      Futamidő csökkentése<br />
+                      <span className="text-xs font-normal">
+                        (azonos törlesztő, rövidebb idő)
+                      </span>
+                    </button>
+                    <button
+                      onClick={() =>
+                        setPrepaymentForm({
+                          ...prepaymentForm,
+                          mode: "reducePayment",
+                        })
+                      }
+                      className={`p-3 rounded-lg border-2 text-sm ${
+                        prepaymentForm.mode === "reducePayment"
+                          ? "border-red-500 bg-red-50 text-red-700 font-semibold"
+                          : "border-gray-300 text-gray-700"
+                      }`}
+                    >
+                      Törlesztő csökkentése<br />
+                      <span className="text-xs font-normal">
+                        (azonos futamidő, alacsonyabb törlesztő)
+                      </span>
+                    </button>
+                  </div>
+                </div>
+
+                {prepayAmount > 0 && (
+                  <div className="bg-green-50 border border-green-200 rounded-lg p-4 space-y-3">
+                    <h4 className="font-semibold text-gray-800">
+                      Eredmény az előtörlesztés után
+                    </h4>
+                    <div className="grid grid-cols-2 gap-3 text-sm">
+                      <div>
+                        <div className="text-gray-600">Új tartozás</div>
+                        <div className="font-bold text-lg">
+                          {balanceAfter.toLocaleString()} Ft
+                        </div>
+                      </div>
+                      <div>
+                        <div className="text-gray-600">Új havi törlesztő</div>
+                        <div className="font-bold text-lg">
+                          {Math.round(newMonthly).toLocaleString()} Ft
+                        </div>
+                      </div>
+                      <div>
+                        <div className="text-gray-600">Új futamidő</div>
+                        <div className="font-bold text-lg">
+                          {isFinite(newMonths) ? `${newMonths} hó` : "—"}
+                          {monthsSaved > 0 && (
+                            <span className="text-sm text-green-700 font-semibold ml-2">
+                              (-{monthsSaved} hó)
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                      <div>
+                        <div className="text-gray-600">Megtakarított kamat</div>
+                        <div className="font-bold text-lg text-green-700">
+                          {Math.max(
+                            0,
+                            Math.round(interestSaved)
+                          ).toLocaleString()}{" "}
+                          Ft
+                        </div>
+                      </div>
+                    </div>
+                    <p className="text-xs text-gray-600">
+                      A számítás az aktuális kamattal és törlesztővel készül,
+                      tájékoztató jellegű. Mindig egyeztess a bankoddal az
+                      előtörlesztési díjakról.
+                    </p>
+                  </div>
+                )}
+              </div>
+
+              <div className="mt-6 flex gap-3">
+                <button
+                  onClick={() => setShowPrepaymentModal(false)}
+                  className="flex-1 px-4 py-3 border border-gray-300 rounded-lg hover:bg-gray-50"
+                >
+                  Bezárás
+                </button>
+                {prepayAmount > 0 && (
+                  <button
+                    onClick={async () => {
+                      // A tartozás csökkentése
+                      const newData = { ...data };
+                      newData.finances = {
+                        ...newData.finances,
+                        loans: (newData.finances?.loans || []).map((l) =>
+                          l.id === loan.id
+                            ? {
+                                ...l,
+                                currentBalance: balanceAfter,
+                                monthlyPayment:
+                                  prepaymentForm.mode === "reducePayment"
+                                    ? Math.round(newMonthly)
+                                    : l.monthlyPayment,
+                                prepayments: [
+                                  ...(l.prepayments || []),
+                                  {
+                                    id: Date.now(),
+                                    amount: prepayAmount,
+                                    mode: prepaymentForm.mode,
+                                    date: new Date().toISOString(),
+                                  },
+                                ],
+                              }
+                            : l
+                        ),
+                      };
+                      setData(newData);
+                      await saveUserData(newData);
+                      setShowPrepaymentModal(false);
+                      setPrepaymentForm({ amount: "", mode: "shortenTerm" });
+                    }}
+                    className="flex-1 px-4 py-3 bg-red-600 text-white rounded-lg hover:bg-red-700"
+                  >
+                    Rögzítés mint kifizetett előtörlesztés
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+      {/* Rezsi értesítő (utility schedule) Modal */}
+      {showUtilityScheduleModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50 overflow-y-auto">
+          <div className="bg-white rounded-lg shadow-xl max-w-lg w-full p-6 my-8 max-h-[90vh] overflow-y-auto">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-xl font-bold text-gray-800">
+                {editingUtilitySchedule
+                  ? "Rezsi értesítő szerkesztése"
+                  : "Új rezsi értesítő"}
+              </h3>
+              <button
+                onClick={() => setShowUtilityScheduleModal(false)}
+                className="text-gray-500 hover:text-gray-700"
+              >
+                <X size={24} />
+              </button>
+            </div>
+            <div className="space-y-3">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Rezsi típusa / neve *
+                </label>
+                <input
+                  type="text"
+                  value={tempUtilitySchedule.name}
+                  onChange={(e) =>
+                    setTempUtilitySchedule({
+                      ...tempUtilitySchedule,
+                      name: e.target.value,
+                    })
+                  }
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                  placeholder="pl. Áram, Gáz, Víz, Közös költség"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Szolgáltató
+                </label>
+                <input
+                  type="text"
+                  value={tempUtilitySchedule.provider}
+                  onChange={(e) =>
+                    setTempUtilitySchedule({
+                      ...tempUtilitySchedule,
+                      provider: e.target.value,
+                    })
+                  }
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                  placeholder="pl. MVM Next"
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Számlázási nap *
+                  </label>
+                  <input
+                    type="number"
+                    min="1"
+                    max="31"
+                    value={tempUtilitySchedule.billingDay}
+                    onChange={(e) =>
+                      setTempUtilitySchedule({
+                        ...tempUtilitySchedule,
+                        billingDay: e.target.value,
+                      })
+                    }
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Gyakoriság
+                  </label>
+                  <select
+                    value={tempUtilitySchedule.frequency}
+                    onChange={(e) =>
+                      setTempUtilitySchedule({
+                        ...tempUtilitySchedule,
+                        frequency: e.target.value,
+                      })
+                    }
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                  >
+                    <option value="havi">Havi</option>
+                    <option value="2-havi">2-havi</option>
+                    <option value="negyedéves">Negyedéves</option>
+                    <option value="féléves">Féléves</option>
+                    <option value="éves">Éves</option>
+                  </select>
+                </div>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Értesítés ennyi nappal előbb
+                </label>
+                <input
+                  type="number"
+                  min="0"
+                  value={tempUtilitySchedule.reminderDaysBefore}
+                  onChange={(e) =>
+                    setTempUtilitySchedule({
+                      ...tempUtilitySchedule,
+                      reminderDaysBefore: e.target.value,
+                    })
+                  }
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Szolgáltató ügyfél portál (URL)
+                </label>
+                <input
+                  type="url"
+                  value={tempUtilitySchedule.portalUrl}
+                  onChange={(e) =>
+                    setTempUtilitySchedule({
+                      ...tempUtilitySchedule,
+                      portalUrl: e.target.value,
+                    })
+                  }
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                  placeholder="https://..."
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Megjegyzés
+                </label>
+                <textarea
+                  rows="2"
+                  value={tempUtilitySchedule.notes}
+                  onChange={(e) =>
+                    setTempUtilitySchedule({
+                      ...tempUtilitySchedule,
+                      notes: e.target.value,
+                    })
+                  }
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+            </div>
+            <div className="mt-6 flex gap-3">
+              <button
+                onClick={() => setShowUtilityScheduleModal(false)}
+                className="flex-1 px-4 py-3 border border-gray-300 rounded-lg hover:bg-gray-50"
+              >
+                Mégse
+              </button>
+              <button
+                onClick={saveUtilitySchedule}
+                className="flex-1 px-4 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+              >
+                Mentés
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       {/* Saving Goal Modal */}
       {showSavingGoalModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50 overflow-y-auto">
@@ -25258,6 +27922,1235 @@ const FamilyOrganizerApp = () => {
           </div>
         </div>
       )}
+      {/* === HÁZVÁSÁRLÁS MODAL-OK === */}
+      {/* Projekt létrehozás / szerkesztés */}
+      {showHazvasarlasProjectModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50 overflow-y-auto">
+          <div className="bg-white rounded-lg shadow-xl max-w-lg w-full p-6 my-8 max-h-[90vh] overflow-y-auto">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-xl font-bold text-gray-800">
+                {editingItem ? "Projekt szerkesztése" : "Új házvásárlás projekt"}
+              </h3>
+              <button
+                onClick={() => setShowHazvasarlasProjectModal(false)}
+                className="text-gray-500 hover:text-gray-700"
+              >
+                <X size={24} />
+              </button>
+            </div>
+            <div className="space-y-3">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Projekt neve *
+                </label>
+                <input
+                  type="text"
+                  value={formData.name || ""}
+                  onChange={(e) =>
+                    setFormData({ ...formData, name: e.target.value })
+                  }
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
+                  placeholder="pl. Lakásvásárlás 2026"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Típus *
+                </label>
+                <div className="grid grid-cols-3 gap-2">
+                  {Object.entries(HAZ_PROJECT_TYPES).map(([k, meta]) => (
+                    <button
+                      key={k}
+                      onClick={() => setFormData({ ...formData, type: k })}
+                      className={`p-3 rounded-lg border-2 text-sm ${
+                        formData.type === k
+                          ? "border-indigo-500 bg-indigo-50 text-indigo-700 font-semibold"
+                          : "border-gray-200 text-gray-700"
+                      }`}
+                    >
+                      <div className="text-2xl mb-1">{meta.icon}</div>
+                      {meta.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Tervezett keret (Ft)
+                </label>
+                <input
+                  type="number"
+                  value={formData.plannedBudget || ""}
+                  onChange={(e) =>
+                    setFormData({ ...formData, plannedBudget: e.target.value })
+                  }
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
+                  placeholder="pl. 50000000"
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Kezdés
+                  </label>
+                  <input
+                    type="date"
+                    value={
+                      formData.startDate ||
+                      new Date().toISOString().split("T")[0]
+                    }
+                    onChange={(e) =>
+                      setFormData({ ...formData, startDate: e.target.value })
+                    }
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Cél beköltözés
+                  </label>
+                  <input
+                    type="date"
+                    value={formData.targetMoveInDate || ""}
+                    onChange={(e) =>
+                      setFormData({
+                        ...formData,
+                        targetMoveInDate: e.target.value,
+                      })
+                    }
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
+                  />
+                </div>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Rövid leírás
+                </label>
+                <textarea
+                  rows="2"
+                  value={formData.description || ""}
+                  onChange={(e) =>
+                    setFormData({ ...formData, description: e.target.value })
+                  }
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Jegyzetek
+                </label>
+                <textarea
+                  rows="3"
+                  value={formData.notes || ""}
+                  onChange={(e) =>
+                    setFormData({ ...formData, notes: e.target.value })
+                  }
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
+                />
+              </div>
+              {!editingItem && (
+                <p className="text-xs text-gray-500">
+                  A projekt létrejöttekor automatikusan kapsz egy ajánlott
+                  idővonalat és költségtételeket a kiválasztott típushoz, melyet
+                  szabadon szerkeszthetsz.
+                </p>
+              )}
+            </div>
+            <div className="mt-6 flex gap-3">
+              <button
+                onClick={() => setShowHazvasarlasProjectModal(false)}
+                className="flex-1 px-4 py-3 border border-gray-300 rounded-lg hover:bg-gray-50"
+              >
+                Mégse
+              </button>
+              <button
+                onClick={async () => {
+                  if (!formData.name) {
+                    alert("A projekt nevét kötelező megadni!");
+                    return;
+                  }
+                  if (editingItem) {
+                    await updateHazvasarlasProject(editingItem.id, (p) => ({
+                      ...p,
+                      name: formData.name,
+                      type: formData.type || p.type,
+                      plannedBudget:
+                        parseFloat(formData.plannedBudget) || 0,
+                      startDate: formData.startDate || p.startDate,
+                      targetMoveInDate: formData.targetMoveInDate || "",
+                      description: formData.description || "",
+                      notes: formData.notes || "",
+                    }));
+                  } else {
+                    await createHazvasarlasProject(formData);
+                  }
+                  setShowHazvasarlasProjectModal(false);
+                  setEditingItem(null);
+                  setFormData({});
+                }}
+                className="flex-1 px-4 py-3 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700"
+              >
+                Mentés
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Property option modal */}
+      {showPropertyOptionModal && selectedHazvasarlasProject && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50 overflow-y-auto">
+          <div className="bg-white rounded-lg shadow-xl max-w-2xl w-full p-6 my-8 max-h-[90vh] overflow-y-auto">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-xl font-bold text-gray-800">
+                {editingPropertyOption
+                  ? "Ingatlan opció szerkesztése"
+                  : "Új ingatlan opció"}
+              </h3>
+              <button
+                onClick={() => setShowPropertyOptionModal(false)}
+                className="text-gray-500 hover:text-gray-700"
+              >
+                <X size={24} />
+              </button>
+            </div>
+            <div className="space-y-3">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Cím
+                </label>
+                <input
+                  type="text"
+                  value={formData.address || ""}
+                  onChange={(e) =>
+                    setFormData({ ...formData, address: e.target.value })
+                  }
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
+                  placeholder="Budapest, ..."
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Ár (Ft)
+                  </label>
+                  <input
+                    type="number"
+                    value={formData.price || ""}
+                    onChange={(e) =>
+                      setFormData({ ...formData, price: e.target.value })
+                    }
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Alapterület (m²)
+                  </label>
+                  <input
+                    type="number"
+                    value={formData.area || ""}
+                    onChange={(e) =>
+                      setFormData({ ...formData, area: e.target.value })
+                    }
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Szobaszám
+                  </label>
+                  <input
+                    type="text"
+                    value={formData.rooms || ""}
+                    onChange={(e) =>
+                      setFormData({ ...formData, rooms: e.target.value })
+                    }
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg"
+                    placeholder="pl. 2+1"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Építés éve
+                  </label>
+                  <input
+                    type="number"
+                    value={formData.yearBuilt || ""}
+                    onChange={(e) =>
+                      setFormData({ ...formData, yearBuilt: e.target.value })
+                    }
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg"
+                  />
+                </div>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Állapot
+                </label>
+                <input
+                  type="text"
+                  value={formData.condition || ""}
+                  onChange={(e) =>
+                    setFormData({ ...formData, condition: e.target.value })
+                  }
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg"
+                  placeholder="pl. felújított, költözhető, felújítandó"
+                />
+              </div>
+
+              {/* Pontozás */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Értékelés (1-5)
+                </label>
+                <div className="grid grid-cols-2 gap-2 text-xs">
+                  {[
+                    ["location", "Lokáció"],
+                    ["condition", "Állapot"],
+                    ["value", "Ár/érték"],
+                    ["size", "Méret"],
+                  ].map(([k, label]) => (
+                    <div key={k} className="flex items-center justify-between gap-2 bg-gray-50 p-2 rounded">
+                      <span>{label}</span>
+                      <input
+                        type="range"
+                        min="1"
+                        max="5"
+                        value={formData.scores?.[k] || 3}
+                        onChange={(e) =>
+                          setFormData({
+                            ...formData,
+                            scores: {
+                              ...(formData.scores || {}),
+                              [k]: parseInt(e.target.value, 10),
+                            },
+                          })
+                        }
+                      />
+                      <span className="w-4 font-semibold">
+                        {formData.scores?.[k] ?? 3}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Előnyök/Hátrányok */}
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Előnyök (vesszővel)
+                  </label>
+                  <textarea
+                    rows="2"
+                    value={(formData.pros || []).join(", ")}
+                    onChange={(e) =>
+                      setFormData({
+                        ...formData,
+                        pros: e.target.value
+                          .split(",")
+                          .map((s) => s.trim())
+                          .filter(Boolean),
+                      })
+                    }
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Hátrányok (vesszővel)
+                  </label>
+                  <textarea
+                    rows="2"
+                    value={(formData.cons || []).join(", ")}
+                    onChange={(e) =>
+                      setFormData({
+                        ...formData,
+                        cons: e.target.value
+                          .split(",")
+                          .map((s) => s.trim())
+                          .filter(Boolean),
+                      })
+                    }
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"
+                  />
+                </div>
+              </div>
+
+              {/* Fotók */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Fotók
+                </label>
+                <div className="flex gap-2 flex-wrap mb-2">
+                  {(formData.photos || []).map((p, i) => (
+                    <div key={i} className="relative">
+                      <img
+                        src={p}
+                        alt=""
+                        className="h-20 w-20 object-cover rounded"
+                      />
+                      <button
+                        onClick={() =>
+                          setFormData({
+                            ...formData,
+                            photos: (formData.photos || []).filter(
+                              (_, idx) => idx !== i
+                            ),
+                          })
+                        }
+                        className="absolute -top-1 -right-1 bg-red-500 text-white rounded-full p-0.5"
+                      >
+                        <X size={12} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+                <label className="text-sm text-blue-600 cursor-pointer">
+                  + Fotó feltöltése
+                  <input
+                    type="file"
+                    accept="image/*"
+                    multiple
+                    className="hidden"
+                    onChange={(e) => {
+                      const files = Array.from(e.target.files || []);
+                      files.forEach((file) => {
+                        const r = new FileReader();
+                        r.onload = () => {
+                          setFormData((prev) => ({
+                            ...prev,
+                            photos: [...(prev.photos || []), r.result],
+                          }));
+                        };
+                        r.readAsDataURL(file);
+                      });
+                      e.target.value = "";
+                    }}
+                  />
+                </label>
+              </div>
+
+              {/* Alaprajzok */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Alaprajzok
+                </label>
+                <div className="flex gap-2 flex-wrap mb-2">
+                  {(formData.floorPlans || []).map((p, i) => (
+                    <div key={i} className="relative">
+                      <img
+                        src={p}
+                        alt=""
+                        className="h-24 w-24 object-cover rounded border border-blue-300"
+                      />
+                      <button
+                        onClick={() =>
+                          setFormData({
+                            ...formData,
+                            floorPlans: (formData.floorPlans || []).filter(
+                              (_, idx) => idx !== i
+                            ),
+                          })
+                        }
+                        className="absolute -top-1 -right-1 bg-red-500 text-white rounded-full p-0.5"
+                      >
+                        <X size={12} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+                <label className="text-sm text-blue-600 cursor-pointer">
+                  + Alaprajz feltöltése
+                  <input
+                    type="file"
+                    accept="image/*"
+                    multiple
+                    className="hidden"
+                    onChange={(e) => {
+                      const files = Array.from(e.target.files || []);
+                      files.forEach((file) => {
+                        const r = new FileReader();
+                        r.onload = () => {
+                          setFormData((prev) => ({
+                            ...prev,
+                            floorPlans: [
+                              ...(prev.floorPlans || []),
+                              r.result,
+                            ],
+                          }));
+                        };
+                        r.readAsDataURL(file);
+                      });
+                      e.target.value = "";
+                    }}
+                  />
+                </label>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Hirdetés link (URL)
+                </label>
+                <input
+                  type="url"
+                  value={(formData.links || [])[0] || ""}
+                  onChange={(e) =>
+                    setFormData({ ...formData, links: [e.target.value] })
+                  }
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg"
+                  placeholder="https://ingatlan.com/..."
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Megjegyzés
+                </label>
+                <textarea
+                  rows="2"
+                  value={formData.notes || ""}
+                  onChange={(e) =>
+                    setFormData({ ...formData, notes: e.target.value })
+                  }
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Státusz
+                </label>
+                <select
+                  value={formData.status || "considering"}
+                  onChange={(e) =>
+                    setFormData({ ...formData, status: e.target.value })
+                  }
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg"
+                >
+                  <option value="considering">Megfontolás alatt</option>
+                  <option value="viewed">Megtekintve</option>
+                  <option value="rejected">Elvetve</option>
+                  <option value="selected">Kiválasztott</option>
+                </select>
+              </div>
+            </div>
+            <div className="mt-6 flex gap-3">
+              <button
+                onClick={() => setShowPropertyOptionModal(false)}
+                className="flex-1 px-4 py-3 border border-gray-300 rounded-lg hover:bg-gray-50"
+              >
+                Mégse
+              </button>
+              <button
+                onClick={async () => {
+                  await updateHazvasarlasProject(
+                    selectedHazvasarlasProject.id,
+                    (p) => {
+                      const opt = {
+                        ...formData,
+                        id: editingPropertyOption?.id || Date.now(),
+                      };
+                      const existing = p.options || [];
+                      const options = editingPropertyOption
+                        ? existing.map((o) =>
+                            o.id === editingPropertyOption.id ? opt : o
+                          )
+                        : [...existing, opt];
+                      return { ...p, options };
+                    }
+                  );
+                  setShowPropertyOptionModal(false);
+                  setEditingPropertyOption(null);
+                  setFormData({});
+                }}
+                className="flex-1 px-4 py-3 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700"
+              >
+                Mentés
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Idővonal feladat modal */}
+      {showHazTimelineModal && selectedHazvasarlasProject && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50 overflow-y-auto">
+          <div className="bg-white rounded-lg shadow-xl max-w-md w-full p-6 my-8 max-h-[90vh] overflow-y-auto">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-xl font-bold text-gray-800">
+                {editingHazTimeline ? "Feladat szerkesztése" : "Új feladat"}
+              </h3>
+              <button
+                onClick={() => setShowHazTimelineModal(false)}
+                className="text-gray-500 hover:text-gray-700"
+              >
+                <X size={24} />
+              </button>
+            </div>
+            <div className="space-y-3">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Fázis
+                </label>
+                <select
+                  value={formData.phase || "preparation"}
+                  onChange={(e) =>
+                    setFormData({ ...formData, phase: e.target.value })
+                  }
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg"
+                >
+                  <option value="preparation">Előkészítés</option>
+                  <option value="search">Keresés</option>
+                  <option value="financing">Finanszírozás</option>
+                  <option value="contract">Szerződéskötés</option>
+                  <option value="closing">Lebonyolítás</option>
+                  <option value="moving">Költözés</option>
+                  <option value="renovation">Felújítás</option>
+                  <option value="furnishing">Berendezés</option>
+                  <option value="other">Egyéb</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Feladat *
+                </label>
+                <input
+                  type="text"
+                  value={formData.name || ""}
+                  onChange={(e) =>
+                    setFormData({ ...formData, name: e.target.value })
+                  }
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Határidő
+                </label>
+                <input
+                  type="date"
+                  value={formData.dueDate || ""}
+                  onChange={(e) =>
+                    setFormData({ ...formData, dueDate: e.target.value })
+                  }
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Megjegyzés
+                </label>
+                <textarea
+                  rows="2"
+                  value={formData.notes || ""}
+                  onChange={(e) =>
+                    setFormData({ ...formData, notes: e.target.value })
+                  }
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg"
+                />
+              </div>
+            </div>
+            <div className="mt-6 flex gap-3">
+              <button
+                onClick={() => setShowHazTimelineModal(false)}
+                className="flex-1 px-4 py-3 border border-gray-300 rounded-lg hover:bg-gray-50"
+              >
+                Mégse
+              </button>
+              <button
+                onClick={async () => {
+                  if (!formData.name) {
+                    alert("Feladat név kötelező!");
+                    return;
+                  }
+                  await updateHazvasarlasProject(
+                    selectedHazvasarlasProject.id,
+                    (p) => {
+                      const item = {
+                        ...formData,
+                        id: editingHazTimeline?.id || Date.now(),
+                        completed: editingHazTimeline?.completed || false,
+                      };
+                      const existing = p.timeline || [];
+                      const timeline = editingHazTimeline
+                        ? existing.map((x) =>
+                            x.id === editingHazTimeline.id ? item : x
+                          )
+                        : [...existing, item];
+                      return { ...p, timeline };
+                    }
+                  );
+                  setShowHazTimelineModal(false);
+                  setEditingHazTimeline(null);
+                  setFormData({});
+                }}
+                className="flex-1 px-4 py-3 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700"
+              >
+                Mentés
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Költségtétel modal */}
+      {showHazCostModal && selectedHazvasarlasProject && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50 overflow-y-auto">
+          <div className="bg-white rounded-lg shadow-xl max-w-md w-full p-6 my-8 max-h-[90vh] overflow-y-auto">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-xl font-bold text-gray-800">
+                {editingHazCost ? "Költségtétel" : "Új költségtétel"}
+              </h3>
+              <button
+                onClick={() => setShowHazCostModal(false)}
+                className="text-gray-500 hover:text-gray-700"
+              >
+                <X size={24} />
+              </button>
+            </div>
+            <div className="space-y-3">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Kategória *
+                </label>
+                <input
+                  type="text"
+                  value={formData.category || ""}
+                  onChange={(e) =>
+                    setFormData({ ...formData, category: e.target.value })
+                  }
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg"
+                  placeholder="pl. Ügyvédi díj"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Leírás
+                </label>
+                <input
+                  type="text"
+                  value={formData.description || ""}
+                  onChange={(e) =>
+                    setFormData({ ...formData, description: e.target.value })
+                  }
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg"
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Tervezett (Ft)
+                  </label>
+                  <input
+                    type="number"
+                    value={formData.plannedAmount || ""}
+                    onChange={(e) =>
+                      setFormData({
+                        ...formData,
+                        plannedAmount: e.target.value,
+                      })
+                    }
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Tényleges (Ft)
+                  </label>
+                  <input
+                    type="number"
+                    value={formData.actualAmount || ""}
+                    onChange={(e) =>
+                      setFormData({
+                        ...formData,
+                        actualAmount: e.target.value,
+                      })
+                    }
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg"
+                  />
+                </div>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Beszállító / cégnév
+                </label>
+                <input
+                  type="text"
+                  value={formData.vendor || ""}
+                  onChange={(e) =>
+                    setFormData({ ...formData, vendor: e.target.value })
+                  }
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg"
+                />
+              </div>
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={formData.paid || false}
+                  onChange={(e) =>
+                    setFormData({ ...formData, paid: e.target.checked })
+                  }
+                  className="w-4 h-4"
+                />
+                <span className="text-sm">Kifizetve</span>
+              </label>
+            </div>
+            <div className="mt-6 flex gap-3">
+              <button
+                onClick={() => setShowHazCostModal(false)}
+                className="flex-1 px-4 py-3 border border-gray-300 rounded-lg hover:bg-gray-50"
+              >
+                Mégse
+              </button>
+              <button
+                onClick={async () => {
+                  if (!formData.category) {
+                    alert("Kategória kötelező!");
+                    return;
+                  }
+                  await updateHazvasarlasProject(
+                    selectedHazvasarlasProject.id,
+                    (p) => {
+                      const item = {
+                        ...formData,
+                        id: editingHazCost?.id || Date.now(),
+                      };
+                      const existing = p.costs || [];
+                      const costs = editingHazCost
+                        ? existing.map((x) =>
+                            x.id === editingHazCost.id ? item : x
+                          )
+                        : [...existing, item];
+                      return { ...p, costs };
+                    }
+                  );
+                  setShowHazCostModal(false);
+                  setEditingHazCost(null);
+                  setFormData({});
+                }}
+                className="flex-1 px-4 py-3 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700"
+              >
+                Mentés
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Szoba modal */}
+      {showHazRoomModal && selectedHazvasarlasProject && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50 overflow-y-auto">
+          <div className="bg-white rounded-lg shadow-xl max-w-md w-full p-6 my-8 max-h-[90vh] overflow-y-auto">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-xl font-bold text-gray-800">
+                {editingHazRoom ? "Szoba szerkesztése" : "Új szoba"}
+              </h3>
+              <button
+                onClick={() => setShowHazRoomModal(false)}
+                className="text-gray-500 hover:text-gray-700"
+              >
+                <X size={24} />
+              </button>
+            </div>
+            <div className="space-y-3">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Szoba neve *
+                </label>
+                <input
+                  type="text"
+                  value={formData.name || ""}
+                  onChange={(e) =>
+                    setFormData({ ...formData, name: e.target.value })
+                  }
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg"
+                  placeholder="pl. Nappali, Hálószoba, Konyha"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Alapterület (m²)
+                </label>
+                <input
+                  type="number"
+                  step="0.1"
+                  value={formData.area || ""}
+                  onChange={(e) =>
+                    setFormData({ ...formData, area: e.target.value })
+                  }
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Megjegyzés
+                </label>
+                <textarea
+                  rows="2"
+                  value={formData.notes || ""}
+                  onChange={(e) =>
+                    setFormData({ ...formData, notes: e.target.value })
+                  }
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg"
+                />
+              </div>
+            </div>
+            <div className="mt-6 flex gap-3">
+              <button
+                onClick={() => setShowHazRoomModal(false)}
+                className="flex-1 px-4 py-3 border border-gray-300 rounded-lg hover:bg-gray-50"
+              >
+                Mégse
+              </button>
+              <button
+                onClick={async () => {
+                  if (!formData.name) {
+                    alert("Szoba neve kötelező!");
+                    return;
+                  }
+                  await updateHazvasarlasProject(
+                    selectedHazvasarlasProject.id,
+                    (p) => {
+                      const item = {
+                        ...formData,
+                        id: editingHazRoom?.id || Date.now(),
+                      };
+                      const existing = p.rooms || [];
+                      const rooms = editingHazRoom
+                        ? existing.map((x) =>
+                            x.id === editingHazRoom.id ? item : x
+                          )
+                        : [...existing, item];
+                      return { ...p, rooms };
+                    }
+                  );
+                  setShowHazRoomModal(false);
+                  setEditingHazRoom(null);
+                  setFormData({});
+                }}
+                className="flex-1 px-4 py-3 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700"
+              >
+                Mentés
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Berendezés modal */}
+      {showHazFurnitureModal && selectedHazvasarlasProject && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50 overflow-y-auto">
+          <div className="bg-white rounded-lg shadow-xl max-w-md w-full p-6 my-8 max-h-[90vh] overflow-y-auto">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-xl font-bold text-gray-800">
+                {editingHazFurniture
+                  ? "Berendezés szerkesztése"
+                  : "Új berendezés / tétel"}
+              </h3>
+              <button
+                onClick={() => setShowHazFurnitureModal(false)}
+                className="text-gray-500 hover:text-gray-700"
+              >
+                <X size={24} />
+              </button>
+            </div>
+            <div className="space-y-3">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Szoba
+                </label>
+                <select
+                  value={formData.roomId || ""}
+                  onChange={(e) =>
+                    setFormData({
+                      ...formData,
+                      roomId: parseInt(e.target.value, 10),
+                    })
+                  }
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg"
+                >
+                  <option value="">— válassz —</option>
+                  {(selectedHazvasarlasProject.rooms || []).map((r) => (
+                    <option key={r.id} value={r.id}>
+                      {r.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Tétel neve *
+                </label>
+                <input
+                  type="text"
+                  value={formData.name || ""}
+                  onChange={(e) =>
+                    setFormData({ ...formData, name: e.target.value })
+                  }
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg"
+                  placeholder="pl. Konyhabútor"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Kategória
+                </label>
+                <input
+                  type="text"
+                  value={formData.category || ""}
+                  onChange={(e) =>
+                    setFormData({ ...formData, category: e.target.value })
+                  }
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg"
+                  placeholder="pl. Bútor, Háztartási gép, Burkolat, Festés"
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Tervezett ár (Ft)
+                  </label>
+                  <input
+                    type="number"
+                    value={formData.plannedPrice || ""}
+                    onChange={(e) =>
+                      setFormData({
+                        ...formData,
+                        plannedPrice: e.target.value,
+                      })
+                    }
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Tényleges ár (Ft)
+                  </label>
+                  <input
+                    type="number"
+                    value={formData.actualPrice || ""}
+                    onChange={(e) =>
+                      setFormData({
+                        ...formData,
+                        actualPrice: e.target.value,
+                      })
+                    }
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg"
+                  />
+                </div>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Státusz
+                </label>
+                <select
+                  value={formData.status || "tervezett"}
+                  onChange={(e) =>
+                    setFormData({ ...formData, status: e.target.value })
+                  }
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg"
+                >
+                  <option value="tervezett">Tervezett</option>
+                  <option value="kiválasztva">Kiválasztva</option>
+                  <option value="megrendelve">Megrendelve</option>
+                  <option value="megérkezett">Megérkezett</option>
+                  <option value="beépítve">Beépítve / kész</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Beszállító
+                </label>
+                <input
+                  type="text"
+                  value={formData.vendor || ""}
+                  onChange={(e) =>
+                    setFormData({ ...formData, vendor: e.target.value })
+                  }
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Termék link
+                </label>
+                <input
+                  type="url"
+                  value={formData.link || ""}
+                  onChange={(e) =>
+                    setFormData({ ...formData, link: e.target.value })
+                  }
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg"
+                />
+              </div>
+            </div>
+            <div className="mt-6 flex gap-3">
+              <button
+                onClick={() => setShowHazFurnitureModal(false)}
+                className="flex-1 px-4 py-3 border border-gray-300 rounded-lg hover:bg-gray-50"
+              >
+                Mégse
+              </button>
+              <button
+                onClick={async () => {
+                  if (!formData.name) {
+                    alert("Tétel név kötelező!");
+                    return;
+                  }
+                  await updateHazvasarlasProject(
+                    selectedHazvasarlasProject.id,
+                    (p) => {
+                      const item = {
+                        ...formData,
+                        id: editingHazFurniture?.id || Date.now(),
+                      };
+                      const existing = p.furniture || [];
+                      const furniture = editingHazFurniture
+                        ? existing.map((x) =>
+                            x.id === editingHazFurniture.id ? item : x
+                          )
+                        : [...existing, item];
+                      return { ...p, furniture };
+                    }
+                  );
+                  setShowHazFurnitureModal(false);
+                  setEditingHazFurniture(null);
+                  setFormData({});
+                }}
+                className="flex-1 px-4 py-3 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700"
+              >
+                Mentés
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Kapcsolat modal */}
+      {showHazContactModal && selectedHazvasarlasProject && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50 overflow-y-auto">
+          <div className="bg-white rounded-lg shadow-xl max-w-md w-full p-6 my-8 max-h-[90vh] overflow-y-auto">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-xl font-bold text-gray-800">
+                {editingHazContact ? "Kapcsolat" : "Új kapcsolat"}
+              </h3>
+              <button
+                onClick={() => setShowHazContactModal(false)}
+                className="text-gray-500 hover:text-gray-700"
+              >
+                <X size={24} />
+              </button>
+            </div>
+            <div className="space-y-3">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Név *
+                </label>
+                <input
+                  type="text"
+                  value={formData.name || ""}
+                  onChange={(e) =>
+                    setFormData({ ...formData, name: e.target.value })
+                  }
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Szerepkör
+                </label>
+                <input
+                  type="text"
+                  value={formData.role || ""}
+                  onChange={(e) =>
+                    setFormData({ ...formData, role: e.target.value })
+                  }
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg"
+                  placeholder="pl. ügyvéd, ingatlanos, közjegyző, kivitelező"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Telefon
+                </label>
+                <input
+                  type="tel"
+                  value={formData.phone || ""}
+                  onChange={(e) =>
+                    setFormData({ ...formData, phone: e.target.value })
+                  }
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Email
+                </label>
+                <input
+                  type="email"
+                  value={formData.email || ""}
+                  onChange={(e) =>
+                    setFormData({ ...formData, email: e.target.value })
+                  }
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Megjegyzés
+                </label>
+                <textarea
+                  rows="2"
+                  value={formData.notes || ""}
+                  onChange={(e) =>
+                    setFormData({ ...formData, notes: e.target.value })
+                  }
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg"
+                />
+              </div>
+            </div>
+            <div className="mt-6 flex gap-3">
+              <button
+                onClick={() => setShowHazContactModal(false)}
+                className="flex-1 px-4 py-3 border border-gray-300 rounded-lg hover:bg-gray-50"
+              >
+                Mégse
+              </button>
+              <button
+                onClick={async () => {
+                  if (!formData.name) {
+                    alert("Név kötelező!");
+                    return;
+                  }
+                  await updateHazvasarlasProject(
+                    selectedHazvasarlasProject.id,
+                    (p) => {
+                      const item = {
+                        ...formData,
+                        id: editingHazContact?.id || Date.now(),
+                      };
+                      const existing = p.contacts || [];
+                      const contacts = editingHazContact
+                        ? existing.map((x) =>
+                            x.id === editingHazContact.id ? item : x
+                          )
+                        : [...existing, item];
+                      return { ...p, contacts };
+                    }
+                  );
+                  setShowHazContactModal(false);
+                  setEditingHazContact(null);
+                  setFormData({});
+                }}
+                className="flex-1 px-4 py-3 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700"
+              >
+                Mentés
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Delete Confirmation Modal */}
       {showDeleteConfirm && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
