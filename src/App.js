@@ -15361,8 +15361,139 @@ const FamilyOrganizerApp = () => {
       other: "Egyéb",
     };
 
+    // Gantt: csak a határidős feladatok
+    const datedTasks = timeline
+      .filter((t) => t.dueDate)
+      .sort((a, b) => new Date(a.dueDate) - new Date(b.dueDate));
+    let gMin = null,
+      gMax = null;
+    if (datedTasks.length > 0) {
+      const ms = datedTasks.map((t) => new Date(t.dueDate).getTime());
+      const todayMs = Date.now();
+      gMin = Math.min(...ms, todayMs) - 7 * 24 * 60 * 60 * 1000;
+      gMax = Math.max(...ms, todayMs) + 7 * 24 * 60 * 60 * 1000;
+    }
+    const phaseColors = {
+      preparation: "#6366f1",
+      search: "#0891b2",
+      financing: "#16a34a",
+      contract: "#a855f7",
+      closing: "#ea580c",
+      moving: "#0ea5e9",
+      renovation: "#dc2626",
+      furnishing: "#db2777",
+      other: "#6b7280",
+    };
+
     return (
       <div className="space-y-4">
+        {/* Gantt-szerű vizuális idővonal */}
+        {gMin && gMax && (
+          <div className="bg-white border border-gray-200 rounded-lg p-4">
+            <h3 className="font-semibold text-gray-800 mb-3 flex items-center gap-2">
+              <Calendar size={18} /> Folyamat vizualizáció
+            </h3>
+            {(() => {
+              const span = Math.max(1, gMax - gMin);
+              const pct = (ms) => ((ms - gMin) / span) * 100;
+              // Hónaphatárok
+              const months = [];
+              const start = new Date(gMin);
+              start.setDate(1);
+              for (
+                let d = new Date(start);
+                d.getTime() <= gMax;
+                d.setMonth(d.getMonth() + 1)
+              ) {
+                months.push(new Date(d));
+              }
+              return (
+                <>
+                  <div
+                    className="relative bg-gray-50 border border-gray-200 rounded overflow-hidden"
+                    style={{ height: "26px" }}
+                  >
+                    {months.map((m, i) => (
+                      <div
+                        key={i}
+                        className="absolute top-0 bottom-0 border-l border-gray-300"
+                        style={{ left: `${pct(m.getTime())}%` }}
+                      >
+                        <span className="absolute top-0 left-1 text-[10px] text-gray-500 whitespace-nowrap">
+                          {m.toLocaleDateString("hu-HU", {
+                            year: "2-digit",
+                            month: "short",
+                          })}
+                        </span>
+                      </div>
+                    ))}
+                    <div
+                      className="absolute top-0 bottom-0 border-l-2 border-dashed border-blue-500"
+                      style={{ left: `${pct(Date.now())}%` }}
+                    />
+                  </div>
+                  <div className="mt-3 space-y-1">
+                    {datedTasks.map((t) => {
+                      const dueMs = new Date(t.dueDate).getTime();
+                      const left = Math.max(0, Math.min(98, pct(dueMs) - 1));
+                      const color =
+                        phaseColors[t.phase] || phaseColors.other;
+                      return (
+                        <div
+                          key={t.id}
+                          className="flex items-center gap-2 text-xs"
+                        >
+                          <div
+                            className="w-32 truncate text-gray-700"
+                            title={t.name}
+                          >
+                            {t.completed ? "✓ " : ""}{t.name}
+                          </div>
+                          <div className="flex-1 relative bg-gray-100 rounded h-5">
+                            <div
+                              className="absolute top-1/2 -translate-y-1/2 w-3 h-3 rounded-full border-2 border-white shadow"
+                              style={{
+                                left: `${left}%`,
+                                backgroundColor: color,
+                                opacity: t.completed ? 0.4 : 1,
+                              }}
+                              title={new Date(t.dueDate).toLocaleDateString(
+                                "hu-HU"
+                              )}
+                            />
+                          </div>
+                          <div className="w-24 text-right text-gray-600">
+                            {new Date(t.dueDate).toLocaleDateString("hu-HU")}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                  <div className="flex flex-wrap gap-2 mt-3 text-[11px] text-gray-600">
+                    {Object.entries(phaseLabels).map(([k, label]) => (
+                      <div key={k} className="flex items-center gap-1">
+                        <span
+                          className="inline-block w-3 h-3 rounded-full"
+                          style={{
+                            backgroundColor:
+                              phaseColors[k] || phaseColors.other,
+                          }}
+                        />
+                        {label}
+                      </div>
+                    ))}
+                  </div>
+                </>
+              );
+            })()}
+          </div>
+        )}
+        {!gMin && timeline.length > 0 && (
+          <div className="bg-yellow-50 border border-yellow-200 rounded p-3 text-sm text-yellow-900">
+            Adj határidőt a feladatokhoz, hogy vizuális idővonalon is láthasd
+            őket.
+          </div>
+        )}
         <div className="flex justify-between items-center">
           <h3 className="font-semibold text-gray-800">Idővonal és határidők</h3>
           <button
@@ -15508,100 +15639,146 @@ const FamilyOrganizerApp = () => {
     const isNew = project.type === "new";
     const isBuild = project.type === "build";
 
-    // Tipikus tételek
+    // === 2026-os tipikus magyar ingatlanvásárlási költségek ===
     const items = [];
 
-    // Vagyonszerzési illeték: 4% (CSOK esetén lehet 0% — figyelmeztetjük)
+    // Vagyonszerzési illeték (2026)
+    // Szabály: 4% az 1 milliárd Ft alatti részre, 2% a felette lévő részre.
+    // Új építésű 30M Ft alatt: 0% első ingatlanos kedvezménnyel.
+    // CSOK / Otthon Start hiteles vásárlás: 0% (feltételekkel).
+    let illetekAmount = 0;
+    if (purchasePrice <= 1000000000) {
+      illetekAmount = purchasePrice * 0.04;
+    } else {
+      illetekAmount = 1000000000 * 0.04 + (purchasePrice - 1000000000) * 0.02;
+    }
     items.push({
       category: "Vagyonszerzési illeték",
       description: isNew
-        ? "4%, ÁFA-val csökkenthető. CSOK esetén jellemzően mentes."
-        : "4% a vételár után. CSOK esetén első ingatlan vásárláskor mentes lehet.",
-      plannedAmount: Math.round(purchasePrice * 0.04),
+        ? "Új lakás 30M Ft-ig 0% (első ingatlanosoknak). Általános 4% / 2% (1 mrd Ft felett). CSOK esetén mentesség."
+        : "4% a vételár után, 1 mrd Ft feletti részre 2%. CSOK / első lakásvásárló kedvezmény: 0%.",
+      plannedAmount: Math.round(illetekAmount),
     });
 
-    // Ügyvédi díj: ~0.7%, min 60-80k
+    // Ügyvédi díj (2026) — Magyar Ügyvédi Kamara ajánlása: kb 1% a vételár után,
+    // a gyakorlat 0.5–1% sávban mozog, minimum jellemzően 100-150 ezer.
     items.push({
       category: "Ügyvédi díj",
-      description: "~0.5–1% a vételár után, általában 0.7%",
-      plannedAmount: Math.max(60000, Math.round(purchasePrice * 0.007)),
+      description: "MÜK ajánlás kb. 1%, gyakorlat 0.5–1% (min. ~120 ezer Ft).",
+      plannedAmount: Math.max(120000, Math.round(purchasePrice * 0.007)),
     });
 
-    // Földhivatali bejegyzési illeték: 6600 Ft per ingatlan
+    // Földhivatali eljárási díjak (2026)
+    // - Tulajdonjog bejegyzés: 6 600 Ft
+    // - Jelzálogjog bejegyzés (hitelnél): 12 600 Ft
+    let foldhivatal = 6600;
+    if (totalLoans > 0) foldhivatal += 12600;
     items.push({
-      category: "Földhivatali bejegyzés",
-      description: "6 600 Ft tulajdoni bejegyzési díj",
-      plannedAmount: 6600,
+      category: "Földhivatali eljárási díj",
+      description: totalLoans > 0
+        ? "Tulajdonjog bejegyzés 6 600 Ft + jelzálogjog bejegyzés 12 600 Ft."
+        : "Tulajdonjog bejegyzési illeték 6 600 Ft.",
+      plannedAmount: foldhivatal,
     });
 
-    // Energetikai tanúsítvány: ~30k Ft (kötelező, általában az eladó fizeti, de érdemes számolni vele)
+    // TakarNet / tulajdoni lap (2026)
+    // Hiteles tulajdoni lap szemle: 1 000 Ft, teljes: 3 600 Ft. Térképmásolat 3 000 Ft.
+    items.push({
+      category: "Tulajdoni lap, térképmásolat",
+      description: "TakarNet hiteles tulajdoni lap (~3 600 Ft) + térképmásolat (~3 000 Ft).",
+      plannedAmount: 8000,
+    });
+
+    // Energetikai tanúsítvány (2026)
+    // Lakás 25-50 ezer Ft, ház 50-80 ezer Ft. Általában az eladó fizeti, de érdemes számolni.
     if (!isBuild) {
       items.push({
         category: "Energetikai tanúsítvány",
-        description: "Kötelező, általában az eladó fizeti (~30 000 Ft)",
-        plannedAmount: 30000,
+        description: "Lakás 25–50 ezer Ft, ház 50–80 ezer Ft. Általában az eladó fizeti.",
+        plannedAmount: 40000,
       });
     }
 
-    // Közjegyzői díj — tartozás-elismerő okirat hitelfelvételnél
+    // Közjegyzői díj — tartozáselismerő közjegyzői okirat (2026)
+    // Közjegyzői díjszabás: kb. 0.1–0.3% a tartozás után + alapdíj.
+    // 50 millió Ft-os hitelnél ~80-150 ezer, 100 millió felett 200-300 ezer.
     if (totalLoans > 0) {
-      // Tartozáselismerő okirat: kb a hitelösszeg 0.1-0.3%-a, plusz alapdíj
-      const notaryFee = Math.min(
-        300000,
-        Math.max(50000, Math.round(totalLoans * 0.0015))
-      );
+      let notaryFee;
+      if (totalLoans <= 20000000) notaryFee = 60000;
+      else if (totalLoans <= 50000000) notaryFee = Math.round(60000 + (totalLoans - 20000000) * 0.0025);
+      else if (totalLoans <= 100000000) notaryFee = Math.round(135000 + (totalLoans - 50000000) * 0.0015);
+      else notaryFee = Math.min(350000, Math.round(210000 + (totalLoans - 100000000) * 0.0008));
       items.push({
         category: "Közjegyzői díj",
-        description: "Tartozáselismerő közjegyzői okirat (hitelfelvételnél)",
+        description: "Tartozáselismerő közjegyzői okirat — hitelösszegtől függ, 2026-os díjszabás szerint.",
         plannedAmount: notaryFee,
       });
     }
 
-    // Bank értékbecslés
+    // Banki értékbecslés (2026)
+    // Lakás 35-50 ezer Ft, ház 50-80 ezer Ft. Egyes bankok eltörölhetik akcióval.
     if (totalLoans > 0) {
       items.push({
         category: "Bank értékbecslés",
-        description: "Banki értékbecslés ingatlanra (~30–60 000 Ft)",
+        description: "Lakás ~40 000 Ft, ház ~60–80 000 Ft. Egyes bankok akciósan elengedik.",
         plannedAmount: 45000,
       });
     }
 
-    // Folyósítási díj: a hitel 1%-a, max 200k jellemzően
+    // Folyósítási / hitelbírálati díj (2026)
+    // Általában 1% a hitelből, max 200 000 Ft. Sok bank akciósan ingyenes.
     if (totalLoans > 0) {
       const disbursementFee = Math.min(
         200000,
         Math.max(0, Math.round(totalLoans * 0.01))
       );
       items.push({
-        category: "Folyósítási díj",
-        description: "A hitelösszeg ~1%-a, általában maximalizálva",
+        category: "Folyósítási / hitelbírálati díj",
+        description: "Hitel ~1%, max 200 000 Ft. Sok bank akciósan elengedi.",
         plannedAmount: disbursementFee,
       });
     }
 
-    // Hitelközvetítői díj — sok közvetítő ingyenes (a banktól kapja a jutalékot),
-    // de jelezzük 0-val, hogy a felhasználó tudja, hogy szempont
+    // Hitelközvetítő (2026)
+    // A közvetítő általában a banktól kapja a jutalékot, az ügyfélnek 0 Ft.
     if (totalLoans > 0) {
       items.push({
         category: "Hitelközvetítő",
-        description: "0 Ft általában, ha banktól kapja a jutalékot",
+        description: "Általában 0 Ft (a banktól kapja a jutalékot). Ritkán külön díjat kér.",
         plannedAmount: 0,
       });
     }
 
-    // Tulajdoni lap és térképmásolat
-    items.push({
-      category: "Tulajdoni lap, térképmásolat",
-      description: "TakarNet díjak (~5–10 000 Ft)",
-      plannedAmount: 8000,
-    });
-
-    // Költözés
+    // Költözés (2026)
     items.push({
       category: "Költözés",
-      description: "Költöztető cég, csomagolóanyag (~80–200 000 Ft)",
+      description: "Költöztető cég, csomagolóanyag, esetleg bútorszerelő (80–250 000 Ft).",
       plannedAmount: 150000,
     });
+
+    // Közmű átírás / bekötés (2026)
+    if (isBuild) {
+      items.push({
+        category: "Közmű bekötés",
+        description: "Villany, víz, gáz bekötés újépítésnél (3–8 millió Ft, telekfüggő).",
+        plannedAmount: 5000000,
+      });
+    } else {
+      items.push({
+        category: "Közmű átírás",
+        description: "Áram, gáz, víz, internet, hulladék szállító átírása (~20–50 000 Ft).",
+        plannedAmount: 30000,
+      });
+    }
+
+    // Műszaki ellenőr (építésnél)
+    if (isBuild) {
+      items.push({
+        category: "Műszaki ellenőr",
+        description: "Független műszaki ellenőr az építkezéshez (300–800 000 Ft).",
+        plannedAmount: 500000,
+      });
+    }
 
     // Az új tételeket vagy felülírjuk (ha létezik ugyanaz a kategória és nincs még
     // tényleges összeg), vagy hozzáadjuk
@@ -15642,6 +15819,7 @@ const FamilyOrganizerApp = () => {
 
   const renderHazvasarlasBudget = (project) => {
     const costs = project.costs || [];
+    const furniture = project.furniture || [];
     const totalPlanned = costs.reduce(
       (s, c) => s + (parseFloat(c.plannedAmount) || 0),
       0
@@ -15653,6 +15831,47 @@ const FamilyOrganizerApp = () => {
     const totalPaid = costs
       .filter((c) => c.paid)
       .reduce((s, c) => s + (parseFloat(c.actualAmount) || 0), 0);
+    // Berendezés tételek összegzése (szobánként is)
+    const furniturePlanned = furniture.reduce(
+      (s, f) => s + (parseFloat(f.plannedPrice) || 0),
+      0
+    );
+    const furnitureActual = furniture.reduce(
+      (s, f) => s + (parseFloat(f.actualPrice) || 0),
+      0
+    );
+    const furniturePaid = furniture
+      .filter(
+        (f) => f.status === "megérkezett" || f.status === "beépítve"
+      )
+      .reduce((s, f) => s + (parseFloat(f.actualPrice) || 0), 0);
+    // Szobánkénti bontás
+    const rooms = project.rooms || [];
+    const byRoom = rooms.map((r) => {
+      const items = furniture.filter((f) => f.roomId === r.id);
+      return {
+        room: r,
+        items,
+        planned: items.reduce(
+          (s, f) => s + (parseFloat(f.plannedPrice) || 0),
+          0
+        ),
+        actual: items.reduce(
+          (s, f) => s + (parseFloat(f.actualPrice) || 0),
+          0
+        ),
+        completed: items.filter((f) => f.status === "beépítve").length,
+      };
+    });
+    const unassigned = furniture.filter(
+      (f) => !rooms.find((r) => r.id === f.roomId)
+    );
+
+    // Költségek + berendezés együtt
+    const grandPlanned = totalPlanned + furniturePlanned;
+    const grandActual = totalActual + furnitureActual;
+    const grandPaid = totalPaid + furniturePaid;
+
     return (
       <div className="space-y-4">
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
@@ -15663,24 +15882,153 @@ const FamilyOrganizerApp = () => {
             </div>
           </div>
           <div className="bg-green-50 border border-green-200 rounded-lg p-3">
-            <div className="text-xs text-green-600">Tervezett</div>
+            <div className="text-xs text-green-600">
+              Tervezett (mindennel)
+            </div>
             <div className="text-lg font-bold text-green-800">
-              {totalPlanned.toLocaleString()} Ft
+              {grandPlanned.toLocaleString()} Ft
+            </div>
+            <div className="text-xs text-gray-500 mt-0.5">
+              költség: {totalPlanned.toLocaleString()} Ft + berendezés:{" "}
+              {furniturePlanned.toLocaleString()} Ft
             </div>
           </div>
           <div className="bg-orange-50 border border-orange-200 rounded-lg p-3">
-            <div className="text-xs text-orange-600">Tényleges</div>
+            <div className="text-xs text-orange-600">
+              Tényleges (mindennel)
+            </div>
             <div className="text-lg font-bold text-orange-800">
-              {totalActual.toLocaleString()} Ft
+              {grandActual.toLocaleString()} Ft
+            </div>
+            <div className="text-xs text-gray-500 mt-0.5">
+              költség: {totalActual.toLocaleString()} Ft + berendezés:{" "}
+              {furnitureActual.toLocaleString()} Ft
             </div>
           </div>
           <div className="bg-purple-50 border border-purple-200 rounded-lg p-3">
             <div className="text-xs text-purple-600">Kifizetve</div>
             <div className="text-lg font-bold text-purple-800">
-              {totalPaid.toLocaleString()} Ft
+              {grandPaid.toLocaleString()} Ft
             </div>
           </div>
         </div>
+
+        {/* Berendezés összegzés szobánként */}
+        {furniture.length > 0 && (
+          <div className="bg-white border border-gray-200 rounded-lg">
+            <div className="p-3 border-b border-gray-200 flex justify-between items-center">
+              <h3 className="font-semibold text-gray-800 flex items-center gap-2">
+                <Package size={18} /> Berendezés és szobák összegzése
+              </h3>
+              <div className="text-sm text-gray-600">
+                Tervezett: <b>{furniturePlanned.toLocaleString()} Ft</b> •
+                Tényleges:{" "}
+                <b className="text-orange-700">
+                  {furnitureActual.toLocaleString()} Ft
+                </b>
+              </div>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead className="bg-gray-50">
+                  <tr>
+                    <th className="text-left p-2">Szoba</th>
+                    <th className="text-right p-2">Tételek</th>
+                    <th className="text-right p-2">Kész</th>
+                    <th className="text-right p-2">Tervezett</th>
+                    <th className="text-right p-2">Tényleges</th>
+                    <th className="text-right p-2">Eltérés</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {byRoom.map((b) => {
+                    const diff = b.actual - b.planned;
+                    return (
+                      <tr key={b.room.id} className="border-t">
+                        <td className="p-2 font-medium">{b.room.name}</td>
+                        <td className="p-2 text-right">{b.items.length}</td>
+                        <td className="p-2 text-right">
+                          {b.completed} / {b.items.length}
+                        </td>
+                        <td className="p-2 text-right">
+                          {b.planned.toLocaleString()} Ft
+                        </td>
+                        <td className="p-2 text-right">
+                          {b.actual.toLocaleString()} Ft
+                        </td>
+                        <td
+                          className={`p-2 text-right ${
+                            diff > 0
+                              ? "text-red-600 font-semibold"
+                              : diff < 0
+                              ? "text-green-700"
+                              : "text-gray-500"
+                          }`}
+                        >
+                          {diff > 0 ? "+" : ""}
+                          {diff.toLocaleString()} Ft
+                        </td>
+                      </tr>
+                    );
+                  })}
+                  {unassigned.length > 0 && (
+                    <tr className="border-t bg-yellow-50">
+                      <td className="p-2 font-medium italic text-gray-600">
+                        Szoba nélküli tételek
+                      </td>
+                      <td className="p-2 text-right">{unassigned.length}</td>
+                      <td className="p-2 text-right">—</td>
+                      <td className="p-2 text-right">
+                        {unassigned
+                          .reduce(
+                            (s, f) => s + (parseFloat(f.plannedPrice) || 0),
+                            0
+                          )
+                          .toLocaleString()}{" "}
+                        Ft
+                      </td>
+                      <td className="p-2 text-right">
+                        {unassigned
+                          .reduce(
+                            (s, f) => s + (parseFloat(f.actualPrice) || 0),
+                            0
+                          )
+                          .toLocaleString()}{" "}
+                        Ft
+                      </td>
+                      <td className="p-2 text-right text-gray-500">—</td>
+                    </tr>
+                  )}
+                  <tr className="border-t bg-gray-50 font-semibold">
+                    <td className="p-2" colSpan={3}>
+                      Berendezés összesen
+                    </td>
+                    <td className="p-2 text-right">
+                      {furniturePlanned.toLocaleString()} Ft
+                    </td>
+                    <td className="p-2 text-right">
+                      {furnitureActual.toLocaleString()} Ft
+                    </td>
+                    <td
+                      className={`p-2 text-right ${
+                        furnitureActual - furniturePlanned > 0
+                          ? "text-red-600"
+                          : "text-green-700"
+                      }`}
+                    >
+                      {furnitureActual - furniturePlanned > 0 ? "+" : ""}
+                      {(furnitureActual - furniturePlanned).toLocaleString()} Ft
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <p className="text-xs text-gray-500 p-2">
+              A szobák és berendezés tételeket a "Szobák & Berendezés" fülön
+              tudod szerkeszteni.
+            </p>
+          </div>
+        )}
 
         <div className="flex flex-wrap justify-between items-center gap-2">
           <h3 className="font-semibold text-gray-800">Költségtételek</h3>
@@ -16593,8 +16941,206 @@ const FamilyOrganizerApp = () => {
       "#db2777",
     ];
 
+    // === Vízszintes grafikus idővonal adat ===
+    // Minden időpontnak proporcionális pozíció.
+    const allTimelineDates = timelineEvents.map((e) =>
+      new Date(e.date + "-01").getTime()
+    );
+    const todayMs = (() => {
+      const t = new Date();
+      t.setDate(1);
+      return t.getTime();
+    })();
+    let tlMin = null,
+      tlMax = null;
+    if (allTimelineDates.length > 0) {
+      tlMin = Math.min(...allTimelineDates, todayMs);
+      tlMax = Math.max(...allTimelineDates, todayMs);
+      // Adj egy hónap padding-et oldalt
+      tlMin -= 30 * 24 * 60 * 60 * 1000;
+      tlMax += 30 * 24 * 60 * 60 * 1000;
+    }
+    const tlSpan = tlMax && tlMin ? Math.max(1, tlMax - tlMin) : 1;
+    const tlPct = (ms) => ((ms - tlMin) / tlSpan) * 100;
+
     return (
       <div className="space-y-4">
+        {/* Grafikus vízszintes idővonal */}
+        {timelineEvents.length > 0 && tlMin && tlMax && (
+          <div className="bg-white border border-gray-200 rounded-lg p-4">
+            <h3 className="font-semibold text-gray-800 mb-3 flex items-center gap-2">
+              <Calendar size={18} /> Finanszírozási folyamat — grafikus
+              áttekintés
+            </h3>
+            {(() => {
+              // Évhatárok generálása az alap rácshoz
+              const startD = new Date(tlMin);
+              const endD = new Date(tlMax);
+              const years = [];
+              for (
+                let y = startD.getFullYear();
+                y <= endD.getFullYear();
+                y++
+              ) {
+                years.push(y);
+              }
+              const eventsWithLanes = timelineEvents.map((e) => {
+                const ms = new Date(e.date + "-01").getTime();
+                return { ...e, ms, pct: tlPct(ms) };
+              });
+              // Lane assignment: ne legyenek átfedő címkék
+              // Ha két esemény közelebb mint 8% a tengelyen, ütemezzük új lane-re
+              const lanes = [];
+              eventsWithLanes.forEach((e) => {
+                let placed = false;
+                for (let li = 0; li < lanes.length; li++) {
+                  const lane = lanes[li];
+                  const last = lane[lane.length - 1];
+                  if (e.pct - last.pct > 12) {
+                    lane.push(e);
+                    e.lane = li;
+                    placed = true;
+                    break;
+                  }
+                }
+                if (!placed) {
+                  e.lane = lanes.length;
+                  lanes.push([e]);
+                }
+              });
+              const colorMap = {
+                green: { bg: "#16a34a", soft: "#bbf7d0" },
+                red: { bg: "#dc2626", soft: "#fecaca" },
+                blue: { bg: "#2563eb", soft: "#bfdbfe" },
+                gray: { bg: "#6b7280", soft: "#e5e7eb" },
+              };
+              const iconMap = {
+                equityIn: "💰",
+                loanIn: "🏦",
+                end: "🏁",
+                scenario: "⚡",
+              };
+              const trackHeight = 70 + lanes.length * 70;
+              return (
+                <div
+                  className="relative"
+                  style={{ height: `${trackHeight}px` }}
+                >
+                  {/* Évek alap rácsa */}
+                  <div className="absolute inset-0">
+                    {years.map((y) => {
+                      const yStart = new Date(y, 0, 1).getTime();
+                      const pct = tlPct(yStart);
+                      if (pct < -2 || pct > 102) return null;
+                      return (
+                        <div
+                          key={y}
+                          className="absolute top-0 bottom-0 border-l border-gray-200"
+                          style={{ left: `${pct}%` }}
+                        >
+                          <span className="absolute -top-1 left-1 text-xs text-gray-500 font-medium bg-white px-1">
+                            {y}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                  {/* Központi tengely */}
+                  <div
+                    className="absolute left-0 right-0 h-1 bg-gradient-to-r from-gray-300 via-indigo-300 to-gray-300 rounded"
+                    style={{ top: "40px" }}
+                  />
+                  {/* "Most" vonal */}
+                  <div
+                    className="absolute top-2 bottom-2 border-l-2 border-dashed border-blue-500"
+                    style={{ left: `${tlPct(todayMs)}%` }}
+                  >
+                    <span className="absolute -top-1 -translate-x-1/2 left-0 text-xs bg-blue-500 text-white px-1.5 py-0.5 rounded-full whitespace-nowrap">
+                      most
+                    </span>
+                  </div>
+                  {/* Események */}
+                  {eventsWithLanes.map((e, idx) => {
+                    const c = colorMap[e.color] || colorMap.gray;
+                    const laneOffset = e.lane * 70;
+                    const above = e.lane % 2 === 0;
+                    const bubbleTop = above
+                      ? `${40 - 30 - laneOffset / 2}px`
+                      : `${40 + 14 + laneOffset / 2}px`;
+                    return (
+                      <div key={idx} className="absolute" style={{ left: `${e.pct}%`, top: 0, bottom: 0 }}>
+                        {/* Pötty a tengelyen */}
+                        <div
+                          className="absolute w-4 h-4 rounded-full border-2 border-white shadow"
+                          style={{
+                            top: "34px",
+                            left: "-8px",
+                            backgroundColor: c.bg,
+                          }}
+                        />
+                        {/* Csatlakozó vonal */}
+                        <div
+                          className="absolute w-0.5"
+                          style={{
+                            left: "-1px",
+                            top: above
+                              ? `${44 - 30 - laneOffset / 2 + 18}px`
+                              : "42px",
+                            height: `${laneOffset / 2 + 8}px`,
+                            backgroundColor: c.bg,
+                            opacity: 0.4,
+                          }}
+                        />
+                        {/* Buborék */}
+                        <div
+                          className="absolute -translate-x-1/2 px-2 py-1 rounded shadow-sm border text-xs whitespace-nowrap max-w-[200px] overflow-hidden text-ellipsis"
+                          style={{
+                            top: bubbleTop,
+                            backgroundColor: c.soft,
+                            borderColor: c.bg,
+                            color: "#111",
+                          }}
+                          title={`${e.label}\n${e.subLabel || ""}`}
+                        >
+                          <span className="mr-1">{iconMap[e.kind]}</span>
+                          <span className="font-medium">{e.label}</span>
+                          {e.amount !== 0 && (
+                            <span className="ml-1 font-semibold">
+                              {e.amount > 0 ? "+" : ""}
+                              {Math.abs(e.amount) >= 1000000
+                                ? `${(e.amount / 1000000).toFixed(1)}M`
+                                : `${Math.round(e.amount / 1000)}k`}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              );
+            })()}
+            {/* Jelmagyarázat */}
+            <div className="flex flex-wrap gap-3 text-xs text-gray-600 mt-2">
+              <div className="flex items-center gap-1">
+                <span className="w-3 h-3 rounded-full bg-green-600 inline-block" />
+                💰 Önerő érkezik
+              </div>
+              <div className="flex items-center gap-1">
+                <span className="w-3 h-3 rounded-full bg-red-600 inline-block" />
+                🏦 Hitel folyósítás
+              </div>
+              <div className="flex items-center gap-1">
+                <span className="w-3 h-3 rounded-full bg-blue-600 inline-block" />
+                ⚡ Szcenárió esemény
+              </div>
+              <div className="flex items-center gap-1">
+                <span className="w-3 h-3 rounded-full bg-gray-500 inline-block" />
+                🏁 Lezárás
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Vizuális idővonal */}
         {Object.keys(grouped).length > 0 && (
           <div className="bg-white border border-gray-200 rounded-lg p-4">
