@@ -631,6 +631,8 @@ const FamilyOrganizerApp = () => {
   const [editingHazFinancingSource, setEditingHazFinancingSource] = useState(null);
   const [showHazScenarioModal, setShowHazScenarioModal] = useState(false);
   const [editingHazScenario, setEditingHazScenario] = useState(null);
+  const [showHazInsuranceModal, setShowHazInsuranceModal] = useState(false);
+  const [editingHazInsurance, setEditingHazInsurance] = useState(null);
 
   // Family temp statek
 
@@ -9037,6 +9039,15 @@ const FamilyOrganizerApp = () => {
             id: `haz-end-${project.id}-${s.id}`,
           });
         }
+        if (s.subsidyEndDate) {
+          upcoming.push({
+            date: s.subsidyEndDate + "-01",
+            label: `${s.name} — kamattámogatás vége${
+              s.subsidyCondition ? ` (${s.subsidyCondition})` : ""
+            }`,
+            id: `haz-subsidy-${project.id}-${s.id}`,
+          });
+        }
       });
       scenarios.forEach((sc) => {
         if (sc.plannedDate) {
@@ -14458,6 +14469,146 @@ const FamilyOrganizerApp = () => {
               </button>
             </div>
           ) : (
+            <>
+            {/* Forgatókönyv-összehasonlító táblázat, ha 2+ projekt van */}
+            {projects.length >= 2 && (
+              <div className="bg-white border border-gray-200 rounded-lg p-4 mb-4">
+                <h3 className="font-semibold text-gray-800 mb-3 flex items-center gap-2">
+                  <BarChart3 size={18} /> Forgatókönyvek összehasonlítása
+                </h3>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead className="bg-gray-50">
+                      <tr>
+                        <th className="text-left p-2">Szempont</th>
+                        {projects.map((p) => (
+                          <th key={p.id} className="text-left p-2 min-w-[140px]">
+                            {p.name}
+                          </th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {[
+                        [
+                          "Típus",
+                          (p) => HAZ_PROJECT_TYPES[p.type]?.label || p.type,
+                        ],
+                        [
+                          "Tervezett keret",
+                          (p) =>
+                            `${(p.plannedBudget || 0).toLocaleString()} Ft`,
+                        ],
+                        [
+                          "Önerő",
+                          (p) => {
+                            const eq = (p.financingPlan?.sources || [])
+                              .filter(
+                                (s) =>
+                                  FINANCING_SOURCE_TYPES[s.type]?.kind ===
+                                  "equity"
+                              )
+                              .reduce(
+                                (sum, s) => sum + (parseFloat(s.amount) || 0),
+                                0
+                              );
+                            return `${eq.toLocaleString()} Ft`;
+                          },
+                        ],
+                        [
+                          "Hitelek",
+                          (p) => {
+                            const ln = (p.financingPlan?.sources || [])
+                              .filter(
+                                (s) =>
+                                  FINANCING_SOURCE_TYPES[s.type]?.kind === "loan"
+                              )
+                              .reduce(
+                                (sum, s) => sum + (parseFloat(s.amount) || 0),
+                                0
+                              );
+                            return `${ln.toLocaleString()} Ft`;
+                          },
+                        ],
+                        [
+                          "Havi törlesztő",
+                          (p) => {
+                            const monthly = (p.financingPlan?.sources || [])
+                              .filter(
+                                (s) =>
+                                  FINANCING_SOURCE_TYPES[s.type]?.kind ===
+                                    "loan" && s.status !== "suspended"
+                              )
+                              .reduce(
+                                (sum, s) =>
+                                  sum +
+                                  (parseFloat(s.monthlyPayment) ||
+                                    calcAnnuityPayment(
+                                      s.amount,
+                                      s.thm,
+                                      s.termYears
+                                    )),
+                                0
+                              );
+                            return `${Math.round(monthly).toLocaleString()} Ft`;
+                          },
+                        ],
+                        [
+                          "Tényleges költés",
+                          (p) =>
+                            `${(p.costs || [])
+                              .reduce(
+                                (sum, c) =>
+                                  sum + (parseFloat(c.actualAmount) || 0),
+                                0
+                              )
+                              .toLocaleString()} Ft`,
+                        ],
+                        [
+                          "Cél beköltözés",
+                          (p) =>
+                            p.targetMoveInDate
+                              ? new Date(p.targetMoveInDate).toLocaleDateString(
+                                  "hu-HU"
+                                )
+                              : "—",
+                        ],
+                        [
+                          "Folyamat",
+                          (p) => {
+                            const total = (p.timeline || []).length;
+                            const done = (p.timeline || []).filter(
+                              (t) => t.completed
+                            ).length;
+                            return total
+                              ? `${done}/${total} (${Math.round(
+                                  (done / total) * 100
+                                )}%)`
+                              : "—";
+                          },
+                        ],
+                      ].map(([label, fn]) => (
+                        <tr key={label} className="border-t">
+                          <td className="p-2 font-medium text-gray-700">
+                            {label}
+                          </td>
+                          {projects.map((p) => (
+                            <td key={p.id} className="p-2">
+                              {fn(p)}
+                            </td>
+                          ))}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <p className="text-xs text-gray-500 mt-2">
+                  Tipp: ha egy projekten belül a "duplikálás" gombbal létrehozol
+                  egy variánst (pl. "alacsonyabb keret + nagyobb önerő"),
+                  összehasonlíthatod őket itt.
+                </p>
+              </div>
+            )}
             <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
               {projects.map((p) => {
                 const typeMeta = HAZ_PROJECT_TYPES[p.type] || HAZ_PROJECT_TYPES.used;
@@ -14541,6 +14692,7 @@ const FamilyOrganizerApp = () => {
                 );
               })}
             </div>
+            </>
           )}
         </div>
       );
@@ -14600,6 +14752,38 @@ const FamilyOrganizerApp = () => {
                   </option>
                 ))}
               </select>
+              <button
+                onClick={() => window.print()}
+                className="p-2 text-gray-600 hover:bg-gray-100 rounded"
+                title="Nyomtatás / PDF mentés"
+              >
+                <Download size={18} />
+              </button>
+              <button
+                onClick={async () => {
+                  const newName = window.prompt(
+                    "Új projekt neve (forgatókönyv másolat):",
+                    `${project.name} — variáns`
+                  );
+                  if (!newName) return;
+                  const clone = JSON.parse(JSON.stringify(project));
+                  clone.id = Date.now();
+                  clone.name = newName;
+                  clone.createdAt = new Date().toISOString();
+                  const newData = { ...data };
+                  newData.hazvasarlasProjects = [
+                    ...(newData.hazvasarlasProjects || []),
+                    clone,
+                  ];
+                  setData(newData);
+                  await saveUserData(newData);
+                  setSelectedHazvasarlasProject(clone);
+                }}
+                className="p-2 text-purple-600 hover:bg-purple-50 rounded"
+                title="Forgatókönyv duplikálása (mi lenne, ha…)"
+              >
+                <Repeat size={18} />
+              </button>
               <button
                 onClick={() => {
                   setEditingItem(project);
@@ -15300,6 +15484,162 @@ const FamilyOrganizerApp = () => {
     );
   };
 
+  // === Banki / jogi költségek automatikus kalkulátora ===
+  // Magyar használt és új ingatlan vásárlás tipikus mellékköltségei.
+  const autoFillBankFees = async (project) => {
+    const selectedOption = (project.options || []).find(
+      (o) => o.id === project.selectedOptionId
+    );
+    const purchasePrice =
+      parseFloat(selectedOption?.price) ||
+      parseFloat(project.plannedBudget) ||
+      0;
+    if (!purchasePrice) {
+      alert(
+        "Adj meg vételárat (válassz egy ingatlan opciót, vagy állítsd be a projekt keretét), hogy ki tudjam számolni a tipikus költségeket."
+      );
+      return;
+    }
+
+    const totalLoans = (project.financingPlan?.sources || [])
+      .filter((s) => FINANCING_SOURCE_TYPES[s.type]?.kind === "loan")
+      .reduce((sum, s) => sum + (parseFloat(s.amount) || 0), 0);
+
+    const isNew = project.type === "new";
+    const isBuild = project.type === "build";
+
+    // Tipikus tételek
+    const items = [];
+
+    // Vagyonszerzési illeték: 4% (CSOK esetén lehet 0% — figyelmeztetjük)
+    items.push({
+      category: "Vagyonszerzési illeték",
+      description: isNew
+        ? "4%, ÁFA-val csökkenthető. CSOK esetén jellemzően mentes."
+        : "4% a vételár után. CSOK esetén első ingatlan vásárláskor mentes lehet.",
+      plannedAmount: Math.round(purchasePrice * 0.04),
+    });
+
+    // Ügyvédi díj: ~0.7%, min 60-80k
+    items.push({
+      category: "Ügyvédi díj",
+      description: "~0.5–1% a vételár után, általában 0.7%",
+      plannedAmount: Math.max(60000, Math.round(purchasePrice * 0.007)),
+    });
+
+    // Földhivatali bejegyzési illeték: 6600 Ft per ingatlan
+    items.push({
+      category: "Földhivatali bejegyzés",
+      description: "6 600 Ft tulajdoni bejegyzési díj",
+      plannedAmount: 6600,
+    });
+
+    // Energetikai tanúsítvány: ~30k Ft (kötelező, általában az eladó fizeti, de érdemes számolni vele)
+    if (!isBuild) {
+      items.push({
+        category: "Energetikai tanúsítvány",
+        description: "Kötelező, általában az eladó fizeti (~30 000 Ft)",
+        plannedAmount: 30000,
+      });
+    }
+
+    // Közjegyzői díj — tartozás-elismerő okirat hitelfelvételnél
+    if (totalLoans > 0) {
+      // Tartozáselismerő okirat: kb a hitelösszeg 0.1-0.3%-a, plusz alapdíj
+      const notaryFee = Math.min(
+        300000,
+        Math.max(50000, Math.round(totalLoans * 0.0015))
+      );
+      items.push({
+        category: "Közjegyzői díj",
+        description: "Tartozáselismerő közjegyzői okirat (hitelfelvételnél)",
+        plannedAmount: notaryFee,
+      });
+    }
+
+    // Bank értékbecslés
+    if (totalLoans > 0) {
+      items.push({
+        category: "Bank értékbecslés",
+        description: "Banki értékbecslés ingatlanra (~30–60 000 Ft)",
+        plannedAmount: 45000,
+      });
+    }
+
+    // Folyósítási díj: a hitel 1%-a, max 200k jellemzően
+    if (totalLoans > 0) {
+      const disbursementFee = Math.min(
+        200000,
+        Math.max(0, Math.round(totalLoans * 0.01))
+      );
+      items.push({
+        category: "Folyósítási díj",
+        description: "A hitelösszeg ~1%-a, általában maximalizálva",
+        plannedAmount: disbursementFee,
+      });
+    }
+
+    // Hitelközvetítői díj — sok közvetítő ingyenes (a banktól kapja a jutalékot),
+    // de jelezzük 0-val, hogy a felhasználó tudja, hogy szempont
+    if (totalLoans > 0) {
+      items.push({
+        category: "Hitelközvetítő",
+        description: "0 Ft általában, ha banktól kapja a jutalékot",
+        plannedAmount: 0,
+      });
+    }
+
+    // Tulajdoni lap és térképmásolat
+    items.push({
+      category: "Tulajdoni lap, térképmásolat",
+      description: "TakarNet díjak (~5–10 000 Ft)",
+      plannedAmount: 8000,
+    });
+
+    // Költözés
+    items.push({
+      category: "Költözés",
+      description: "Költöztető cég, csomagolóanyag (~80–200 000 Ft)",
+      plannedAmount: 150000,
+    });
+
+    // Az új tételeket vagy felülírjuk (ha létezik ugyanaz a kategória és nincs még
+    // tényleges összeg), vagy hozzáadjuk
+    await updateHazvasarlasProject(project.id, (p) => {
+      const existing = p.costs || [];
+      const merged = [...existing];
+      let added = 0;
+      let updated = 0;
+      items.forEach((it) => {
+        const existingItem = merged.find(
+          (e) =>
+            e.category === it.category &&
+            (!e.actualAmount || parseFloat(e.actualAmount) === 0)
+        );
+        if (existingItem) {
+          existingItem.plannedAmount = it.plannedAmount;
+          existingItem.description = it.description;
+          updated++;
+        } else {
+          merged.push({
+            ...it,
+            id: Date.now() + Math.random(),
+            paid: false,
+            actualAmount: 0,
+          });
+          added++;
+        }
+      });
+      console.log(`Banki költségek: ${added} új, ${updated} frissítve.`);
+      return { ...p, costs: merged };
+    });
+
+    alert(
+      `Banki költségek hozzáadva a tervhez a ${purchasePrice.toLocaleString()} Ft vételár alapján.\n\n` +
+        `Ezek tájékoztató jellegű becslések — egyeztess banki és ügyvédi ajánlatokat a pontos számokért.`
+    );
+  };
+
   const renderHazvasarlasBudget = (project) => {
     const costs = project.costs || [];
     const totalPlanned = costs.reduce(
@@ -15342,26 +15682,36 @@ const FamilyOrganizerApp = () => {
           </div>
         </div>
 
-        <div className="flex justify-between items-center">
+        <div className="flex flex-wrap justify-between items-center gap-2">
           <h3 className="font-semibold text-gray-800">Költségtételek</h3>
-          <button
-            onClick={() => {
-              setEditingHazCost(null);
-              setFormData({
-                category: "",
-                description: "",
-                plannedAmount: "",
-                actualAmount: "",
-                paid: false,
-                vendor: "",
-              });
-              setShowHazCostModal(true);
-            }}
-            className="px-3 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 text-sm flex items-center gap-1"
-          >
-            <Plus size={16} />
-            Új tétel
-          </button>
+          <div className="flex gap-2">
+            <button
+              onClick={() => autoFillBankFees(project)}
+              className="px-3 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm flex items-center gap-1"
+              title="Tipikus banki és jogi költségek automatikus kitöltése"
+            >
+              <Sparkles size={16} />
+              Banki költségek
+            </button>
+            <button
+              onClick={() => {
+                setEditingHazCost(null);
+                setFormData({
+                  category: "",
+                  description: "",
+                  plannedAmount: "",
+                  actualAmount: "",
+                  paid: false,
+                  vendor: "",
+                });
+                setShowHazCostModal(true);
+              }}
+              className="px-3 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 text-sm flex items-center gap-1"
+            >
+              <Plus size={16} />
+              Új tétel
+            </button>
+          </div>
         </div>
 
         <div className="overflow-x-auto bg-white rounded-lg border border-gray-200">
@@ -15471,8 +15821,108 @@ const FamilyOrganizerApp = () => {
   const renderHazvasarlasRooms = (project) => {
     const rooms = project.rooms || [];
     const furniture = project.furniture || [];
+    // Felújítási idővonal: van-e tétel plannedStart/End-del?
+    const scheduledItems = furniture.filter(
+      (f) => f.plannedStartDate || f.plannedEndDate
+    );
+    let timelineRange = null;
+    if (scheduledItems.length > 0) {
+      const dates = scheduledItems
+        .flatMap((f) => [f.plannedStartDate, f.plannedEndDate])
+        .filter(Boolean)
+        .map((d) => new Date(d).getTime());
+      if (dates.length > 0) {
+        const min = Math.min(...dates);
+        const max = Math.max(...dates);
+        timelineRange = { min, max, span: Math.max(1, max - min) };
+      }
+    }
+
     return (
       <div className="space-y-4">
+        {/* Felújítás / berendezés ütemterv */}
+        {timelineRange && (
+          <div className="bg-white border border-gray-200 rounded-lg p-4">
+            <h3 className="font-semibold text-gray-800 mb-3 flex items-center gap-2">
+              <Calendar size={18} /> Felújítás / berendezés ütemterv
+            </h3>
+            <div className="text-xs text-gray-500 mb-2 flex justify-between">
+              <span>{new Date(timelineRange.min).toLocaleDateString("hu-HU")}</span>
+              <span>{new Date(timelineRange.max).toLocaleDateString("hu-HU")}</span>
+            </div>
+            <div className="space-y-2">
+              {scheduledItems
+                .sort(
+                  (a, b) =>
+                    new Date(a.plannedStartDate || a.plannedEndDate) -
+                    new Date(b.plannedStartDate || b.plannedEndDate)
+                )
+                .map((f) => {
+                  const start = new Date(
+                    f.plannedStartDate || f.plannedEndDate
+                  ).getTime();
+                  const end = new Date(
+                    f.plannedEndDate || f.plannedStartDate
+                  ).getTime();
+                  const startPct =
+                    ((start - timelineRange.min) / timelineRange.span) * 100;
+                  const endPct =
+                    ((end - timelineRange.min) / timelineRange.span) * 100;
+                  const widthPct = Math.max(2, endPct - startPct);
+                  const room = rooms.find((r) => r.id === f.roomId);
+                  const statusColor = {
+                    tervezett: "bg-gray-400",
+                    kiválasztva: "bg-blue-400",
+                    megrendelve: "bg-yellow-500",
+                    megérkezett: "bg-orange-500",
+                    beépítve: "bg-green-500",
+                  }[f.status] || "bg-gray-400";
+                  return (
+                    <div key={f.id} className="flex items-center gap-2 text-xs">
+                      <div className="w-32 truncate" title={f.name}>
+                        <span className="font-medium">{f.name}</span>
+                        {room && (
+                          <span className="text-gray-500 ml-1">
+                            ({room.name})
+                          </span>
+                        )}
+                      </div>
+                      <div className="flex-1 bg-gray-100 rounded h-5 relative">
+                        <div
+                          className={`absolute h-5 rounded ${statusColor} opacity-80`}
+                          style={{
+                            left: `${startPct}%`,
+                            width: `${widthPct}%`,
+                          }}
+                          title={`${new Date(start).toLocaleDateString("hu-HU")} — ${new Date(end).toLocaleDateString("hu-HU")}`}
+                        />
+                      </div>
+                      <div className="w-20 text-right text-gray-600">
+                        {(parseFloat(f.actualPrice) || parseFloat(f.plannedPrice) || 0)
+                          .toLocaleString()}{" "}
+                        Ft
+                      </div>
+                    </div>
+                  );
+                })}
+            </div>
+            <div className="flex flex-wrap gap-2 text-xs text-gray-600 mt-3">
+              {[
+                ["tervezett", "bg-gray-400"],
+                ["kiválasztva", "bg-blue-400"],
+                ["megrendelve", "bg-yellow-500"],
+                ["megérkezett", "bg-orange-500"],
+                ["beépítve", "bg-green-500"],
+              ].map(([s, c]) => (
+                <div key={s} className="flex items-center gap-1">
+                  <span className={`inline-block w-3 h-3 rounded ${c}`} />
+                  {s}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
         <div className="flex justify-between items-center">
           <h3 className="font-semibold text-gray-800">Szobák</h3>
           <button
@@ -16866,6 +17316,318 @@ const FamilyOrganizerApp = () => {
             </div>
           </div>
         </div>
+
+        {/* Önerő-növelő hatás csúszka */}
+        {loansForSim.length > 0 && totalLoans > 0 && (() => {
+          const sliderMax = Math.min(totalLoans, 30000000);
+          const boost = parseFloat(project.financingPlan?.equityBoost) || 0;
+          // Hatás: a megnövelt önerő arányosan csökkenti a hitelek tartozását.
+          // Az össz havi törlesztő arányos csökkenése a hitel összegével.
+          const ratio = totalLoans > 0 ? Math.max(0, totalLoans - boost) / totalLoans : 1;
+          const baseTotalMonthly = loansForSim
+            .filter((l) => l.status !== "suspended")
+            .reduce(
+              (sum, l) =>
+                sum +
+                (parseFloat(l.monthlyPayment) ||
+                  calcAnnuityPayment(l.amount, l.thm, l.termYears)),
+              0
+            );
+          const newTotalMonthly = baseTotalMonthly * ratio;
+          // Megspórolt kamat egyszerűsítve: futamidő * havi különbség
+          // Hosszabb (átlagos) futamidőt használunk
+          const avgTerm = loansForSim.length
+            ? loansForSim.reduce(
+                (s, l) => s + (parseFloat(l.termYears) || 15),
+                0
+              ) / loansForSim.length
+            : 15;
+          const interestSaved = (baseTotalMonthly - newTotalMonthly) * avgTerm * 12 - boost;
+          return (
+            <div className="bg-white border border-gray-200 rounded-lg p-4">
+              <h3 className="font-semibold text-gray-800 mb-3 flex items-center gap-2">
+                <TrendingUp size={18} /> Önerő-növelő hatás
+              </h3>
+              <div className="flex items-center gap-3 mb-3">
+                <input
+                  type="range"
+                  min="0"
+                  max={sliderMax}
+                  step="500000"
+                  value={boost}
+                  onChange={(e) =>
+                    updateHazvasarlasProject(project.id, (p) => ({
+                      ...p,
+                      financingPlan: {
+                        ...(p.financingPlan || {}),
+                        equityBoost: parseFloat(e.target.value),
+                      },
+                    }))
+                  }
+                  className="flex-1"
+                />
+                <span className="w-28 text-right font-semibold">
+                  +{(boost / 1000000).toFixed(1)} M Ft
+                </span>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-2 text-sm">
+                <div className="bg-gray-50 border border-gray-200 rounded p-2">
+                  <div className="text-xs text-gray-600">Új össz. hitel</div>
+                  <div className="font-bold">
+                    {Math.round(totalLoans - boost).toLocaleString()} Ft
+                  </div>
+                </div>
+                <div className="bg-green-50 border border-green-200 rounded p-2">
+                  <div className="text-xs text-green-600">Új havi törlesztő</div>
+                  <div className="font-bold text-green-800">
+                    {Math.round(newTotalMonthly).toLocaleString()} Ft
+                  </div>
+                  <div className="text-xs text-gray-600 mt-0.5">
+                    -{Math.round(baseTotalMonthly - newTotalMonthly).toLocaleString()} Ft / hó
+                  </div>
+                </div>
+                <div className="bg-blue-50 border border-blue-200 rounded p-2">
+                  <div className="text-xs text-blue-600">
+                    Becsült kamat-megtakarítás*
+                  </div>
+                  <div className="font-bold text-blue-800">
+                    {Math.max(0, Math.round(interestSaved)).toLocaleString()} Ft
+                  </div>
+                </div>
+              </div>
+              <p className="text-xs text-gray-500 mt-2">
+                * A becslés feltételezi, hogy a plusz önerő arányosan csökkenti
+                az összes hitel tartozását. A kamat-megtakarítás közelítő, az
+                átlagos futamidőt használja.
+              </p>
+            </div>
+          );
+        })()}
+
+        {/* Biztosítások */}
+        <div className="bg-white border border-gray-200 rounded-lg">
+          <div className="p-3 border-b border-gray-200 flex justify-between items-center">
+            <h3 className="font-semibold text-gray-800 flex items-center gap-2">
+              <Heart size={18} /> Biztosítások
+            </h3>
+            <button
+              onClick={() => {
+                setEditingHazInsurance(null);
+                setFormData({
+                  name: "",
+                  type: "lakásbiztosítás",
+                  insurer: "",
+                  monthlyPremium: "",
+                  annualPremium: "",
+                  required: false,
+                  coverage: "",
+                  notes: "",
+                });
+                setShowHazInsuranceModal(true);
+              }}
+              className="px-3 py-1 bg-pink-600 text-white rounded text-sm flex items-center gap-1"
+            >
+              <Plus size={14} /> Új biztosítás
+            </button>
+          </div>
+          {(project.financingPlan?.insurances || []).length === 0 ? (
+            <div className="p-3">
+              <p className="text-sm text-gray-500 italic mb-2">
+                Tipikus biztosítások: lakásbiztosítás (kötelező hitelfelvételnél),
+                hitelfedezeti biztosítás, élet- / baleseti biztosítás (a bank gyakran
+                jutalékot ad ezekre alacsonyabb kamattal cserébe).
+              </p>
+              <button
+                onClick={async () => {
+                  await updateHazvasarlasProject(project.id, (p) => ({
+                    ...p,
+                    financingPlan: {
+                      ...(p.financingPlan || {}),
+                      insurances: [
+                        ...(p.financingPlan?.insurances || []),
+                        {
+                          id: Date.now(),
+                          name: "Lakásbiztosítás",
+                          type: "lakásbiztosítás",
+                          monthlyPremium: 6000,
+                          annualPremium: 72000,
+                          required: true,
+                          coverage: "Tűz, ár, vihar, vagyon",
+                          notes: "Hitelfelvételhez gyakran kötelező",
+                        },
+                        {
+                          id: Date.now() + 1,
+                          name: "Hitelfedezeti biztosítás",
+                          type: "hitelfedezeti",
+                          monthlyPremium: 4000,
+                          annualPremium: 48000,
+                          required: false,
+                          notes: "A bank gyakran ehhez köti a kedvezőbb kamatot",
+                        },
+                      ],
+                    },
+                  }));
+                }}
+                className="text-sm text-blue-600 hover:underline"
+              >
+                + Tipikus biztosítások hozzáadása
+              </button>
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead className="bg-gray-50">
+                  <tr>
+                    <th className="text-left p-2">Név</th>
+                    <th className="text-left p-2">Típus</th>
+                    <th className="text-right p-2">Havi díj</th>
+                    <th className="text-right p-2">Éves díj</th>
+                    <th className="text-center p-2">Kötelező</th>
+                    <th className="p-2"></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(project.financingPlan?.insurances || []).map((ins) => (
+                    <tr key={ins.id} className="border-t">
+                      <td className="p-2 font-medium">{ins.name}</td>
+                      <td className="p-2 text-gray-600">{ins.type}</td>
+                      <td className="p-2 text-right">
+                        {parseFloat(ins.monthlyPremium || 0).toLocaleString()} Ft
+                      </td>
+                      <td className="p-2 text-right">
+                        {parseFloat(ins.annualPremium || 0).toLocaleString()} Ft
+                      </td>
+                      <td className="p-2 text-center">
+                        {ins.required ? (
+                          <span className="text-xs px-2 py-0.5 bg-red-100 text-red-700 rounded">
+                            Kötelező
+                          </span>
+                        ) : (
+                          <span className="text-xs px-2 py-0.5 bg-gray-100 text-gray-600 rounded">
+                            Opció
+                          </span>
+                        )}
+                      </td>
+                      <td className="p-2">
+                        <div className="flex gap-1 justify-end">
+                          <button
+                            onClick={() => {
+                              setEditingHazInsurance(ins);
+                              setFormData({ ...ins });
+                              setShowHazInsuranceModal(true);
+                            }}
+                            className="text-blue-600 hover:bg-blue-50 p-1 rounded"
+                          >
+                            <Edit2 size={14} />
+                          </button>
+                          <button
+                            onClick={() =>
+                              updateHazvasarlasProject(project.id, (p) => ({
+                                ...p,
+                                financingPlan: {
+                                  ...(p.financingPlan || {}),
+                                  insurances: (
+                                    p.financingPlan?.insurances || []
+                                  ).filter((x) => x.id !== ins.id),
+                                },
+                              }))
+                            }
+                            className="text-red-600 hover:bg-red-50 p-1 rounded"
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                  <tr className="border-t bg-gray-50 font-semibold">
+                    <td className="p-2" colSpan={2}>
+                      Összesen havonta
+                    </td>
+                    <td className="p-2 text-right">
+                      {(project.financingPlan?.insurances || [])
+                        .reduce(
+                          (s, i) => s + (parseFloat(i.monthlyPremium) || 0),
+                          0
+                        )
+                        .toLocaleString()}{" "}
+                      Ft
+                    </td>
+                    <td className="p-2 text-right">
+                      {(project.financingPlan?.insurances || [])
+                        .reduce(
+                          (s, i) => s + (parseFloat(i.annualPremium) || 0),
+                          0
+                        )
+                        .toLocaleString()}{" "}
+                      Ft
+                    </td>
+                    <td colSpan={2}></td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+
+        {/* Inflációs nézet kapcsoló */}
+        {loansForSim.length > 0 && (
+          <div className="bg-white border border-gray-200 rounded-lg p-4">
+            <h3 className="font-semibold text-gray-800 mb-3 flex items-center gap-2">
+              <TrendingDown size={18} /> Inflációs reálérték
+            </h3>
+            <div className="flex flex-col md:flex-row md:items-center gap-3">
+              <div>
+                <label className="text-sm text-gray-600 mr-2">
+                  Várt inflációs ráta (% / év):
+                </label>
+                <input
+                  type="number"
+                  step="0.5"
+                  value={project.financingPlan?.inflationRate || ""}
+                  onChange={(e) =>
+                    updateHazvasarlasProject(project.id, (p) => ({
+                      ...p,
+                      financingPlan: {
+                        ...(p.financingPlan || {}),
+                        inflationRate: parseFloat(e.target.value) || 0,
+                      },
+                    }))
+                  }
+                  className="w-20 px-2 py-1 border border-gray-300 rounded text-sm"
+                  placeholder="4"
+                />
+              </div>
+              {(() => {
+                const infl =
+                  parseFloat(project.financingPlan?.inflationRate) || 0;
+                if (!infl || !cashflowHorizon) return null;
+                // Reálérték: a futamidő végén a havi törlesztő mennyit ér mai pénzben
+                const realRatio = 1 / Math.pow(1 + infl / 100, cashflowHorizon);
+                const realPeak = peakMonthly * realRatio;
+                const realAvg = avgMonthly * realRatio;
+                return (
+                  <div className="text-sm text-gray-700">
+                    <span className="mr-3">
+                      Csúcs havi teher mai pénzben{" "}
+                      {cashflowHorizon} év múlva:{" "}
+                      <b>{Math.round(realPeak).toLocaleString()} Ft</b>
+                    </span>
+                    <span>
+                      (átlag:{" "}
+                      <b>{Math.round(realAvg).toLocaleString()} Ft</b>)
+                    </span>
+                  </div>
+                );
+              })()}
+            </div>
+            <p className="text-xs text-gray-500 mt-2">
+              Az inflációval a havi nominális törlesztő reálértéke csökken — egy
+              ma "drágának" tűnő törlesztő 10–20 év múlva mai pénzben sokkal
+              kevesebbet ér.
+            </p>
+          </div>
+        )}
 
         {/* Szcenáriók (Lakás eladás utáni előtörlesztés stb.) */}
         <div className="bg-white rounded-lg border border-gray-200">
@@ -30818,6 +31580,40 @@ const FamilyOrganizerApp = () => {
                   className="w-full px-4 py-2 border border-gray-300 rounded-lg"
                 />
               </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Tervezett kezdés (felújításhoz)
+                  </label>
+                  <input
+                    type="date"
+                    value={formData.plannedStartDate || ""}
+                    onChange={(e) =>
+                      setFormData({
+                        ...formData,
+                        plannedStartDate: e.target.value,
+                      })
+                    }
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Tervezett befejezés
+                  </label>
+                  <input
+                    type="date"
+                    value={formData.plannedEndDate || ""}
+                    onChange={(e) =>
+                      setFormData({
+                        ...formData,
+                        plannedEndDate: e.target.value,
+                      })
+                    }
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+                  />
+                </div>
+              </div>
             </div>
             <div className="mt-6 flex gap-3">
               <button
@@ -30853,6 +31649,197 @@ const FamilyOrganizerApp = () => {
                   setFormData({});
                 }}
                 className="flex-1 px-4 py-3 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700"
+              >
+                Mentés
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Biztosítás modal */}
+      {showHazInsuranceModal && selectedHazvasarlasProject && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50 overflow-y-auto">
+          <div className="bg-white rounded-lg shadow-xl max-w-md w-full p-6 my-8 max-h-[90vh] overflow-y-auto">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-xl font-bold text-gray-800">
+                {editingHazInsurance ? "Biztosítás" : "Új biztosítás"}
+              </h3>
+              <button
+                onClick={() => setShowHazInsuranceModal(false)}
+                className="text-gray-500 hover:text-gray-700"
+              >
+                <X size={24} />
+              </button>
+            </div>
+            <div className="space-y-3">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Név *
+                </label>
+                <input
+                  type="text"
+                  value={formData.name || ""}
+                  onChange={(e) =>
+                    setFormData({ ...formData, name: e.target.value })
+                  }
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg"
+                  placeholder="pl. Lakásbiztosítás"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Típus
+                </label>
+                <select
+                  value={formData.type || "lakásbiztosítás"}
+                  onChange={(e) =>
+                    setFormData({ ...formData, type: e.target.value })
+                  }
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg"
+                >
+                  <option value="lakásbiztosítás">Lakásbiztosítás</option>
+                  <option value="hitelfedezeti">Hitelfedezeti</option>
+                  <option value="élet">Élet- / baleseti</option>
+                  <option value="építési">Építési / felelősségi</option>
+                  <option value="egyéb">Egyéb</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Biztosító
+                </label>
+                <input
+                  type="text"
+                  value={formData.insurer || ""}
+                  onChange={(e) =>
+                    setFormData({ ...formData, insurer: e.target.value })
+                  }
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg"
+                  placeholder="pl. Generali"
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Havi díj (Ft)
+                  </label>
+                  <input
+                    type="number"
+                    value={formData.monthlyPremium || ""}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setFormData({
+                        ...formData,
+                        monthlyPremium: val,
+                        annualPremium: val
+                          ? (parseFloat(val) * 12).toString()
+                          : "",
+                      });
+                    }}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Éves díj (Ft)
+                  </label>
+                  <input
+                    type="number"
+                    value={formData.annualPremium || ""}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setFormData({
+                        ...formData,
+                        annualPremium: val,
+                        monthlyPremium: val
+                          ? Math.round(parseFloat(val) / 12).toString()
+                          : "",
+                      });
+                    }}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+                  />
+                </div>
+              </div>
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={formData.required || false}
+                  onChange={(e) =>
+                    setFormData({ ...formData, required: e.target.checked })
+                  }
+                  className="w-4 h-4"
+                />
+                <span className="text-sm">Kötelező (pl. hitelhez)</span>
+              </label>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Fedezet
+                </label>
+                <input
+                  type="text"
+                  value={formData.coverage || ""}
+                  onChange={(e) =>
+                    setFormData({ ...formData, coverage: e.target.value })
+                  }
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg"
+                  placeholder="pl. tűz, vihar, vagyon, betörés"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Megjegyzés
+                </label>
+                <textarea
+                  rows="2"
+                  value={formData.notes || ""}
+                  onChange={(e) =>
+                    setFormData({ ...formData, notes: e.target.value })
+                  }
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg"
+                />
+              </div>
+            </div>
+            <div className="mt-6 flex gap-3">
+              <button
+                onClick={() => setShowHazInsuranceModal(false)}
+                className="flex-1 px-4 py-3 border border-gray-300 rounded-lg hover:bg-gray-50"
+              >
+                Mégse
+              </button>
+              <button
+                onClick={async () => {
+                  if (!formData.name) {
+                    alert("Név kötelező!");
+                    return;
+                  }
+                  await updateHazvasarlasProject(
+                    selectedHazvasarlasProject.id,
+                    (p) => {
+                      const item = {
+                        ...formData,
+                        id: editingHazInsurance?.id || Date.now(),
+                      };
+                      const existing = p.financingPlan?.insurances || [];
+                      const insurances = editingHazInsurance
+                        ? existing.map((x) =>
+                            x.id === editingHazInsurance.id ? item : x
+                          )
+                        : [...existing, item];
+                      return {
+                        ...p,
+                        financingPlan: {
+                          ...(p.financingPlan || {}),
+                          insurances,
+                        },
+                      };
+                    }
+                  );
+                  setShowHazInsuranceModal(false);
+                  setEditingHazInsurance(null);
+                  setFormData({});
+                }}
+                className="flex-1 px-4 py-3 bg-pink-600 text-white rounded-lg hover:bg-pink-700"
               >
                 Mentés
               </button>
@@ -31148,25 +32135,48 @@ const FamilyOrganizerApp = () => {
                       />
                     </div>
                   </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Eltérő törlesztő az első évben (Ft)
-                    </label>
-                    <input
-                      type="number"
-                      value={formData.firstYearPayment || ""}
-                      onChange={(e) =>
-                        setFormData({
-                          ...formData,
-                          firstYearPayment: e.target.value,
-                        })
-                      }
-                      className="w-full px-4 py-2 border border-gray-300 rounded-lg"
-                      placeholder="pl. CSOK kamattámogatás miatt"
-                    />
-                    {formData.amount && formData.thm && formData.termYears && (
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        Eltérő törlesztő az első évben (Ft)
+                      </label>
+                      <input
+                        type="number"
+                        value={formData.firstYearPayment || ""}
+                        onChange={(e) =>
+                          setFormData({
+                            ...formData,
+                            firstYearPayment: e.target.value,
+                          })
+                        }
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+                        placeholder="pl. CSOK kamattámogatás"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        Kamattámogatás vége
+                      </label>
+                      <input
+                        type="month"
+                        value={formData.subsidyEndDate || ""}
+                        onChange={(e) =>
+                          setFormData({
+                            ...formData,
+                            subsidyEndDate: e.target.value,
+                          })
+                        }
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+                      />
                       <p className="text-xs text-gray-500 mt-1">
-                        Számolt havi törlesztő:{" "}
+                        CSOK / Babaváró támogatás vége — emlékeztető előtte
+                      </p>
+                    </div>
+                  </div>
+                  {formData.amount && formData.thm && formData.termYears && (
+                    <p className="text-xs text-gray-500">
+                      Számolt havi törlesztő (annuitással):{" "}
+                      <b>
                         {Math.round(
                           calcAnnuityPayment(
                             formData.amount,
@@ -31175,8 +32185,25 @@ const FamilyOrganizerApp = () => {
                           )
                         ).toLocaleString()}{" "}
                         Ft
-                      </p>
-                    )}
+                      </b>
+                    </p>
+                  )}
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Támogatási feltétel emlékeztető
+                    </label>
+                    <input
+                      type="text"
+                      value={formData.subsidyCondition || ""}
+                      onChange={(e) =>
+                        setFormData({
+                          ...formData,
+                          subsidyCondition: e.target.value,
+                        })
+                      }
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg"
+                      placeholder="pl. 2. gyermek születése 2028-ig"
+                    />
                   </div>
                 </>
               )}
