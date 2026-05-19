@@ -9062,6 +9062,20 @@ const FamilyOrganizerApp = () => {
             id: `haz-subsidy-${project.id}-${s.id}`,
           });
         }
+        if (s.moratoriumStartDate) {
+          upcoming.push({
+            date: s.moratoriumStartDate + "-01",
+            label: `${s.name} — moratórium kezdete`,
+            id: `haz-mora-start-${project.id}-${s.id}`,
+          });
+        }
+        if (s.moratoriumEndDate) {
+          upcoming.push({
+            date: s.moratoriumEndDate + "-01",
+            label: `${s.name} — moratórium vége (törlesztés folytatódik)`,
+            id: `haz-mora-end-${project.id}-${s.id}`,
+          });
+        }
       });
       scenarios.forEach((sc) => {
         if (sc.plannedDate) {
@@ -16733,6 +16747,31 @@ const FamilyOrganizerApp = () => {
           status: s.status,
         });
       }
+      if (s.moratoriumStartDate) {
+        timelineEvents.push({
+          date: s.moratoriumStartDate,
+          kind: "moratorium",
+          label: `${s.name} — moratórium kezdete`,
+          subLabel:
+            s.moratoriumType === "full"
+              ? "teljes szünetelés"
+              : s.moratoriumType === "interestAccrues"
+              ? "kamat tőkésítve"
+              : "csak kamatfizetés",
+          amount: 0,
+          color: "yellow",
+        });
+      }
+      if (s.moratoriumEndDate) {
+        timelineEvents.push({
+          date: s.moratoriumEndDate,
+          kind: "moratoriumEnd",
+          label: `${s.name} — moratórium vége`,
+          subLabel: "törlesztés folytatódik",
+          amount: 0,
+          color: "yellow",
+        });
+      }
     });
     scenarios.forEach((sc) => {
       if (sc.plannedDate) {
@@ -16794,6 +16833,31 @@ const FamilyOrganizerApp = () => {
         ? parseFloat(loan.firstYearPayment)
         : standardPayment;
 
+      // Moratórium intervallum
+      const moratoriumStartIdx = loan.moratoriumStartDate
+        ? (() => {
+            const d = new Date(loan.moratoriumStartDate + "-01");
+            return (
+              (d.getFullYear() - startCashflow.getFullYear()) * 12 +
+              (d.getMonth() - startCashflow.getMonth())
+            );
+          })()
+        : null;
+      const moratoriumEndIdx = loan.moratoriumEndDate
+        ? (() => {
+            const d = new Date(loan.moratoriumEndDate + "-01");
+            return (
+              (d.getFullYear() - startCashflow.getFullYear()) * 12 +
+              (d.getMonth() - startCashflow.getMonth())
+            );
+          })()
+        : null;
+      const moratoriumType = loan.moratoriumType || "full";
+      const isInMoratorium = (m) => {
+        if (moratoriumStartIdx == null || moratoriumEndIdx == null) return false;
+        return m >= moratoriumStartIdx && m < moratoriumEndIdx;
+      };
+
       // Kezdő hónap: plannedDate vagy most
       const startD = loan.plannedDate
         ? new Date(loan.plannedDate + "-01")
@@ -16803,7 +16867,7 @@ const FamilyOrganizerApp = () => {
         (startD.getFullYear() - startCashflow.getFullYear()) * 12 +
           (startD.getMonth() - startCashflow.getMonth())
       );
-      // Vég hónap: endDate vagy plannedDate + termYears
+      // Vég hónap: endDate vagy plannedDate + termYears + moratórium hossz
       let endMonthIdx = horizonMonths;
       if (loan.endDate) {
         const endD = new Date(loan.endDate + "-01");
@@ -16835,8 +16899,6 @@ const FamilyOrganizerApp = () => {
             if (adj) {
               const prepay = parseFloat(adj.amount) || 0;
               balance = Math.max(0, balance - prepay);
-              // Új törlesztő (azonos hátralévő idővel) — ha jelezve van, hogy
-              // törlesztő-csökkentő, különben futamidő-csökkentő (változatlan)
               if (balance > 0 && remainingMonths > 0) {
                 if (monthlyRate === 0) {
                   payment = balance / remainingMonths;
@@ -16852,7 +16914,31 @@ const FamilyOrganizerApp = () => {
           }
         });
 
-        // Első évi eltérő törlesztő
+        // Moratórium kezelése
+        if (isInMoratorium(m)) {
+          if (moratoriumType === "full") {
+            // Teljes szünetelés (pl. Babaváró 3 év): nincs törlesztés,
+            // a kamat sincs (állami támogatás). A futamidő tolódik.
+            monthlyByMonth[m] = 0;
+            balanceByMonth[m] = balance;
+            // Nem növeljük monthsPaid-et, nem csökkentjük remainingMonths-t
+          } else if (moratoriumType === "interestAccrues") {
+            // Tőkésített kamat (a fennmaradó kamatot a tőkéhez adja)
+            const interest = balance * monthlyRate;
+            balance += interest;
+            monthlyByMonth[m] = 0;
+            balanceByMonth[m] = balance;
+          } else if (moratoriumType === "interestOnly") {
+            // Csak kamatfizetés, tőketartozás nem csökken
+            const interest = balance * monthlyRate;
+            monthlyByMonth[m] = interest;
+            balanceByMonth[m] = balance;
+          }
+          if (balance <= 0.5) break;
+          continue;
+        }
+
+        // Első évi eltérő törlesztő (a moratórium NEM számít az első évbe)
         const usePayment =
           monthsPaid < 12 && firstYearPayment !== standardPayment
             ? firstYearPayment
@@ -17027,12 +17113,15 @@ const FamilyOrganizerApp = () => {
                 red: { bg: "#dc2626", soft: "#fecaca" },
                 blue: { bg: "#2563eb", soft: "#bfdbfe" },
                 gray: { bg: "#6b7280", soft: "#e5e7eb" },
+                yellow: { bg: "#ca8a04", soft: "#fef08a" },
               };
               const iconMap = {
                 equityIn: "💰",
                 loanIn: "🏦",
                 end: "🏁",
                 scenario: "⚡",
+                moratorium: "⏸️",
+                moratoriumEnd: "▶️",
               };
               const trackHeight = 70 + lanes.length * 70;
               return (
@@ -17201,12 +17290,15 @@ const FamilyOrganizerApp = () => {
                             red: "bg-red-50 border-red-200 text-red-900",
                             blue: "bg-blue-50 border-blue-200 text-blue-900",
                             gray: "bg-gray-50 border-gray-200 text-gray-700",
+                            yellow: "bg-yellow-50 border-yellow-200 text-yellow-900",
                           };
                           const icon = {
                             equityIn: "💰",
                             loanIn: "🏦",
                             end: "🏁",
                             scenario: "⚡",
+                            moratorium: "⏸️",
+                            moratoriumEnd: "▶️",
                           }[e.kind];
                           return (
                             <div
@@ -17523,6 +17615,16 @@ const FamilyOrganizerApp = () => {
                             <span className="ml-1 px-1 bg-yellow-100 text-yellow-700 rounded">
                               Szüneteltetve
                             </span>
+                          )}
+                          {s.moratoriumStartDate && s.moratoriumEndDate && (
+                            <div className="mt-1">
+                              <span className="px-1 bg-yellow-100 text-yellow-800 rounded">
+                                ⏸️ Moratórium:{" "}
+                                {new Date(s.moratoriumStartDate + "-01").toLocaleDateString("hu-HU", { year: "numeric", month: "short" })}
+                                {" – "}
+                                {new Date(s.moratoriumEndDate + "-01").toLocaleDateString("hu-HU", { year: "numeric", month: "short" })}
+                              </span>
+                            </div>
                           )}
                         </td>
                         <td className="p-2">
@@ -32764,6 +32866,79 @@ const FamilyOrganizerApp = () => {
                       className="w-full px-4 py-2 border border-gray-300 rounded-lg"
                       placeholder="pl. 2. gyermek születése 2028-ig"
                     />
+                  </div>
+
+                  {/* Törlesztési moratórium */}
+                  <div className="border-t pt-3 mt-1">
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Törlesztési moratórium (pl. Babaváró gyerek születésekor)
+                    </label>
+                    <div className="grid grid-cols-2 gap-3 mb-2">
+                      <div>
+                        <label className="block text-xs text-gray-600 mb-1">
+                          Moratórium kezdete
+                        </label>
+                        <input
+                          type="month"
+                          value={formData.moratoriumStartDate || ""}
+                          onChange={(e) =>
+                            setFormData({
+                              ...formData,
+                              moratoriumStartDate: e.target.value,
+                            })
+                          }
+                          className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs text-gray-600 mb-1">
+                          Moratórium vége
+                        </label>
+                        <input
+                          type="month"
+                          value={formData.moratoriumEndDate || ""}
+                          onChange={(e) =>
+                            setFormData({
+                              ...formData,
+                              moratoriumEndDate: e.target.value,
+                            })
+                          }
+                          className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+                        />
+                      </div>
+                    </div>
+                    {(formData.moratoriumStartDate || formData.moratoriumEndDate) && (
+                      <div>
+                        <label className="block text-xs text-gray-600 mb-1">
+                          Moratórium típusa
+                        </label>
+                        <select
+                          value={formData.moratoriumType || "full"}
+                          onChange={(e) =>
+                            setFormData({
+                              ...formData,
+                              moratoriumType: e.target.value,
+                            })
+                          }
+                          className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"
+                        >
+                          <option value="full">
+                            Teljes szünetelés (állam fizet, pl. Babaváró)
+                          </option>
+                          <option value="interestAccrues">
+                            Tőkésített kamat (kamat hozzáadódik a tőkéhez)
+                          </option>
+                          <option value="interestOnly">
+                            Csak kamatfizetés (tőketartozás nem csökken)
+                          </option>
+                        </select>
+                        <p className="text-xs text-gray-500 mt-1">
+                          A futamidő automatikusan kitolódik a moratórium
+                          hosszával. Babaváró standard: <b>3 év teljes
+                          szünetelés</b> minden gyerek születésénél.
+                        </p>
+                      </div>
+                    )}
                   </div>
                 </>
               )}
