@@ -9017,6 +9017,58 @@ const FamilyOrganizerApp = () => {
       });
     });
 
+    // Házvásárlási finanszírozási idővonal események
+    (data.hazvasarlasProjects || []).forEach((project) => {
+      const sources = project.financingPlan?.sources || [];
+      const scenarios = project.financingPlan?.scenarios || [];
+      const upcoming = [];
+      sources.forEach((s) => {
+        if (s.plannedDate) {
+          upcoming.push({
+            date: s.plannedDate + "-01",
+            label: `${s.name} aktiválása`,
+            id: `haz-source-${project.id}-${s.id}`,
+          });
+        }
+        if (s.endDate) {
+          upcoming.push({
+            date: s.endDate + "-01",
+            label: `${s.name} lezárása`,
+            id: `haz-end-${project.id}-${s.id}`,
+          });
+        }
+      });
+      scenarios.forEach((sc) => {
+        if (sc.plannedDate) {
+          upcoming.push({
+            date: sc.plannedDate + "-01",
+            label: sc.name,
+            id: `haz-scenario-${project.id}-${sc.id}`,
+          });
+        }
+      });
+      upcoming.forEach((u) => {
+        const d = new Date(u.date);
+        if (d <= reminderDate && d >= today) {
+          const existing = data.notifications?.find(
+            (n) => n.relatedId === u.id
+          );
+          if (!existing) {
+            newNotifications.push({
+              id: Date.now() + Math.random(),
+              type: "hazvasarlas",
+              title: "Finanszírozási esemény közelít",
+              message: `${project.name} — ${u.label}: ${d.toLocaleDateString("hu-HU")}`,
+              date: u.date,
+              read: false,
+              relatedId: u.id,
+              createdAt: new Date().toISOString(),
+            });
+          }
+        }
+      });
+    });
+
     // Rezsi értesítők (rezsi értesítő időzítések)
     data.homes.forEach((home) => {
       home.utilitySchedules?.forEach((sch) => {
@@ -15896,6 +15948,201 @@ const FamilyOrganizerApp = () => {
       return acc;
     }, {});
 
+    // === HAVI CASH-FLOW SZIMULÁCIÓ ===
+    // Minden hitelhez kiszámoljuk az aktív hónapokat és a havi terhet.
+    // Szcenáriók előtörlesztései az adott hónapban csökkentik a tartozást
+    // és újraszámolják a törlesztőt.
+    const cashflowHorizon = (
+      (project.financingPlan?.cashflowHorizonYears) || 10
+    );
+    const horizonMonths = cashflowHorizon * 12;
+    const startCashflow = new Date();
+    startCashflow.setDate(1);
+    const rateAdjustment =
+      parseFloat(project.financingPlan?.stressRateDelta) || 0;
+    const monthlyIncome =
+      parseFloat(project.financingPlan?.monthlyIncome) || 0;
+
+    // Egy hitel szimulációja
+    const simulateLoan = (loan, withRateStress) => {
+      const monthlyByMonth = new Array(horizonMonths).fill(0);
+      const balanceByMonth = new Array(horizonMonths).fill(0);
+      if (loan.status === "suspended") return { monthlyByMonth, balanceByMonth };
+
+      const annualRate = (parseFloat(loan.thm) || 0) + rateAdjustment;
+      const monthlyRate = annualRate / 100 / 12;
+      const termMonths = (parseFloat(loan.termYears) || 0) * 12;
+      const principal = parseFloat(loan.amount) || 0;
+      const standardPayment =
+        parseFloat(loan.monthlyPayment) ||
+        (principal && termMonths
+          ? calcAnnuityPayment(principal, annualRate, parseFloat(loan.termYears))
+          : 0);
+      const firstYearPayment = loan.firstYearPayment
+        ? parseFloat(loan.firstYearPayment)
+        : standardPayment;
+
+      // Kezdő hónap: plannedDate vagy most
+      const startD = loan.plannedDate
+        ? new Date(loan.plannedDate + "-01")
+        : startCashflow;
+      const startMonthIdx = Math.max(
+        0,
+        (startD.getFullYear() - startCashflow.getFullYear()) * 12 +
+          (startD.getMonth() - startCashflow.getMonth())
+      );
+      // Vég hónap: endDate vagy plannedDate + termYears
+      let endMonthIdx = horizonMonths;
+      if (loan.endDate) {
+        const endD = new Date(loan.endDate + "-01");
+        endMonthIdx = Math.min(
+          horizonMonths,
+          (endD.getFullYear() - startCashflow.getFullYear()) * 12 +
+            (endD.getMonth() - startCashflow.getMonth())
+        );
+      }
+
+      let balance = principal;
+      let payment = standardPayment;
+      let monthsPaid = 0;
+      let remainingMonths = termMonths || horizonMonths;
+
+      for (let m = startMonthIdx; m < endMonthIdx && balance > 0.5; m++) {
+        // Először nézzük, hogy van-e ebben a hónapban valamilyen szcenárió
+        // hatása erre a hitelre
+        scenarios.forEach((sc) => {
+          if (!sc.plannedDate) return;
+          const scD = new Date(sc.plannedDate + "-01");
+          const scMonthIdx =
+            (scD.getFullYear() - startCashflow.getFullYear()) * 12 +
+            (scD.getMonth() - startCashflow.getMonth());
+          if (scMonthIdx === m) {
+            const adj = (sc.adjustments || []).find(
+              (a) => a.sourceId === loan.id
+            );
+            if (adj) {
+              const prepay = parseFloat(adj.amount) || 0;
+              balance = Math.max(0, balance - prepay);
+              // Új törlesztő (azonos hátralévő idővel) — ha jelezve van, hogy
+              // törlesztő-csökkentő, különben futamidő-csökkentő (változatlan)
+              if (balance > 0 && remainingMonths > 0) {
+                if (monthlyRate === 0) {
+                  payment = balance / remainingMonths;
+                } else {
+                  payment =
+                    (balance *
+                      monthlyRate *
+                      Math.pow(1 + monthlyRate, remainingMonths)) /
+                    (Math.pow(1 + monthlyRate, remainingMonths) - 1);
+                }
+              }
+            }
+          }
+        });
+
+        // Első évi eltérő törlesztő
+        const usePayment =
+          monthsPaid < 12 && firstYearPayment !== standardPayment
+            ? firstYearPayment
+            : payment;
+
+        const interest = balance * monthlyRate;
+        let principalPaid = Math.max(0, usePayment - interest);
+        if (principalPaid > balance) principalPaid = balance;
+        const actualPayment = principalPaid + interest;
+        balance = Math.max(0, balance - principalPaid);
+        monthlyByMonth[m] = actualPayment;
+        balanceByMonth[m] = balance;
+        monthsPaid++;
+        remainingMonths--;
+        if (balance <= 0.5) break;
+      }
+      return { monthlyByMonth, balanceByMonth };
+    };
+
+    // Egyenként szimulálja, majd összegez a chart adatokhoz
+    const loansForSim = sources.filter(
+      (s) => FINANCING_SOURCE_TYPES[s.type]?.kind === "loan"
+    );
+    const loanSimulations = loansForSim.map((l) => ({
+      loan: l,
+      sim: simulateLoan(l, false),
+    }));
+    const stressSimulations = loansForSim.map((l) => ({
+      loan: l,
+      sim: simulateLoan({ ...l, _stress: true }, true),
+    }));
+
+    // Egyszeri pénzbeáramlások szcenáriókból (pl. lakás eladás)
+    // A scenarioról nem mondjuk meg külön az eladás összegét — de a "díjak"
+    // és előtörlesztések ismertek. Ehelyett: ha a felhasználó megad scenarioInflow-t,
+    // azt megjelenítjük az adott hónapban pozitív cash-flow-ként.
+
+    const cashflowChart = [];
+    for (let m = 0; m < horizonMonths; m++) {
+      const d = new Date(
+        startCashflow.getFullYear(),
+        startCashflow.getMonth() + m,
+        1
+      );
+      const monthLabel = `${d.getFullYear()}.${String(d.getMonth() + 1).padStart(2, "0")}`;
+      const row = { month: m, label: monthLabel };
+      let total = 0;
+      let stressTotal = 0;
+      loanSimulations.forEach((ls, i) => {
+        const v = Math.round(ls.sim.monthlyByMonth[m] || 0);
+        row[ls.loan.name || `Hitel ${i + 1}`] = v;
+        total += v;
+      });
+      stressSimulations.forEach((ls) => {
+        stressTotal += Math.round(ls.sim.monthlyByMonth[m] || 0);
+      });
+      row["Összesen"] = total;
+      if (rateAdjustment !== 0) {
+        row["Stressz (+kamat)"] = stressTotal;
+      }
+      if (monthlyIncome > 0) {
+        row["Jövedelem"] = monthlyIncome;
+      }
+      cashflowChart.push(row);
+    }
+
+    // Ritkítás
+    const chartStep = Math.max(1, Math.ceil(cashflowChart.length / 60));
+    const cashflowChartSampled = cashflowChart.filter(
+      (_, i) => i % chartStep === 0 || i === cashflowChart.length - 1
+    );
+
+    // Csúcsterhelés és átlag
+    const monthlyTotals = cashflowChart.map((r) => r["Összesen"] || 0).filter((v) => v > 0);
+    const peakMonthly = monthlyTotals.length ? Math.max(...monthlyTotals) : 0;
+    const avgMonthly = monthlyTotals.length
+      ? Math.round(monthlyTotals.reduce((s, v) => s + v, 0) / monthlyTotals.length)
+      : 0;
+    const stressMonthlyTotals = cashflowChart
+      .map((r) => r["Stressz (+kamat)"] || 0)
+      .filter((v) => v > 0);
+    const peakStress = stressMonthlyTotals.length
+      ? Math.max(...stressMonthlyTotals)
+      : 0;
+    // Első 12 hónap átlag
+    const first12 = monthlyTotals.slice(0, 12);
+    const first12Avg = first12.length
+      ? Math.round(first12.reduce((s, v) => s + v, 0) / first12.length)
+      : 0;
+    // Hitelteher arány
+    const dti = monthlyIncome > 0 ? (peakMonthly / monthlyIncome) * 100 : null;
+
+    const loanColors = [
+      "#dc2626",
+      "#ea580c",
+      "#ca8a04",
+      "#16a34a",
+      "#0891b2",
+      "#7c3aed",
+      "#db2777",
+    ];
+
     return (
       <div className="space-y-4">
         {/* Vizuális idővonal */}
@@ -16378,6 +16625,247 @@ const FamilyOrganizerApp = () => {
             </div>
           </div>
         )}
+
+        {/* Havi cash-flow előrejelzés */}
+        {loansForSim.length > 0 && (
+          <div className="bg-white border border-gray-200 rounded-lg p-4">
+            <div className="flex flex-wrap justify-between items-center gap-2 mb-3">
+              <h3 className="font-semibold text-gray-800 flex items-center gap-2">
+                <BarChart3 size={18} /> Havi cash-flow előrejelzés
+              </h3>
+              <div className="flex flex-wrap items-center gap-2 text-sm">
+                <label className="text-gray-600">Időhorizont:</label>
+                <select
+                  value={cashflowHorizon}
+                  onChange={(e) =>
+                    updateHazvasarlasProject(project.id, (p) => ({
+                      ...p,
+                      financingPlan: {
+                        ...(p.financingPlan || {}),
+                        cashflowHorizonYears: parseInt(e.target.value, 10),
+                      },
+                    }))
+                  }
+                  className="px-2 py-1 border border-gray-300 rounded text-sm"
+                >
+                  <option value="5">5 év</option>
+                  <option value="10">10 év</option>
+                  <option value="15">15 év</option>
+                  <option value="20">20 év</option>
+                  <option value="25">25 év</option>
+                  <option value="30">30 év</option>
+                </select>
+              </div>
+            </div>
+
+            {/* Statisztikai kártyák */}
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mb-3">
+              <div className="bg-orange-50 border border-orange-200 rounded p-2">
+                <div className="text-xs text-orange-600">Csúcs havi teher</div>
+                <div className="text-lg font-bold text-orange-800">
+                  {peakMonthly.toLocaleString()} Ft
+                </div>
+              </div>
+              <div className="bg-blue-50 border border-blue-200 rounded p-2">
+                <div className="text-xs text-blue-600">Átlag havi teher</div>
+                <div className="text-lg font-bold text-blue-800">
+                  {avgMonthly.toLocaleString()} Ft
+                </div>
+              </div>
+              <div className="bg-purple-50 border border-purple-200 rounded p-2">
+                <div className="text-xs text-purple-600">Első 12 hó átlag</div>
+                <div className="text-lg font-bold text-purple-800">
+                  {first12Avg.toLocaleString()} Ft
+                </div>
+              </div>
+              {rateAdjustment !== 0 && (
+                <div className="bg-red-50 border border-red-200 rounded p-2">
+                  <div className="text-xs text-red-600">
+                    Stressz csúcs (+{rateAdjustment}% kamat)
+                  </div>
+                  <div className="text-lg font-bold text-red-800">
+                    {peakStress.toLocaleString()} Ft
+                  </div>
+                </div>
+              )}
+              {dti !== null && rateAdjustment === 0 && (
+                <div
+                  className={`border rounded p-2 ${
+                    dti < 40
+                      ? "bg-green-50 border-green-200"
+                      : dti < 60
+                      ? "bg-yellow-50 border-yellow-200"
+                      : "bg-red-50 border-red-200"
+                  }`}
+                >
+                  <div
+                    className={`text-xs ${
+                      dti < 40
+                        ? "text-green-700"
+                        : dti < 60
+                        ? "text-yellow-700"
+                        : "text-red-700"
+                    }`}
+                  >
+                    Jövedelem-arány (csúcs)
+                  </div>
+                  <div
+                    className={`text-lg font-bold ${
+                      dti < 40
+                        ? "text-green-800"
+                        : dti < 60
+                        ? "text-yellow-800"
+                        : "text-red-800"
+                    }`}
+                  >
+                    {dti.toFixed(1)}%
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <ResponsiveContainer width="100%" height={300}>
+              <BarChart data={cashflowChartSampled}>
+                <CartesianGrid strokeDasharray="3 3" />
+                <XAxis
+                  dataKey="label"
+                  tick={{ fontSize: 10 }}
+                  interval="preserveStartEnd"
+                />
+                <YAxis
+                  tick={{ fontSize: 10 }}
+                  tickFormatter={(v) =>
+                    v >= 1000000
+                      ? `${(v / 1000000).toFixed(1)}M`
+                      : v >= 1000
+                      ? `${(v / 1000).toFixed(0)}k`
+                      : v
+                  }
+                />
+                <Tooltip
+                  formatter={(v, name) => [
+                    `${Math.round(v).toLocaleString()} Ft`,
+                    name,
+                  ]}
+                />
+                {loansForSim.map((l, i) => (
+                  <Bar
+                    key={l.id}
+                    dataKey={l.name || `Hitel ${i + 1}`}
+                    stackId="loans"
+                    fill={loanColors[i % loanColors.length]}
+                  />
+                ))}
+              </BarChart>
+            </ResponsiveContainer>
+
+            <div className="flex flex-wrap gap-3 text-xs text-gray-600 mt-2">
+              {loansForSim.map((l, i) => (
+                <div key={l.id} className="flex items-center gap-1">
+                  <span
+                    className="inline-block w-3 h-3 rounded"
+                    style={{
+                      backgroundColor: loanColors[i % loanColors.length],
+                    }}
+                  />
+                  {l.name}
+                </div>
+              ))}
+            </div>
+            <p className="text-xs text-gray-500 mt-2">
+              Az előrejelzés figyelembe veszi: hitelek aktiválási dátumát, első
+              évi eltérő törlesztőt (pl. CSOK kamattámogatás), szüneteltetett
+              forrásokat, és a szcenáriók előtörlesztéseit (a megadott dátumon
+              csökkentik a tartozást).
+            </p>
+          </div>
+        )}
+
+        {/* Törlesztőképesség + stressz teszt */}
+        <div className="bg-white border border-gray-200 rounded-lg p-4">
+          <h3 className="font-semibold text-gray-800 mb-3 flex items-center gap-2">
+            <Target size={18} /> Törlesztőképesség és stressz teszt
+          </h3>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Családi nettó havi jövedelem (Ft)
+              </label>
+              <input
+                type="number"
+                value={project.financingPlan?.monthlyIncome || ""}
+                onChange={(e) =>
+                  updateHazvasarlasProject(project.id, (p) => ({
+                    ...p,
+                    financingPlan: {
+                      ...(p.financingPlan || {}),
+                      monthlyIncome: parseFloat(e.target.value) || 0,
+                    },
+                  }))
+                }
+                className="w-full px-3 py-2 border border-gray-300 rounded text-sm"
+                placeholder="pl. 800000"
+              />
+              {monthlyIncome > 0 && peakMonthly > 0 && (
+                <p
+                  className={`text-xs mt-1 ${
+                    dti < 40
+                      ? "text-green-600"
+                      : dti < 60
+                      ? "text-yellow-600"
+                      : "text-red-600"
+                  }`}
+                >
+                  {dti < 40
+                    ? "✓ Komfortzónán belül (< 40%)"
+                    : dti < 60
+                    ? "⚠ Magas, de még kezelhető (< 60%)"
+                    : "❌ Kockázatos: a csúcs törlesztő a nettó jövedelem több mint 60%-a"}
+                </p>
+              )}
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Kamat-stressz teszt: kamat emelkedés (%)
+              </label>
+              <div className="flex items-center gap-3">
+                <input
+                  type="range"
+                  min="0"
+                  max="5"
+                  step="0.5"
+                  value={project.financingPlan?.stressRateDelta || 0}
+                  onChange={(e) =>
+                    updateHazvasarlasProject(project.id, (p) => ({
+                      ...p,
+                      financingPlan: {
+                        ...(p.financingPlan || {}),
+                        stressRateDelta: parseFloat(e.target.value),
+                      },
+                    }))
+                  }
+                  className="flex-1"
+                />
+                <span className="w-12 text-right font-semibold">
+                  +{(parseFloat(project.financingPlan?.stressRateDelta) || 0).toFixed(1)}%
+                </span>
+              </div>
+              {rateAdjustment !== 0 && (
+                <p className="text-xs text-gray-600 mt-1">
+                  Stressz csúcs havi teher:{" "}
+                  <span className="font-semibold">
+                    {peakStress.toLocaleString()} Ft
+                  </span>{" "}
+                  ({peakMonthly > 0
+                    ? `+${Math.round(
+                        ((peakStress - peakMonthly) / peakMonthly) * 100
+                      )}%`
+                    : ""})
+                </p>
+              )}
+            </div>
+          </div>
+        </div>
 
         {/* Szcenáriók (Lakás eladás utáni előtörlesztés stb.) */}
         <div className="bg-white rounded-lg border border-gray-200">
