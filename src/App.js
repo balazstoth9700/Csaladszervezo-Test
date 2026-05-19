@@ -17297,22 +17297,75 @@ const FamilyOrganizerApp = () => {
       "#db2777",
     ];
 
-    // === Vízszintes grafikus idővonal adat ===
-    // Minden időpontnak proporcionális pozíció.
-    const allTimelineDates = timelineEvents.map((e) =>
-      new Date(e.date + "-01").getTime()
-    );
+    // === GANTT DIAGRAM ADAT ===
+    // Minden forráshoz kiszámoljuk a kezdő és záró időpontot.
+    // A szcenáriók vertikális események a Gantt felett.
     const todayMs = (() => {
       const t = new Date();
       t.setDate(1);
       return t.getTime();
     })();
+    const ganttRows = [];
+    sources.forEach((s) => {
+      if (!s.plannedDate) return; // Csak az időzítettek
+      const startMs = new Date(s.plannedDate + "-01").getTime();
+      let endMs = null;
+      if (s.endDate) {
+        endMs = new Date(s.endDate + "-01").getTime();
+      } else if (FINANCING_SOURCE_TYPES[s.type]?.kind === "loan") {
+        // Hitel végdátuma: plannedDate + termYears
+        const years = parseFloat(s.termYears) || 0;
+        if (years > 0) {
+          const d = new Date(s.plannedDate + "-01");
+          d.setFullYear(d.getFullYear() + years);
+          endMs = d.getTime();
+        }
+      }
+      if (!endMs) {
+        // Önerő dátum nélkül: max + 2 év
+        endMs = startMs + 2 * 365 * 24 * 60 * 60 * 1000;
+      }
+      const kind = FINANCING_SOURCE_TYPES[s.type]?.kind || "equity";
+      const isLoan = kind === "loan";
+      // Moratórium intervallum
+      let moraStartMs = null,
+        moraEndMs = null;
+      if (isLoan && s.moratoriumStartDate && s.moratoriumEndDate) {
+        moraStartMs = new Date(s.moratoriumStartDate + "-01").getTime();
+        moraEndMs = new Date(s.moratoriumEndDate + "-01").getTime();
+      }
+      ganttRows.push({
+        id: s.id,
+        name: s.name,
+        type: s.type,
+        kind,
+        isLoan,
+        amount: parseFloat(s.amount) || 0,
+        monthly:
+          parseFloat(s.monthlyPayment) ||
+          (isLoan ? calcAnnuityPayment(s.amount, s.thm, s.termYears) : 0),
+        startMs,
+        endMs,
+        moraStartMs,
+        moraEndMs,
+        status: s.status,
+        excludeFromFunding: s.excludeFromFunding,
+      });
+    });
+    // Időbeli határok
+    const ganttDates = [];
+    ganttRows.forEach((r) => {
+      ganttDates.push(r.startMs, r.endMs);
+    });
+    scenarios.forEach((sc) => {
+      if (sc.plannedDate)
+        ganttDates.push(new Date(sc.plannedDate + "-01").getTime());
+    });
     let tlMin = null,
       tlMax = null;
-    if (allTimelineDates.length > 0) {
-      tlMin = Math.min(...allTimelineDates, todayMs);
-      tlMax = Math.max(...allTimelineDates, todayMs);
-      // Adj egy hónap padding-et oldalt
+    if (ganttDates.length > 0) {
+      tlMin = Math.min(...ganttDates, todayMs);
+      tlMax = Math.max(...ganttDates, todayMs);
       tlMin -= 30 * 24 * 60 * 60 * 1000;
       tlMax += 30 * 24 * 60 * 60 * 1000;
     }
@@ -17321,184 +17374,319 @@ const FamilyOrganizerApp = () => {
 
     return (
       <div className="space-y-4">
-        {/* Grafikus vízszintes idővonal */}
-        {timelineEvents.length > 0 && tlMin && tlMax && (
-          <div className="bg-white border border-gray-200 rounded-lg p-4">
-            <h3 className="font-semibold text-gray-800 mb-3 flex items-center gap-2">
-              <Calendar size={18} /> Finanszírozási folyamat — grafikus
-              áttekintés
-            </h3>
-            {(() => {
-              // Évhatárok generálása az alap rácshoz
-              const startD = new Date(tlMin);
-              const endD = new Date(tlMax);
-              const years = [];
-              for (
-                let y = startD.getFullYear();
-                y <= endD.getFullYear();
-                y++
-              ) {
-                years.push(y);
-              }
-              const eventsWithLanes = timelineEvents.map((e) => {
-                const ms = new Date(e.date + "-01").getTime();
-                return { ...e, ms, pct: tlPct(ms) };
-              });
-              // Lane assignment: ne legyenek átfedő címkék
-              // Ha két esemény közelebb mint 8% a tengelyen, ütemezzük új lane-re
-              const lanes = [];
-              eventsWithLanes.forEach((e) => {
-                let placed = false;
-                for (let li = 0; li < lanes.length; li++) {
-                  const lane = lanes[li];
-                  const last = lane[lane.length - 1];
-                  if (e.pct - last.pct > 12) {
-                    lane.push(e);
-                    e.lane = li;
-                    placed = true;
-                    break;
-                  }
-                }
-                if (!placed) {
-                  e.lane = lanes.length;
-                  lanes.push([e]);
-                }
-              });
-              const colorMap = {
-                green: { bg: "#16a34a", soft: "#bbf7d0" },
-                red: { bg: "#dc2626", soft: "#fecaca" },
-                blue: { bg: "#2563eb", soft: "#bfdbfe" },
-                gray: { bg: "#6b7280", soft: "#e5e7eb" },
-                yellow: { bg: "#ca8a04", soft: "#fef08a" },
-              };
-              const iconMap = {
-                equityIn: "💰",
-                loanIn: "🏦",
-                end: "🏁",
-                scenario: "⚡",
-                moratorium: "⏸️",
-                moratoriumEnd: "▶️",
-              };
-              const trackHeight = 70 + lanes.length * 70;
-              return (
-                <div
-                  className="relative"
-                  style={{ height: `${trackHeight}px` }}
-                >
-                  {/* Évek alap rácsa */}
-                  <div className="absolute inset-0">
-                    {years.map((y) => {
-                      const yStart = new Date(y, 0, 1).getTime();
-                      const pct = tlPct(yStart);
-                      if (pct < -2 || pct > 102) return null;
-                      return (
+        {/* Gantt diagram */}
+        {ganttRows.length > 0 && tlMin && tlMax && (() => {
+          const labelWidth = 160;
+          const rowHeight = 32;
+          const headerHeight = 26;
+          const scenarioBandHeight = scenarios.some((s) => s.plannedDate)
+            ? 26
+            : 0;
+          const totalHeight =
+            headerHeight + scenarioBandHeight + ganttRows.length * rowHeight + 4;
+          // Hónaphatárok generálása
+          const months = [];
+          const minD = new Date(tlMin);
+          const maxD = new Date(tlMax);
+          const cursor = new Date(minD.getFullYear(), minD.getMonth(), 1);
+          while (cursor.getTime() <= maxD.getTime()) {
+            months.push(new Date(cursor));
+            cursor.setMonth(cursor.getMonth() + 1);
+          }
+          const tlSpanYears = (tlMax - tlMin) / (365 * 24 * 60 * 60 * 1000);
+          // Ha sok év, akkor csak az év elejét mutatjuk feliratként
+          const showYearLabelOnly = tlSpanYears > 4;
+          const colorByKind = {
+            loan: { bg: "#dc2626", soft: "#fecaca", text: "text-red-700" },
+            equity: { bg: "#16a34a", soft: "#bbf7d0", text: "text-green-700" },
+          };
+          return (
+            <div className="bg-white border border-gray-200 rounded-lg p-4">
+              <h3 className="font-semibold text-gray-800 mb-3 flex items-center gap-2">
+                <Calendar size={18} /> Finanszírozási Gantt diagram
+              </h3>
+              <div className="overflow-x-auto">
+                <div style={{ minWidth: "700px" }}>
+                  <div
+                    className="relative"
+                    style={{
+                      height: `${totalHeight}px`,
+                      paddingLeft: `${labelWidth}px`,
+                    }}
+                  >
+                    {/* Hónap / év fejléc */}
+                    <div
+                      className="absolute top-0 right-0 border-b border-gray-300 bg-gray-50"
+                      style={{
+                        left: `${labelWidth}px`,
+                        height: `${headerHeight}px`,
+                      }}
+                    >
+                      {months.map((m, i) => {
+                        const pct = tlPct(m.getTime());
+                        const isJan = m.getMonth() === 0;
+                        if (showYearLabelOnly && !isJan) return null;
+                        return (
+                          <div
+                            key={i}
+                            className="absolute top-0 bottom-0 border-l border-gray-300"
+                            style={{ left: `${pct}%` }}
+                          >
+                            <span
+                              className={`absolute top-1 left-1 text-[10px] font-medium ${
+                                isJan
+                                  ? "text-gray-800"
+                                  : "text-gray-500"
+                              } whitespace-nowrap`}
+                            >
+                              {showYearLabelOnly
+                                ? m.getFullYear()
+                                : m.toLocaleDateString("hu-HU", {
+                                    year: "2-digit",
+                                    month: "short",
+                                  })}
+                            </span>
+                          </div>
+                        );
+                      })}
+                    </div>
+
+                    {/* Szcenárió sáv (vertikális események) */}
+                    {scenarioBandHeight > 0 && (
+                      <div
+                        className="absolute right-0 border-b border-gray-200 bg-blue-50/50"
+                        style={{
+                          left: `${labelWidth}px`,
+                          top: `${headerHeight}px`,
+                          height: `${scenarioBandHeight}px`,
+                        }}
+                      >
+                        <span className="absolute left-1 top-1 text-[10px] text-blue-700 font-medium">
+                          ⚡ Szcenáriók
+                        </span>
+                        {scenarios
+                          .filter((sc) => sc.plannedDate)
+                          .map((sc) => {
+                            const ms = new Date(
+                              sc.plannedDate + "-01"
+                            ).getTime();
+                            const pct = tlPct(ms);
+                            return (
+                              <div
+                                key={sc.id}
+                                className="absolute top-0 bottom-0 group"
+                                style={{ left: `${pct}%` }}
+                                title={sc.name}
+                              >
+                                <div className="absolute top-1 left-0 -translate-x-1/2 w-4 h-4 rounded-full bg-blue-600 border-2 border-white shadow flex items-center justify-center">
+                                  <span className="text-white text-[9px]">⚡</span>
+                                </div>
+                                <div className="absolute top-6 left-0 translate-x-1 text-[10px] text-blue-700 whitespace-nowrap font-medium">
+                                  {sc.name}
+                                </div>
+                              </div>
+                            );
+                          })}
+                      </div>
+                    )}
+
+                    {/* Címke oszlop (bal) */}
+                    <div
+                      className="absolute left-0 top-0 bottom-0 border-r border-gray-300 bg-white"
+                      style={{ width: `${labelWidth}px` }}
+                    >
+                      <div style={{ height: `${headerHeight + scenarioBandHeight}px` }} />
+                      {ganttRows.map((r, i) => (
                         <div
-                          key={y}
-                          className="absolute top-0 bottom-0 border-l border-gray-200"
-                          style={{ left: `${pct}%` }}
+                          key={r.id}
+                          className="flex items-center px-2 text-xs border-b border-gray-100"
+                          style={{ height: `${rowHeight}px` }}
                         >
-                          <span className="absolute -top-1 left-1 text-xs text-gray-500 font-medium bg-white px-1">
-                            {y}
+                          <span
+                            className="inline-block w-2 h-2 rounded-full mr-2 flex-shrink-0"
+                            style={{
+                              backgroundColor:
+                                (colorByKind[r.kind] || colorByKind.equity).bg,
+                            }}
+                          />
+                          <span
+                            className="truncate font-medium text-gray-700"
+                            title={r.name}
+                          >
+                            {r.name}
                           </span>
                         </div>
-                      );
-                    })}
-                  </div>
-                  {/* Központi tengely */}
-                  <div
-                    className="absolute left-0 right-0 h-1 bg-gradient-to-r from-gray-300 via-indigo-300 to-gray-300 rounded"
-                    style={{ top: "40px" }}
-                  />
-                  {/* "Most" vonal */}
-                  <div
-                    className="absolute top-2 bottom-2 border-l-2 border-dashed border-blue-500"
-                    style={{ left: `${tlPct(todayMs)}%` }}
-                  >
-                    <span className="absolute -top-1 -translate-x-1/2 left-0 text-xs bg-blue-500 text-white px-1.5 py-0.5 rounded-full whitespace-nowrap">
-                      most
-                    </span>
-                  </div>
-                  {/* Események */}
-                  {eventsWithLanes.map((e, idx) => {
-                    const c = colorMap[e.color] || colorMap.gray;
-                    const laneOffset = e.lane * 70;
-                    const above = e.lane % 2 === 0;
-                    const bubbleTop = above
-                      ? `${40 - 30 - laneOffset / 2}px`
-                      : `${40 + 14 + laneOffset / 2}px`;
-                    return (
-                      <div key={idx} className="absolute" style={{ left: `${e.pct}%`, top: 0, bottom: 0 }}>
-                        {/* Pötty a tengelyen */}
-                        <div
-                          className="absolute w-4 h-4 rounded-full border-2 border-white shadow"
-                          style={{
-                            top: "34px",
-                            left: "-8px",
-                            backgroundColor: c.bg,
-                          }}
-                        />
-                        {/* Csatlakozó vonal */}
-                        <div
-                          className="absolute w-0.5"
-                          style={{
-                            left: "-1px",
-                            top: above
-                              ? `${44 - 30 - laneOffset / 2 + 18}px`
-                              : "42px",
-                            height: `${laneOffset / 2 + 8}px`,
-                            backgroundColor: c.bg,
-                            opacity: 0.4,
-                          }}
-                        />
-                        {/* Buborék */}
-                        <div
-                          className="absolute -translate-x-1/2 px-2 py-1 rounded shadow-sm border text-xs whitespace-nowrap max-w-[200px] overflow-hidden text-ellipsis"
-                          style={{
-                            top: bubbleTop,
-                            backgroundColor: c.soft,
-                            borderColor: c.bg,
-                            color: "#111",
-                          }}
-                          title={`${e.label}\n${e.subLabel || ""}`}
-                        >
-                          <span className="mr-1">{iconMap[e.kind]}</span>
-                          <span className="font-medium">{e.label}</span>
-                          {e.amount !== 0 && (
-                            <span className="ml-1 font-semibold">
-                              {e.amount > 0 ? "+" : ""}
-                              {Math.abs(e.amount) >= 1000000
-                                ? `${(e.amount / 1000000).toFixed(1)}M`
-                                : `${Math.round(e.amount / 1000)}k`}
-                            </span>
-                          )}
-                        </div>
+                      ))}
+                    </div>
+
+                    {/* Gantt plot terület */}
+                    <div
+                      className="absolute right-0 bottom-0"
+                      style={{
+                        left: `${labelWidth}px`,
+                        top: `${headerHeight + scenarioBandHeight}px`,
+                      }}
+                    >
+                      {/* Évhatár halvány vonalak */}
+                      {months.map((m, i) => {
+                        if (m.getMonth() !== 0) return null;
+                        const pct = tlPct(m.getTime());
+                        return (
+                          <div
+                            key={`yr-${i}`}
+                            className="absolute top-0 bottom-0 border-l border-gray-200"
+                            style={{ left: `${pct}%` }}
+                          />
+                        );
+                      })}
+                      {/* "Most" vonal */}
+                      <div
+                        className="absolute top-0 bottom-0 z-10 pointer-events-none"
+                        style={{ left: `${tlPct(todayMs)}%` }}
+                      >
+                        <div className="absolute top-0 bottom-0 border-l-2 border-dashed border-blue-500" />
+                        <span className="absolute -top-5 -translate-x-1/2 left-0 text-[10px] bg-blue-500 text-white px-1.5 py-0.5 rounded-full font-medium whitespace-nowrap">
+                          most
+                        </span>
                       </div>
-                    );
-                  })}
+
+                      {/* Sorok és sávok */}
+                      {ganttRows.map((r, i) => {
+                        const startPct = tlPct(r.startMs);
+                        const endPct = tlPct(r.endMs);
+                        const widthPct = Math.max(1, endPct - startPct);
+                        const colors =
+                          colorByKind[r.kind] || colorByKind.equity;
+                        const suspended = r.status === "suspended";
+                        return (
+                          <div
+                            key={r.id}
+                            className="relative border-b border-gray-100"
+                            style={{ height: `${rowHeight}px` }}
+                          >
+                            {/* Fő sáv */}
+                            <div
+                              className="absolute rounded shadow-sm flex items-center px-2 overflow-hidden"
+                              style={{
+                                left: `${startPct}%`,
+                                width: `${widthPct}%`,
+                                top: "6px",
+                                height: `${rowHeight - 12}px`,
+                                backgroundColor: colors.soft,
+                                border: `1px solid ${colors.bg}`,
+                                opacity: suspended ? 0.4 : 1,
+                              }}
+                              title={`${r.name}\n${new Date(r.startMs).toLocaleDateString("hu-HU")} – ${new Date(r.endMs).toLocaleDateString("hu-HU")}\n${r.amount.toLocaleString()} Ft${r.monthly ? `, havi ${Math.round(r.monthly).toLocaleString()} Ft` : ""}${r.excludeFromFunding ? " (csak törlesztés)" : ""}`}
+                            >
+                              <span
+                                className="text-[10px] whitespace-nowrap font-semibold"
+                                style={{ color: colors.bg }}
+                              >
+                                {r.amount >= 1000000
+                                  ? `${(r.amount / 1000000).toFixed(1)}M Ft`
+                                  : r.amount > 0
+                                  ? `${Math.round(r.amount / 1000)}k Ft`
+                                  : ""}
+                                {r.isLoan && r.monthly > 0 && widthPct > 12 && (
+                                  <span className="opacity-70 ml-1 font-normal">
+                                    • {Math.round(r.monthly).toLocaleString()} Ft/hó
+                                  </span>
+                                )}
+                                {r.excludeFromFunding && widthPct > 18 && (
+                                  <span className="opacity-70 ml-1 font-normal">
+                                    • csak törlesztés
+                                  </span>
+                                )}
+                              </span>
+                            </div>
+                            {/* Moratórium átfedés */}
+                            {r.moraStartMs && r.moraEndMs && (
+                              <div
+                                className="absolute rounded"
+                                style={{
+                                  left: `${tlPct(r.moraStartMs)}%`,
+                                  width: `${Math.max(
+                                    1,
+                                    tlPct(r.moraEndMs) - tlPct(r.moraStartMs)
+                                  )}%`,
+                                  top: "6px",
+                                  height: `${rowHeight - 12}px`,
+                                  backgroundImage:
+                                    "repeating-linear-gradient(45deg, rgba(202, 138, 4, 0.4), rgba(202, 138, 4, 0.4) 4px, transparent 4px, transparent 8px)",
+                                  borderTop: "1px solid #ca8a04",
+                                  borderBottom: "1px solid #ca8a04",
+                                }}
+                                title="⏸️ Moratórium"
+                              />
+                            )}
+                            {/* Szcenárió-előtörlesztés markerek erre a hitelre */}
+                            {scenarios
+                              .filter((sc) => sc.plannedDate)
+                              .map((sc) => {
+                                const adj = (sc.adjustments || []).find(
+                                  (a) => a.sourceId === r.id
+                                );
+                                if (!adj) return null;
+                                const ms = new Date(
+                                  sc.plannedDate + "-01"
+                                ).getTime();
+                                const pct = tlPct(ms);
+                                if (pct < startPct - 1 || pct > endPct + 1)
+                                  return null;
+                                return (
+                                  <div
+                                    key={sc.id}
+                                    className="absolute z-10"
+                                    style={{
+                                      left: `${pct}%`,
+                                      top: "0",
+                                      height: "100%",
+                                    }}
+                                    title={`${sc.name}: -${(parseFloat(adj.amount) || 0).toLocaleString()} Ft`}
+                                  >
+                                    <div className="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 w-3 h-3 rotate-45 bg-blue-600 border border-white" />
+                                  </div>
+                                );
+                              })}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
                 </div>
-              );
-            })()}
-            {/* Jelmagyarázat */}
-            <div className="flex flex-wrap gap-3 text-xs text-gray-600 mt-2">
-              <div className="flex items-center gap-1">
-                <span className="w-3 h-3 rounded-full bg-green-600 inline-block" />
-                💰 Önerő érkezik
               </div>
-              <div className="flex items-center gap-1">
-                <span className="w-3 h-3 rounded-full bg-red-600 inline-block" />
-                🏦 Hitel folyósítás
-              </div>
-              <div className="flex items-center gap-1">
-                <span className="w-3 h-3 rounded-full bg-blue-600 inline-block" />
-                ⚡ Szcenárió esemény
-              </div>
-              <div className="flex items-center gap-1">
-                <span className="w-3 h-3 rounded-full bg-gray-500 inline-block" />
-                🏁 Lezárás
+              {/* Jelmagyarázat */}
+              <div className="flex flex-wrap gap-3 text-xs text-gray-600 mt-3 pt-2 border-t border-gray-100">
+                <div className="flex items-center gap-1">
+                  <span className="inline-block w-4 h-3 rounded border border-green-700" style={{ backgroundColor: "#bbf7d0" }} />
+                  Önerő
+                </div>
+                <div className="flex items-center gap-1">
+                  <span className="inline-block w-4 h-3 rounded border border-red-700" style={{ backgroundColor: "#fecaca" }} />
+                  Hitel (futamidő végéig)
+                </div>
+                <div className="flex items-center gap-1">
+                  <span
+                    className="inline-block w-4 h-3 rounded border border-yellow-600"
+                    style={{
+                      backgroundImage:
+                        "repeating-linear-gradient(45deg, rgba(202, 138, 4, 0.4), rgba(202, 138, 4, 0.4) 3px, transparent 3px, transparent 6px)",
+                    }}
+                  />
+                  ⏸️ Moratórium
+                </div>
+                <div className="flex items-center gap-1">
+                  <span className="inline-block w-3 h-3 rotate-45 bg-blue-600" />
+                  Szcenárió előtörlesztés
+                </div>
+                <div className="flex items-center gap-1">
+                  <span className="inline-block w-0.5 h-3 border-l-2 border-dashed border-blue-500" />
+                  Most
+                </div>
               </div>
             </div>
-          </div>
-        )}
+          );
+        })()}
 
         {/* Vizuális idővonal */}
         {Object.keys(grouped).length > 0 && (
@@ -18591,20 +18779,36 @@ const FamilyOrganizerApp = () => {
                   const principal = parseFloat(s.amount) || 0;
                   const prepay = parseFloat(adj.amount) || 0;
                   const newBalance = Math.max(0, principal - prepay);
-                  let newMonthly = parseFloat(s.monthlyPayment) || 0;
+                  const oldMonthly =
+                    parseFloat(s.monthlyPayment) ||
+                    calcAnnuityPayment(s.amount, s.thm, s.termYears);
+                  const mode = adj.mode || "reducePayment";
+                  let newMonthly = oldMonthly;
                   let newMonths = null;
-                  if (newBalance > 0 && newMonthly > 0) {
-                    newMonths = calcMonthsAfterPrepay(
-                      newBalance,
-                      newMonthly,
-                      s.thm
-                    );
-                  } else if (newBalance > 0 && s.termYears && s.thm != null) {
-                    newMonthly = calcAnnuityPayment(
-                      newBalance,
-                      s.thm,
-                      s.termYears
-                    );
+                  if (newBalance > 0) {
+                    if (mode === "shortenTerm" && oldMonthly > 0) {
+                      // Megtartjuk a régi havi törlesztőt, futamidőt rövidítjük
+                      newMonthly = oldMonthly;
+                      newMonths = calcMonthsAfterPrepay(
+                        newBalance,
+                        oldMonthly,
+                        s.thm
+                      );
+                    } else {
+                      // reducePayment: megtartjuk a futamidőt, havi törlesztőt csökkentjük
+                      if (s.termYears && s.thm != null) {
+                        newMonthly = calcAnnuityPayment(
+                          newBalance,
+                          s.thm,
+                          s.termYears
+                        );
+                        newMonths = (parseFloat(s.termYears) || 0) * 12;
+                      }
+                    }
+                  } else {
+                    // Teljesen visszafizetve
+                    newMonthly = 0;
+                    newMonths = 0;
                   }
                   return {
                     ...s,
@@ -18612,7 +18816,9 @@ const FamilyOrganizerApp = () => {
                     _newBalance: newBalance,
                     _newMonthly: newMonthly,
                     _newMonths: newMonths,
+                    _oldMonthly: oldMonthly,
                     _adjFee: adj.fee,
+                    _adjMode: mode,
                   };
                 });
 
@@ -18634,7 +18840,8 @@ const FamilyOrganizerApp = () => {
                       sum +
                       (s._adjusted
                         ? s._newMonthly
-                        : parseFloat(s.monthlyPayment) || 0),
+                        : parseFloat(s.monthlyPayment) ||
+                          calcAnnuityPayment(s.amount, s.thm, s.termYears)),
                     0
                   );
                 const totalPrepay = (sc.adjustments || []).reduce(
@@ -18725,7 +18932,8 @@ const FamilyOrganizerApp = () => {
                               <th className="text-right p-1">Eredeti</th>
                               <th className="text-right p-1">Előtörlesztés</th>
                               <th className="text-right p-1">Új tartozás</th>
-                              <th className="text-right p-1">Új törlesztő</th>
+                              <th className="text-left p-1">Mód</th>
+                              <th className="text-right p-1">Régi → Új törlesztő</th>
                               <th className="text-right p-1">Új futamidő</th>
                             </tr>
                           </thead>
@@ -18748,8 +18956,20 @@ const FamilyOrganizerApp = () => {
                                   <td className="p-1 text-right font-semibold">
                                     {Math.round(s._newBalance).toLocaleString()} Ft
                                   </td>
+                                  <td className="p-1 text-gray-600">
+                                    {s._adjMode === "shortenTerm"
+                                      ? "futamidő↓"
+                                      : "törlesztő↓"}
+                                  </td>
                                   <td className="p-1 text-right">
-                                    {Math.round(s._newMonthly).toLocaleString()} Ft
+                                    <span className="text-gray-500">
+                                      {Math.round(s._oldMonthly).toLocaleString()}
+                                    </span>
+                                    <span className="mx-1">→</span>
+                                    <span className="font-semibold text-green-700">
+                                      {Math.round(s._newMonthly).toLocaleString()}
+                                    </span>{" "}
+                                    Ft
                                   </td>
                                   <td className="p-1 text-right">
                                     {s._newMonths && isFinite(s._newMonths)
@@ -33978,7 +34198,7 @@ const FamilyOrganizerApp = () => {
                     {(formData.adjustments || []).map((a, idx) => (
                       <div
                         key={a.id}
-                        className="grid grid-cols-12 gap-2 bg-gray-50 p-2 rounded"
+                        className="grid grid-cols-12 gap-1 bg-gray-50 p-2 rounded"
                       >
                         <select
                           value={a.sourceId || ""}
@@ -33990,7 +34210,7 @@ const FamilyOrganizerApp = () => {
                             };
                             setFormData({ ...formData, adjustments: adjs });
                           }}
-                          className="col-span-5 px-2 py-1 border border-gray-300 rounded text-sm"
+                          className="col-span-4 px-2 py-1 border border-gray-300 rounded text-sm"
                         >
                           <option value="">— hitel kiválasztása —</option>
                           {(
@@ -34027,8 +34247,21 @@ const FamilyOrganizerApp = () => {
                             adjs[idx] = { ...adjs[idx], fee: e.target.value };
                             setFormData({ ...formData, adjustments: adjs });
                           }}
-                          className="col-span-3 px-2 py-1 border border-gray-300 rounded text-sm"
+                          className="col-span-2 px-2 py-1 border border-gray-300 rounded text-sm"
                         />
+                        <select
+                          value={a.mode || "reducePayment"}
+                          onChange={(e) => {
+                            const adjs = [...(formData.adjustments || [])];
+                            adjs[idx] = { ...adjs[idx], mode: e.target.value };
+                            setFormData({ ...formData, adjustments: adjs });
+                          }}
+                          className="col-span-2 px-2 py-1 border border-gray-300 rounded text-sm"
+                          title="Mód"
+                        >
+                          <option value="reducePayment">Törlesztő↓</option>
+                          <option value="shortenTerm">Futamidő↓</option>
+                        </select>
                         <button
                           onClick={() => {
                             const adjs = (formData.adjustments || []).filter(
