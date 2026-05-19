@@ -17421,8 +17421,21 @@ const FamilyOrganizerApp = () => {
     startCashflow.setDate(1);
     const rateAdjustment =
       parseFloat(project.financingPlan?.stressRateDelta) || 0;
-    const monthlyIncome =
-      parseFloat(project.financingPlan?.monthlyIncome) || 0;
+    // Jövedelem tételek listája (új formátum) — backwards compat a régi
+    // `monthlyIncome` egyetlen számértékkel.
+    const incomeSources = (() => {
+      const list = project.financingPlan?.incomeSources;
+      if (Array.isArray(list)) return list;
+      const legacy = parseFloat(project.financingPlan?.monthlyIncome) || 0;
+      if (legacy > 0) {
+        return [{ id: "legacy", name: "Havi jövedelem", amount: legacy }];
+      }
+      return [];
+    })();
+    const monthlyIncome = incomeSources.reduce(
+      (s, i) => s + (parseFloat(i.amount) || 0),
+      0
+    );
 
     // Egy hitel szimulációja
     const simulateLoan = (loan, withRateStress) => {
@@ -18703,27 +18716,141 @@ const FamilyOrganizerApp = () => {
           </h3>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Családi nettó havi jövedelem (Ft)
-              </label>
-              <input
-                type="number"
-                value={project.financingPlan?.monthlyIncome || ""}
-                onChange={(e) =>
-                  updateHazvasarlasProject(project.id, (p) => ({
-                    ...p,
-                    financingPlan: {
-                      ...(p.financingPlan || {}),
-                      monthlyIncome: parseFloat(e.target.value) || 0,
-                    },
-                  }))
-                }
-                className="w-full px-3 py-2 border border-gray-300 rounded text-sm"
-                placeholder="pl. 800000"
-              />
+              <div className="flex items-center justify-between mb-1">
+                <label className="block text-sm font-medium text-gray-700">
+                  Családi nettó havi jövedelem
+                </label>
+                <button
+                  onClick={() =>
+                    updateHazvasarlasProject(project.id, (p) => {
+                      const existing = Array.isArray(
+                        p.financingPlan?.incomeSources
+                      )
+                        ? p.financingPlan.incomeSources
+                        : (() => {
+                            const legacy =
+                              parseFloat(p.financingPlan?.monthlyIncome) || 0;
+                            return legacy > 0
+                              ? [{ id: "legacy-" + Date.now(), name: "Havi jövedelem", amount: legacy }]
+                              : [];
+                          })();
+                      return {
+                        ...p,
+                        financingPlan: {
+                          ...(p.financingPlan || {}),
+                          monthlyIncome: 0,
+                          incomeSources: [
+                            ...existing,
+                            {
+                              id: Date.now().toString() + "-" + Math.random().toString(36).slice(2, 6),
+                              name: "",
+                              amount: 0,
+                            },
+                          ],
+                        },
+                      };
+                    })
+                  }
+                  className="text-xs px-2 py-1 bg-blue-600 text-white rounded hover:bg-blue-700 flex items-center gap-1"
+                >
+                  <Plus size={12} /> Új jövedelem
+                </button>
+              </div>
+              {incomeSources.length === 0 ? (
+                <p className="text-xs text-gray-500 italic py-2">
+                  Adj hozzá jövedelmeket (pl. fizetés, családi pótlék,
+                  bérbeadás), hogy lásd a havi terhelési arányt.
+                </p>
+              ) : (
+                <div className="space-y-1">
+                  {incomeSources.map((inc, idx) => (
+                    <div
+                      key={inc.id || idx}
+                      className="grid grid-cols-12 gap-1 items-center"
+                    >
+                      <input
+                        type="text"
+                        placeholder="Megnevezés (pl. fizetés)"
+                        value={inc.name || ""}
+                        onChange={(e) => {
+                          updateHazvasarlasProject(project.id, (p) => {
+                            const list = p.financingPlan?.incomeSources
+                              ? [...p.financingPlan.incomeSources]
+                              : [...incomeSources];
+                            const i = list.findIndex((x) => x.id === inc.id);
+                            if (i >= 0) {
+                              list[i] = { ...list[i], name: e.target.value };
+                            }
+                            return {
+                              ...p,
+                              financingPlan: {
+                                ...(p.financingPlan || {}),
+                                incomeSources: list,
+                                monthlyIncome: 0,
+                              },
+                            };
+                          });
+                        }}
+                        className="col-span-6 px-2 py-1 border border-gray-300 rounded text-sm"
+                      />
+                      <input
+                        type="number"
+                        placeholder="Ft / hó"
+                        value={inc.amount || ""}
+                        onChange={(e) => {
+                          const v = parseFloat(e.target.value) || 0;
+                          updateHazvasarlasProject(project.id, (p) => {
+                            const list = p.financingPlan?.incomeSources
+                              ? [...p.financingPlan.incomeSources]
+                              : [...incomeSources];
+                            const i = list.findIndex((x) => x.id === inc.id);
+                            if (i >= 0) {
+                              list[i] = { ...list[i], amount: v };
+                            }
+                            return {
+                              ...p,
+                              financingPlan: {
+                                ...(p.financingPlan || {}),
+                                incomeSources: list,
+                                monthlyIncome: 0,
+                              },
+                            };
+                          });
+                        }}
+                        className="col-span-5 px-2 py-1 border border-gray-300 rounded text-sm text-right"
+                      />
+                      <button
+                        onClick={() =>
+                          updateHazvasarlasProject(project.id, (p) => {
+                            const list = (p.financingPlan?.incomeSources ||
+                              incomeSources).filter((x) => x.id !== inc.id);
+                            return {
+                              ...p,
+                              financingPlan: {
+                                ...(p.financingPlan || {}),
+                                incomeSources: list,
+                              },
+                            };
+                          })
+                        }
+                        className="col-span-1 text-red-600 hover:bg-red-50 rounded p-1"
+                        title="Törlés"
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    </div>
+                  ))}
+                  <div className="flex justify-between text-xs pt-2 border-t border-gray-200">
+                    <span className="text-gray-600">Összesen havonta:</span>
+                    <span className="font-semibold text-gray-800">
+                      {monthlyIncome.toLocaleString()} Ft
+                    </span>
+                  </div>
+                </div>
+              )}
               {monthlyIncome > 0 && peakMonthly > 0 && (
                 <p
-                  className={`text-xs mt-1 ${
+                  className={`text-xs mt-2 ${
                     dti < 40
                       ? "text-green-600"
                       : dti < 60
@@ -18731,6 +18858,7 @@ const FamilyOrganizerApp = () => {
                       : "text-red-600"
                   }`}
                 >
+                  Csúcs havi teher / jövedelem: <b>{dti.toFixed(1)}%</b> —{" "}
                   {dti < 40
                     ? "✓ Komfortzónán belül (< 40%)"
                     : dti < 60
