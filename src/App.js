@@ -2258,7 +2258,14 @@ const FamilyOrganizerApp = () => {
                   }
                 }
 
-                if (!members || members.length === 0) {
+                // Bootstrap: csak akkor tegyük magunkat adminnak, ha mi vagyunk
+                // a család létrehozója ÉS a tagsági lista valóban üres. Egyébként
+                // a tényleges tagsági listát meghagyjuk — különben egy joining user
+                // véletlenül kitörölhetné a többi tagot.
+                if (
+                  (!members || members.length === 0) &&
+                  familyData.createdBy === userId
+                ) {
                   members = [
                     {
                       userId,
@@ -2275,6 +2282,36 @@ const FamilyOrganizerApp = () => {
                     );
                   } catch (error) {
                     console.error("❌ Tagság migrációs hiba:", error);
+                  }
+                } else if (
+                  members &&
+                  !members.some((m) => m.userId === userId)
+                ) {
+                  // SELF-HEAL: a felhasználónak van familyId-ja (tehát legitim
+                  // tag valami módon), de hiányzik a tagsági listából.
+                  // Adjuk hozzá önmagát, de ne nyúljunk a többiekhez.
+                  // Szerepkör: ha a család létrehozója vagyunk → admin, egyébként member.
+                  const myRole =
+                    familyData.createdBy === userId ? "admin" : "member";
+                  members = [
+                    ...members,
+                    {
+                      userId,
+                      email: currentUser?.email || userData.email || "unknown",
+                      nickname: userData.settings?.nickname?.trim() || null,
+                      role: myRole,
+                      joinedAt: new Date().toISOString(),
+                    },
+                  ];
+                  try {
+                    await setDoc(
+                      familyDocRef,
+                      { members },
+                      { merge: true }
+                    );
+                    console.log("🔧 Self-heal: felhasználó visszaírva a tagsági listába.");
+                  } catch (error) {
+                    console.error("❌ Self-heal hiba:", error);
                   }
                 }
 
@@ -2433,12 +2470,16 @@ const FamilyOrganizerApp = () => {
           });
         });
 
+        // FONTOS: a `members` mezőt NEM írjuk ide, mert az a tagsági listát
+        // tartalmazza, amit kizárólag a család-kezelő funkciók (meghívás,
+        // elfogadás, kilépés, stb.) módosíthatnak. Ha itt is írnánk, egy
+        // sima adatváltoztatás (pl. új jármű) versenyhelyzetben üres
+        // tömbbel felülírhatná a tagok listáját.
         await setDoc(
           familyDocRef,
           {
             shareConfig,
             sharedData,
-            members: newData.members || [],
           },
           { merge: true }
         );
@@ -21308,6 +21349,77 @@ const FamilyOrganizerApp = () => {
                   </button>
                 </div>
               </div>
+            )}
+
+            {/* Admin: tagsági lista helyreállítás gomb */}
+            {isAdmin && data.familyId && (
+              <button
+                onClick={async () => {
+                  if (!data.familyId) return;
+                  try {
+                    const familyDocRef = doc(db, "families", data.familyId);
+                    const familySnap = await getDoc(familyDocRef);
+                    if (!familySnap.exists()) {
+                      alert("Család nem található!");
+                      return;
+                    }
+                    const fd = familySnap.data();
+                    const existing = fd.members || [];
+                    const acceptedInvites = (fd.invitations || []).filter(
+                      (i) => i.status === "accepted" && i.acceptedBy
+                    );
+                    let added = 0;
+                    const repaired = [...existing];
+                    for (const inv of acceptedInvites) {
+                      if (
+                        !repaired.some((m) => m.userId === inv.acceptedBy)
+                      ) {
+                        // Felhasználó adatainak lekérése
+                        try {
+                          const userSnap = await getDoc(
+                            doc(db, "users", inv.acceptedBy)
+                          );
+                          const ud = userSnap.exists() ? userSnap.data() : {};
+                          repaired.push({
+                            userId: inv.acceptedBy,
+                            email: ud.email || inv.invitedEmail || "unknown",
+                            nickname: ud.settings?.nickname?.trim() || null,
+                            role: inv.role || "member",
+                            joinedAt: inv.acceptedAt || new Date().toISOString(),
+                          });
+                          added++;
+                        } catch (e) {
+                          console.warn(
+                            "Felhasználó lekérési hiba:",
+                            inv.acceptedBy,
+                            e
+                          );
+                        }
+                      }
+                    }
+                    if (added > 0) {
+                      await setDoc(
+                        familyDocRef,
+                        { members: repaired },
+                        { merge: true }
+                      );
+                      alert(
+                        `Helyreállítás kész: ${added} korábbi tag visszakerült a listába.`
+                      );
+                    } else {
+                      alert("A tagsági lista naprakész — nincs mit visszaállítani.");
+                    }
+                  } catch (err) {
+                    console.error("Tagsági repair hiba:", err);
+                    alert("Hiba történt: " + (err.message || ""));
+                  }
+                }}
+                className="text-xs px-3 py-1 bg-gray-100 text-gray-700 rounded hover:bg-gray-200 flex items-center gap-1 mb-2"
+                title="Az elfogadott meghívók alapján visszaállítja a tagsági listát, ha bármi hiányozna belőle"
+              >
+                <RefreshCw size={12} />
+                Tagsági lista helyreállítása
+              </button>
             )}
 
             {familyUsers.length === 0 ? (
