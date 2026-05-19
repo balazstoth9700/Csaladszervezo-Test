@@ -2,3 +2,34 @@
   font-family: sans-serif;
   text-align: center;
 }
+
+/* Nyomtatás: csak a tartalom látszódjon */
+@media print {
+  body {
+    background: white !important;
+    color: black !important;
+  }
+  /* Modal-ok és overlay-ek ne látszódjanak */
+  .fixed {
+    display: none !important;
+  }
+  /* Print-skip: bármi, amit ne nyomtassunk */
+  .no-print {
+    display: none !important;
+  }
+  /* Grafikonok ne legyenek kettévágva */
+  svg,
+  canvas,
+  .recharts-wrapper,
+  table {
+    page-break-inside: avoid !important;
+  }
+  /* Színek megőrzése (Tailwind bg-* osztályok) */
+  * {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+  @page {
+    margin: 1cm;
+  }
+}
