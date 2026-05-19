@@ -2703,25 +2703,55 @@ const FamilyOrganizerApp = () => {
 
   const addTask = async () => {
     if (!formData.title || !formData.dueDate) {
-      alert("Kérlek töltsd ki az összes mezőt!");
+      alert("Cím és kezdő dátum kötelező!");
       return;
     }
 
+    // dueDate-be ha van pontos idő, akkor beletesszük; egyébként csak a dátum
+    const finalDueDate =
+      formData.time && !formData.allDay
+        ? `${formData.dueDate}T${formData.time}:00`
+        : formData.dueDate;
+
     const newTask = {
       ...formData,
-      id: Date.now(),
-      completed: false,
+      dueDate: finalDueDate,
+      time: formData.allDay ? null : formData.time || null,
+      endDate: formData.endDate || null,
+      endTime: formData.endTime || null,
+      durationMinutes: formData.durationMinutes
+        ? parseInt(formData.durationMinutes, 10)
+        : null,
+      allDay: formData.allDay !== false ? formData.allDay !== false : true,
+      location: formData.location || "",
+      assignedMembers: Array.isArray(formData.assignedMembers)
+        ? formData.assignedMembers
+        : [],
+      assignedToAll: !!formData.assignedToAll,
+      // Régi assignedTo mező backwards compat — null-ra állítjuk az új formátum mellett
+      assignedTo: null,
+      id: editingItem?.id || Date.now(),
+      completed: editingItem?.completed || false,
       recurring: formData.recurring || { enabled: false },
     };
 
-    const newData = {
-      ...data,
-      tasks: [...data.tasks, newTask],
-    };
+    let newData;
+    if (editingItem) {
+      newData = {
+        ...data,
+        tasks: data.tasks.map((t) => (t.id === editingItem.id ? newTask : t)),
+      };
+    } else {
+      newData = {
+        ...data,
+        tasks: [...data.tasks, newTask],
+      };
+    }
     setData(newData);
     await saveUserData(newData);
     setShowTaskModal(false);
     setFormData({});
+    setEditingItem(null);
   };
 
   const openMemberModal = (member = null) => {
@@ -7264,6 +7294,116 @@ const FamilyOrganizerApp = () => {
       : `${symbols[currency]} ${formatted}`;
   };
 
+  // === CSALÁDTAG SZÍNEK ===
+  // A naptárban és más helyeken az eseményekhez tartozó családtagokat
+  // különböző színekkel jelöljük.
+  const FAMILY_COLOR_PALETTE = [
+    { id: "blue", hex: "#3b82f6", bg: "bg-blue-500", text: "text-blue-600", soft: "bg-blue-100", border: "border-blue-500" },
+    { id: "pink", hex: "#ec4899", bg: "bg-pink-500", text: "text-pink-600", soft: "bg-pink-100", border: "border-pink-500" },
+    { id: "green", hex: "#22c55e", bg: "bg-green-500", text: "text-green-600", soft: "bg-green-100", border: "border-green-500" },
+    { id: "orange", hex: "#f97316", bg: "bg-orange-500", text: "text-orange-600", soft: "bg-orange-100", border: "border-orange-500" },
+    { id: "purple", hex: "#a855f7", bg: "bg-purple-500", text: "text-purple-600", soft: "bg-purple-100", border: "border-purple-500" },
+    { id: "red", hex: "#ef4444", bg: "bg-red-500", text: "text-red-600", soft: "bg-red-100", border: "border-red-500" },
+    { id: "teal", hex: "#14b8a6", bg: "bg-teal-500", text: "text-teal-600", soft: "bg-teal-100", border: "border-teal-500" },
+    { id: "indigo", hex: "#6366f1", bg: "bg-indigo-500", text: "text-indigo-600", soft: "bg-indigo-100", border: "border-indigo-500" },
+    { id: "amber", hex: "#f59e0b", bg: "bg-amber-500", text: "text-amber-600", soft: "bg-amber-100", border: "border-amber-500" },
+    { id: "cyan", hex: "#06b6d4", bg: "bg-cyan-500", text: "text-cyan-600", soft: "bg-cyan-100", border: "border-cyan-500" },
+  ];
+
+  // Egy családtag színe — vagy a saját mentett color mezője, vagy a palettából
+  // az ID alapján determinisztikusan választott szín.
+  const getMemberColor = (member) => {
+    if (!member) return FAMILY_COLOR_PALETTE[0];
+    const explicit = FAMILY_COLOR_PALETTE.find((c) => c.id === member.color);
+    if (explicit) return explicit;
+    const idx =
+      Math.abs(
+        String(member.id || member.name || "").split("").reduce(
+          (s, c) => s + c.charCodeAt(0),
+          0
+        )
+      ) % FAMILY_COLOR_PALETTE.length;
+    return FAMILY_COLOR_PALETTE[idx];
+  };
+
+  // Egy feladathoz / eseményhez tartozó családtagok listája
+  const getAssignedMembers = (taskOrEvent) => {
+    if (!taskOrEvent) return [];
+    // assignedToAll → mindenkit visszaadunk
+    if (taskOrEvent.assignedToAll) {
+      return data.familyMembers || [];
+    }
+    // Új formátum: assignedMembers tömb
+    if (Array.isArray(taskOrEvent.assignedMembers) && taskOrEvent.assignedMembers.length > 0) {
+      return taskOrEvent.assignedMembers
+        .map((id) => (data.familyMembers || []).find((m) => m.id === id))
+        .filter(Boolean);
+    }
+    // Régi formátum: assignedTo (egyetlen ID)
+    if (taskOrEvent.assignedTo) {
+      const m = (data.familyMembers || []).find(
+        (x) => x.id === taskOrEvent.assignedTo
+      );
+      return m ? [m] : [];
+    }
+    return [];
+  };
+
+  // Időtartam segédfüggvények
+  const minutesToDurationParts = (minutes) => {
+    const m = parseInt(minutes, 10) || 0;
+    if (m === 0) return { value: "", unit: "minute" };
+    if (m % (60 * 24) === 0) return { value: m / (60 * 24), unit: "day" };
+    if (m % 60 === 0) return { value: m / 60, unit: "hour" };
+    return { value: m, unit: "minute" };
+  };
+
+  const durationPartsToMinutes = (value, unit) => {
+    const v = parseFloat(value) || 0;
+    if (unit === "day") return v * 60 * 24;
+    if (unit === "hour") return v * 60;
+    return v;
+  };
+
+  // Esemény kezdő/befejező időpont egyesítése Date objektummá
+  const eventStartDate = (task) => {
+    if (!task) return null;
+    const date = task.dueDate ? task.dueDate.split("T")[0] : null;
+    if (!date) return null;
+    const time = task.time || (task.allDay ? null : null);
+    if (time) return new Date(`${date}T${time}:00`);
+    return new Date(date + "T00:00:00");
+  };
+
+  const eventEndDate = (task) => {
+    if (!task) return null;
+    const start = eventStartDate(task);
+    if (!start) return null;
+    // Explicit endDate + endTime
+    if (task.endDate) {
+      const endTime = task.endTime || task.time || "23:59";
+      return new Date(`${task.endDate}T${endTime}:00`);
+    }
+    if (task.endTime && task.dueDate) {
+      const date = task.dueDate.split("T")[0];
+      return new Date(`${date}T${task.endTime}:00`);
+    }
+    // durationMinutes-ből
+    if (task.durationMinutes) {
+      return new Date(start.getTime() + task.durationMinutes * 60 * 1000);
+    }
+    // Régi 'duration' nap-alapú
+    if (task.duration && parseInt(task.duration, 10) > 0) {
+      const days = parseInt(task.duration, 10);
+      return new Date(start.getTime() + days * 24 * 60 * 60 * 1000);
+    }
+    // Default: ha van pontos idő, 1 óra; egyébként egész nap
+    if (task.time && !task.allDay) {
+      return new Date(start.getTime() + 60 * 60 * 1000);
+    }
+    return new Date(start.getTime() + 24 * 60 * 60 * 1000 - 1);
+  };
+
   const convertToHUF = (amount, currency, rateOverride = null) => {
     if (!amount) return 0;
     if (currency === "HUF" || !currency) return parseFloat(amount);
@@ -7961,24 +8101,79 @@ const FamilyOrganizerApp = () => {
       return new Date(year, month, day);
     };
 
-    // Feladatok
+    // Feladatok / események — ismétlődés esetén minden példányt generálunk
+    const expandTaskInstances = (task) => {
+      const baseDate = eventStartDate(task);
+      if (!baseDate) return [];
+      const instances = [];
+      // Sima eset: nem ismétlődő, csak egy példány
+      if (!task.recurring?.enabled) {
+        if (baseDate >= startDate && baseDate <= endDate) {
+          instances.push(baseDate);
+        }
+        return instances;
+      }
+      // Ismétlődés
+      const freq = task.recurring.frequency || "weekly";
+      const interval = parseInt(task.recurring.interval, 10) || 1;
+      const recurEndDate = task.recurring.endDate
+        ? new Date(task.recurring.endDate + "T23:59:59")
+        : null;
+      let d = new Date(baseDate);
+      let count = 0;
+      const maxIter = 500;
+      while (d <= endDate && count < maxIter) {
+        if (recurEndDate && d > recurEndDate) break;
+        if (d >= startDate && d <= endDate) {
+          instances.push(new Date(d));
+        }
+        // Léptetés
+        if (freq === "daily") d.setDate(d.getDate() + interval);
+        else if (freq === "weekly") d.setDate(d.getDate() + 7 * interval);
+        else if (freq === "monthly") d.setMonth(d.getMonth() + interval);
+        else if (freq === "yearly") d.setFullYear(d.getFullYear() + interval);
+        else break;
+        count++;
+      }
+      return instances;
+    };
+
     data.tasks.forEach((task) => {
-      const taskDate = new Date(task.dueDate);
-      if (taskDate >= startDate && taskDate <= endDate) {
-        const assignedMember = data.familyMembers.find(
-          (m) => m.id === task.assignedTo
-        );
+      const occurrences = expandTaskInstances(task);
+      occurrences.forEach((taskDate, occIdx) => {
+        const members = getAssignedMembers(task);
+        // Több családtag esetén az első színe domináns, a többi pont
+        const primaryColor = members[0] ? getMemberColor(members[0]) : null;
         events.push({
-          id: `task-${task.id}`,
+          id: `task-${task.id}${occIdx > 0 ? `-${occIdx}` : ""}`,
+          taskId: task.id,
           title: task.title,
           date: taskDate,
-          type: "feladat",
-          color: "bg-blue-500",
+          endDate: eventEndDate({ ...task, dueDate: taskDate.toISOString() }),
+          time: task.time || null,
+          endTime: task.endTime || null,
+          durationMinutes: task.durationMinutes || null,
+          allDay: task.allDay !== false && !task.time,
+          location: task.location || "",
+          category: task.category || "egyéb",
+          type: task.category || "feladat",
+          color: primaryColor
+            ? primaryColor.bg
+            : task.assignedToAll
+            ? "bg-indigo-600"
+            : "bg-blue-500",
+          memberColors: members.map((m) => getMemberColor(m)),
+          assignedMembers: members,
+          assignedToAll: !!task.assignedToAll,
           icon: CheckCircle,
           completed: task.completed,
-          assignedTo: assignedMember?.name,
+          assignedTo: members.map((m) => m.name).join(", "),
+          isRecurringInstance: occIdx > 0,
+          recurring: task.recurring,
+          description: task.description,
+          originalTask: task,
         });
-      }
+      });
     });
 
     // Születésnapok
@@ -8253,40 +8448,57 @@ const FamilyOrganizerApp = () => {
 
   const openEventModal = (dateOrEvent = null, isEvent = false) => {
     if (isEvent && dateOrEvent) {
-      // Meglévő esemény szerkesztése
+      // Meglévő esemény szerkesztése — a teljes Task Modal-ban nyitjuk
       const event = dateOrEvent;
       const eventDate = event.dueDate ? new Date(event.dueDate) : new Date();
-      setEditingEvent(event);
+      setEditingItem(event);
       setSelectedDate(eventDate);
       setFormData({
         title: event.title || "",
-        date: event.dueDate ? event.dueDate.split("T")[0] : new Date().toISOString().split("T")[0],
-        time: event.time || "09:00",
+        dueDate: event.dueDate
+          ? event.dueDate.split("T")[0]
+          : new Date().toISOString().split("T")[0],
+        time: event.time || "",
         endDate: event.endDate || "",
-        duration: event.duration || "",
-        type: event.category || "egyéb",
-        description: event.description || "",
+        endTime: event.endTime || "",
+        durationMinutes: event.durationMinutes || "",
         allDay: event.allDay !== false,
+        location: event.location || "",
+        category: event.category || "egyéb",
+        description: event.description || "",
+        assignedMembers: Array.isArray(event.assignedMembers)
+          ? event.assignedMembers
+          : event.assignedTo
+          ? [event.assignedTo]
+          : [],
+        assignedToAll: !!event.assignedToAll,
+        recurring: event.recurring || { enabled: false },
       });
+      setShowTaskModal(true);
     } else {
-      // Új esemény létrehozása
+      // Új esemény — szintén a Task Modal-ban
       const date = dateOrEvent;
-      setEditingEvent(null);
+      setEditingItem(null);
       setSelectedDate(date || new Date());
       setFormData({
         title: "",
-        date: date
+        dueDate: date
           ? date.toISOString().split("T")[0]
           : new Date().toISOString().split("T")[0],
-        time: "09:00",
+        time: "",
         endDate: "",
-        duration: "",
-        type: "egyéb",
-        description: "",
+        endTime: "",
+        durationMinutes: "",
         allDay: true,
+        location: "",
+        category: "egyéb",
+        description: "",
+        assignedMembers: [],
+        assignedToAll: false,
+        recurring: { enabled: false },
       });
+      setShowTaskModal(true);
     }
-    setShowEventModal(true);
   };
 
   // Befejező dátum számítása időtartamból
@@ -8567,17 +8779,20 @@ const FamilyOrganizerApp = () => {
     data.tasks.forEach((task) => {
       const taskDate = new Date(task.dueDate);
       if (taskDate >= today && taskDate <= endDate) {
-        const assignedMember = data.familyMembers.find(
-          (m) => m.id === task.assignedTo
-        );
+        const members = getAssignedMembers(task);
         allTasks.push({
           id: `task-${task.id}`,
           title: task.title,
           date: taskDate,
+          time: task.time || null,
+          location: task.location || "",
           category: task.category || "egyéb",
           type: "feladat",
           icon: "CheckCircle",
-          assignedTo: assignedMember?.name,
+          assignedTo: members.map((m) => m.name).join(", "),
+          assignedMembers: members,
+          assignedToAll: !!task.assignedToAll,
+          memberColors: members.map((m) => getMemberColor(m)),
           completed: task.completed,
           recurring: task.recurring,
           originalTask: task,
@@ -10048,15 +10263,44 @@ const FamilyOrganizerApp = () => {
                           {task.date.toLocaleDateString("hu-HU")}
                         </span>
                         {task.time && (
-                          <span className="flex items-center gap-1 text-blue-600">
-                            {task.time}
+                          <span className="flex items-center gap-1 text-blue-600 font-semibold">
+                            🕐 {task.time}
                           </span>
                         )}
-                        {task.assignedTo && (
-                          <span className="text-blue-600">
-                            → {task.assignedTo}
+                        {task.location && (
+                          <span className="flex items-center gap-1 text-gray-700">
+                            📍 {task.location}
                           </span>
                         )}
+                        {task.assignedToAll ? (
+                          <span className="flex items-center gap-1 px-2 py-0.5 bg-indigo-100 text-indigo-700 rounded text-xs">
+                            <Users size={12} /> Mindenki
+                          </span>
+                        ) : (
+                          task.memberColors &&
+                          task.memberColors.length > 0 && (
+                            <span className="flex items-center gap-1">
+                              {task.memberColors.slice(0, 5).map((c, ci) => (
+                                <span
+                                  key={ci}
+                                  className="inline-block w-3 h-3 rounded-full border border-white shadow-sm"
+                                  style={{ backgroundColor: c.hex }}
+                                  title={task.assignedMembers?.[ci]?.name}
+                                />
+                              ))}
+                              <span className="text-xs text-gray-600">
+                                {task.assignedTo}
+                              </span>
+                            </span>
+                          )
+                        )}
+                        {!task.assignedToAll &&
+                          (!task.memberColors || task.memberColors.length === 0) &&
+                          task.assignedTo && (
+                            <span className="text-blue-600">
+                              → {task.assignedTo}
+                            </span>
+                          )}
                         {task.details && (
                           <span className="text-gray-500">{task.details}</span>
                         )}
@@ -15661,7 +15905,11 @@ const FamilyOrganizerApp = () => {
     }
 
     const totalLoans = (project.financingPlan?.sources || [])
-      .filter((s) => FINANCING_SOURCE_TYPES[s.type]?.kind === "loan")
+      .filter(
+        (s) =>
+          FINANCING_SOURCE_TYPES[s.type]?.kind === "loan" &&
+          !s.excludeFromFunding
+      )
       .reduce((sum, s) => sum + (parseFloat(s.amount) || 0), 0);
 
     const isNew = project.type === "new";
@@ -16695,10 +16943,11 @@ const FamilyOrganizerApp = () => {
     const totalEquity = equitySources
       .filter((s) => s.status !== "suspended")
       .reduce((sum, s) => sum + (parseFloat(s.amount) || 0), 0);
-    const totalLoans = loanSources.reduce(
-      (sum, s) => sum + (parseFloat(s.amount) || 0),
-      0
-    );
+    const totalLoans = loanSources
+      .filter((s) => !s.excludeFromFunding)
+      .reduce((sum, s) => sum + (parseFloat(s.amount) || 0), 0);
+    // Csak törlesztési kötelezettségként szereplő hitelek (önerőbe transzformálódtak)
+    const paymentOnlyLoans = loanSources.filter((s) => s.excludeFromFunding);
     const totalAmount = totalEquity + totalLoans;
     const targetGap = (project.plannedBudget || 0) - totalAmount;
 
@@ -16725,15 +16974,22 @@ const FamilyOrganizerApp = () => {
     const timelineEvents = [];
     sources.forEach((s) => {
       if (s.plannedDate) {
+        const isLoan = FINANCING_SOURCE_TYPES[s.type]?.kind === "loan";
+        // Ha "csak törlesztés" hitel, az összeg ne jelenjen meg pluszként
+        // (mert nem új pénz a tervhez — már önerőben van).
+        const showAmount = !s.excludeFromFunding;
         timelineEvents.push({
           date: s.plannedDate,
-          kind: FINANCING_SOURCE_TYPES[s.type]?.kind === "loan" ? "loanIn" : "equityIn",
-          label: `${s.name} érkezik`,
+          kind: isLoan ? "loanIn" : "equityIn",
+          label: s.excludeFromFunding
+            ? `${s.name} felvétel (önerőbe transzformálva)`
+            : `${s.name} érkezik`,
           subLabel: s.type,
-          amount: parseFloat(s.amount) || 0,
+          amount: showAmount ? parseFloat(s.amount) || 0 : 0,
           monthly: parseFloat(s.monthlyPayment) || 0,
-          color: FINANCING_SOURCE_TYPES[s.type]?.kind === "loan" ? "red" : "green",
+          color: isLoan ? "red" : "green",
           status: s.status,
+          excludeFromFunding: s.excludeFromFunding,
         });
       }
       if (s.endDate) {
@@ -17614,6 +17870,11 @@ const FamilyOrganizerApp = () => {
                           {s.status === "suspended" && (
                             <span className="ml-1 px-1 bg-yellow-100 text-yellow-700 rounded">
                               Szüneteltetve
+                            </span>
+                          )}
+                          {s.excludeFromFunding && (
+                            <span className="ml-1 px-1 bg-purple-100 text-purple-800 rounded">
+                              💱 Csak törlesztés (önerőbe transzformálva)
                             </span>
                           )}
                           {s.moratoriumStartDate && s.moratoriumEndDate && (
@@ -19524,25 +19785,48 @@ const FamilyOrganizerApp = () => {
                       <div className="space-y-1">
                         {dayEvents.slice(0, 3).map((event) => {
                           const Icon = event.icon;
-                          const originalTask = data.tasks?.find(t => t.id === event.id);
                           return (
                             <div
                               key={event.id}
                               onClick={(e) => {
                                 e.stopPropagation();
-                                if (originalTask) {
-                                  openEventModal(originalTask, true);
+                                if (event.originalTask) {
+                                  openEventModal(event.originalTask, true);
                                 }
                               }}
                               className={`${
                                 event.color
-                              } text-white text-xs p-1 rounded flex items-center gap-1 cursor-pointer hover:opacity-80 ${
+                              } text-white text-xs px-1 py-0.5 rounded flex items-center gap-1 cursor-pointer hover:opacity-80 ${
                                 event.completed ? "opacity-50 line-through" : ""
                               }`}
-                              title={`${event.title} - Kattints a szerkesztéshez`}
+                              title={`${event.title}${event.time ? ` (${event.time})` : ""}${event.location ? ` @ ${event.location}` : ""}`}
                             >
-                              <Icon size={12} />
-                              <span className="truncate">{event.title}</span>
+                              {event.time && (
+                                <span className="text-[10px] font-semibold whitespace-nowrap">
+                                  {event.time}
+                                </span>
+                              )}
+                              <span className="truncate flex-1">
+                                {event.title}
+                              </span>
+                              {event.assignedToAll ? (
+                                <span className="text-[9px]">👨‍👩‍👧</span>
+                              ) : (
+                                event.memberColors &&
+                                event.memberColors.length > 0 && (
+                                  <span className="flex gap-0.5">
+                                    {event.memberColors
+                                      .slice(0, 3)
+                                      .map((c, ci) => (
+                                        <span
+                                          key={ci}
+                                          className="inline-block w-1.5 h-1.5 rounded-full border border-white"
+                                          style={{ backgroundColor: c.hex }}
+                                        />
+                                      ))}
+                                  </span>
+                                )
+                              )}
                             </div>
                           );
                         })}
@@ -19652,91 +19936,273 @@ const FamilyOrganizerApp = () => {
               </button>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-7 gap-4">
-              {weekDays.map((day, idx) => {
-                const dayEvents = events.filter(
-                  (e) => e.date.toDateString() === day.toDateString()
-                );
-                const isToday = day.toDateString() === today.toDateString();
-
-                return (
-                  <div
-                    key={idx}
-                    onClick={() => openEventModal(day)}
-                    className={`border rounded-lg p-3 cursor-pointer hover:shadow-md transition ${
-                      isToday
-                        ? "bg-blue-50 border-blue-500"
-                        : "bg-white border-gray-200"
-                    }`}
-                  >
-                    <div className="text-center mb-3">
-                      <div className="text-xs font-medium text-gray-600 uppercase">
-                        {dayNames[(day.getDay() + 6) % 7]}
-                      </div>
-                      <div
-                        className={`text-2xl font-bold ${
-                          isToday ? "text-blue-600" : "text-gray-800"
-                        }`}
-                      >
-                        {day.getDate()}
-                      </div>
-                      <div className="text-xs text-gray-600">
-                        {monthNames[day.getMonth()].substring(0, 3)}
-                      </div>
+            {/* Klasszikus órás heti rács */}
+            {(() => {
+              const startHour = 6;
+              const endHour = 22;
+              const totalHours = endHour - startHour;
+              const hourPx = 48; // 1 óra magassága
+              // Egész napos események elkülönítve
+              const allDayByDay = weekDays.map((day) =>
+                events.filter(
+                  (e) =>
+                    e.date.toDateString() === day.toDateString() &&
+                    (e.allDay || !e.time)
+                )
+              );
+              const timedByDay = weekDays.map((day) =>
+                events.filter(
+                  (e) =>
+                    e.date.toDateString() === day.toDateString() &&
+                    e.time &&
+                    !e.allDay
+                )
+              );
+              return (
+                <div className="overflow-x-auto">
+                  <div style={{ minWidth: "750px" }}>
+                    {/* Fejléc: napok */}
+                    <div
+                      className="grid"
+                      style={{ gridTemplateColumns: "50px repeat(7, 1fr)" }}
+                    >
+                      <div className="border-b border-gray-200"></div>
+                      {weekDays.map((day, idx) => {
+                        const isToday =
+                          day.toDateString() === today.toDateString();
+                        return (
+                          <div
+                            key={idx}
+                            className={`text-center py-2 border-b border-gray-200 ${
+                              isToday ? "bg-blue-50" : ""
+                            }`}
+                          >
+                            <div className="text-xs font-medium text-gray-600 uppercase">
+                              {dayNames[(day.getDay() + 6) % 7]}
+                            </div>
+                            <div
+                              className={`text-xl font-bold ${
+                                isToday ? "text-blue-600" : "text-gray-800"
+                              }`}
+                            >
+                              {day.getDate()}
+                            </div>
+                            <div className="text-[10px] text-gray-500">
+                              {monthNames[day.getMonth()].substring(0, 3)}
+                            </div>
+                          </div>
+                        );
+                      })}
                     </div>
 
-                    <div className="space-y-2">
-                      {dayEvents.length === 0 ? (
-                        <p className="text-xs text-gray-400 text-center py-4">
-                          Nincs esemény
-                        </p>
-                      ) : (
-                        dayEvents.map((event) => {
-                          const Icon = event.icon;
-                          const originalTask = data.tasks?.find(t => t.id === event.id);
-                          return (
-                            <div
-                              key={event.id}
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                if (originalTask) {
-                                  openEventModal(originalTask, true);
-                                }
-                              }}
-                              className={`${
-                                event.color
-                              } text-white text-xs p-2 rounded cursor-pointer hover:opacity-80 ${
-                                event.completed ? "opacity-50" : ""
-                              }`}
-                              title="Kattints a szerkesztéshez"
-                            >
-                              <div className="flex items-center gap-2 mb-1">
-                                <Icon size={14} />
-                                <span className="font-medium">
-                                  {event.type}
-                                </span>
-                              </div>
+                    {/* Egész napos sáv */}
+                    {allDayByDay.some((a) => a.length > 0) && (
+                      <div
+                        className="grid"
+                        style={{ gridTemplateColumns: "50px repeat(7, 1fr)" }}
+                      >
+                        <div className="text-[10px] text-gray-500 text-right pr-1 py-1 border-r border-gray-200">
+                          egész nap
+                        </div>
+                        {allDayByDay.map((dayItems, idx) => (
+                          <div
+                            key={idx}
+                            className="border-r border-b border-gray-200 p-1 min-h-[24px] space-y-0.5"
+                          >
+                            {dayItems.map((e) => (
                               <div
-                                className={
-                                  event.completed ? "line-through" : ""
-                                }
+                                key={e.id}
+                                onClick={(evt) => {
+                                  evt.stopPropagation();
+                                  if (e.originalTask) {
+                                    openEventModal(e.originalTask, true);
+                                  }
+                                }}
+                                className={`${e.color} text-white text-[10px] px-1 py-0.5 rounded cursor-pointer truncate ${
+                                  e.completed ? "opacity-50 line-through" : ""
+                                }`}
+                                title={e.title}
                               >
-                                {event.title}
+                                {e.title}
+                                {e.assignedToAll && " 👨‍👩‍👧"}
                               </div>
-                              {event.assignedTo && (
-                                <div className="mt-1 text-xs opacity-80">
-                                  → {event.assignedTo}
+                            ))}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    {/* Órás rács */}
+                    <div
+                      className="grid"
+                      style={{ gridTemplateColumns: "50px repeat(7, 1fr)" }}
+                    >
+                      {/* Órák oszlop */}
+                      <div className="relative" style={{ height: `${totalHours * hourPx}px` }}>
+                        {Array.from({ length: totalHours }).map((_, i) => (
+                          <div
+                            key={i}
+                            className="text-[10px] text-gray-500 text-right pr-1"
+                            style={{
+                              position: "absolute",
+                              top: `${i * hourPx}px`,
+                              height: `${hourPx}px`,
+                              right: 0,
+                              left: 0,
+                            }}
+                          >
+                            {String(startHour + i).padStart(2, "0")}:00
+                          </div>
+                        ))}
+                      </div>
+                      {/* 7 napi oszlop */}
+                      {weekDays.map((day, dayIdx) => {
+                        const isToday =
+                          day.toDateString() === today.toDateString();
+                        const dayItems = timedByDay[dayIdx];
+                        return (
+                          <div
+                            key={dayIdx}
+                            className={`relative border-r border-gray-200 ${
+                              isToday ? "bg-blue-50/30" : ""
+                            }`}
+                            style={{ height: `${totalHours * hourPx}px` }}
+                          >
+                            {/* Órás vonalak */}
+                            {Array.from({ length: totalHours }).map((_, i) => (
+                              <div
+                                key={i}
+                                onClick={() => {
+                                  const d = new Date(day);
+                                  setEditingItem(null);
+                                  setFormData({
+                                    title: "",
+                                    dueDate: d.toISOString().split("T")[0],
+                                    time: `${String(startHour + i).padStart(2, "0")}:00`,
+                                    endDate: "",
+                                    endTime: "",
+                                    durationMinutes: 60,
+                                    allDay: false,
+                                    location: "",
+                                    category: "egyéb",
+                                    description: "",
+                                    assignedMembers: [],
+                                    assignedToAll: false,
+                                    recurring: { enabled: false },
+                                  });
+                                  setShowTaskModal(true);
+                                }}
+                                className="border-b border-gray-100 hover:bg-blue-50/50 cursor-pointer"
+                                style={{
+                                  height: `${hourPx}px`,
+                                }}
+                              />
+                            ))}
+                            {/* "Most" vonal — csak ma */}
+                            {isToday &&
+                              (() => {
+                                const now = new Date();
+                                const minutes =
+                                  (now.getHours() - startHour) * 60 +
+                                  now.getMinutes();
+                                if (minutes < 0 || minutes > totalHours * 60)
+                                  return null;
+                                const topPx = (minutes / 60) * hourPx;
+                                return (
+                                  <div
+                                    className="absolute left-0 right-0 z-10 pointer-events-none"
+                                    style={{ top: `${topPx}px` }}
+                                  >
+                                    <div className="h-0.5 bg-red-500" />
+                                    <div className="absolute left-0 -top-1 w-2 h-2 bg-red-500 rounded-full" />
+                                  </div>
+                                );
+                              })()}
+                            {/* Események */}
+                            {dayItems.map((e) => {
+                              const [h, m] = e.time.split(":").map(Number);
+                              const startMin = h * 60 + m;
+                              const offsetMin = startMin - startHour * 60;
+                              if (
+                                offsetMin < -30 ||
+                                offsetMin > totalHours * 60
+                              )
+                                return null;
+                              const durationMin =
+                                e.durationMinutes ||
+                                (e.endTime
+                                  ? (() => {
+                                      const [eh, em] = e.endTime
+                                        .split(":")
+                                        .map(Number);
+                                      let mins =
+                                        eh * 60 + em - (h * 60 + m);
+                                      if (mins < 0) mins += 24 * 60;
+                                      return mins;
+                                    })()
+                                  : 60); // default 1 óra
+                              const topPx = (offsetMin / 60) * hourPx;
+                              const heightPx = Math.max(
+                                20,
+                                (durationMin / 60) * hourPx - 2
+                              );
+                              return (
+                                <div
+                                  key={e.id}
+                                  onClick={(evt) => {
+                                    evt.stopPropagation();
+                                    if (e.originalTask) {
+                                      openEventModal(e.originalTask, true);
+                                    }
+                                  }}
+                                  className={`absolute left-1 right-1 ${e.color} text-white text-[10px] px-1 py-0.5 rounded cursor-pointer overflow-hidden shadow-sm ${
+                                    e.completed
+                                      ? "opacity-50 line-through"
+                                      : ""
+                                  }`}
+                                  style={{
+                                    top: `${topPx}px`,
+                                    height: `${heightPx}px`,
+                                  }}
+                                  title={`${e.time}${e.endTime ? `–${e.endTime}` : ""} ${e.title}${e.location ? ` @ ${e.location}` : ""}`}
+                                >
+                                  <div className="font-semibold truncate">
+                                    {e.time} {e.title}
+                                    {e.assignedToAll && " 👨‍👩‍👧"}
+                                  </div>
+                                  {e.location && heightPx > 28 && (
+                                    <div className="text-[9px] opacity-90 truncate">
+                                      📍 {e.location}
+                                    </div>
+                                  )}
+                                  {/* családtag pötty */}
+                                  {!e.assignedToAll &&
+                                    e.memberColors &&
+                                    e.memberColors.length > 0 &&
+                                    heightPx > 22 && (
+                                      <div className="flex gap-0.5 mt-0.5">
+                                        {e.memberColors
+                                          .slice(0, 4)
+                                          .map((c, ci) => (
+                                            <span
+                                              key={ci}
+                                              className="inline-block w-1.5 h-1.5 rounded-full border border-white"
+                                              style={{ backgroundColor: c.hex }}
+                                            />
+                                          ))}
+                                      </div>
+                                    )}
                                 </div>
-                              )}
-                            </div>
-                          );
-                        })
-                      )}
+                              );
+                            })}
+                          </div>
+                        );
+                      })}
                     </div>
                   </div>
-                );
-              })}
-            </div>
+                </div>
+              );
+            })()}
           </div>
 
           {/* Heti jegyzetek */}
@@ -22166,179 +22632,512 @@ const FamilyOrganizerApp = () => {
 
       {/* ALL MODALS */}
       {/* Task Modal */}
-      {showTaskModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-lg shadow-xl max-w-md w-full p-6 max-h-[90vh] overflow-y-auto">
-            <div className="flex justify-between items-center mb-4">
-              <h3 className="text-xl font-bold text-gray-800">Új feladat</h3>
-              <button
-                onClick={() => setShowTaskModal(false)}
-                className="text-gray-500 hover:text-gray-700"
-              >
-                <X size={24} />
-              </button>
-            </div>
-            <div className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Feladat neve *
-                </label>
-                <input
-                  type="text"
-                  value={formData.title || ""}
-                  onChange={(e) =>
-                    setFormData({ ...formData, title: e.target.value })
-                  }
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Határidő *
-                </label>
-                <input
-                  type="date"
-                  value={formData.dueDate || ""}
-                  onChange={(e) =>
-                    setFormData({ ...formData, dueDate: e.target.value })
-                  }
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Felelős
-                </label>
-                <select
-                  value={formData.assignedTo || ""}
-                  onChange={(e) =>
-                    setFormData({
-                      ...formData,
-                      assignedTo: e.target.value
-                        ? parseInt(e.target.value)
-                        : null,
-                    })
-                  }
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+      {showTaskModal && (() => {
+        const durationParts = minutesToDurationParts(
+          formData.durationMinutes || 0
+        );
+        const isAllDay = formData.allDay !== false &&
+          (!formData.time || formData.time === "");
+        return (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+            <div className="bg-white rounded-lg shadow-xl max-w-xl w-full p-6 max-h-[90vh] overflow-y-auto">
+              <div className="flex justify-between items-center mb-4">
+                <h3 className="text-xl font-bold text-gray-800">
+                  {editingItem ? "Esemény szerkesztése" : "Új esemény"}
+                </h3>
+                <button
+                  onClick={() => {
+                    setShowTaskModal(false);
+                    setEditingItem(null);
+                    setFormData({});
+                  }}
+                  className="text-gray-500 hover:text-gray-700"
                 >
-                  <option value="">Nincs hozzárendelve</option>
-                  {data.familyMembers.map((member) => (
-                    <option key={member.id} value={member.id}>
-                      {member.name}
-                    </option>
-                  ))}
-                </select>
+                  <X size={24} />
+                </button>
               </div>
+              <div className="space-y-3">
+                {/* Cím */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Esemény neve *
+                  </label>
+                  <input
+                    type="text"
+                    value={formData.title || ""}
+                    onChange={(e) =>
+                      setFormData({ ...formData, title: e.target.value })
+                    }
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                    placeholder="pl. Orvosi vizsgálat"
+                  />
+                </div>
 
-              <div className="border-t pt-4">
-                <label className="flex items-center gap-2 cursor-pointer mb-3">
+                {/* Egész napos */}
+                <div className="flex items-center gap-2">
                   <input
                     type="checkbox"
-                    checked={formData.recurring?.enabled || false}
-                    onChange={(e) =>
+                    id="allDay"
+                    checked={isAllDay}
+                    onChange={(e) => {
+                      const all = e.target.checked;
                       setFormData({
                         ...formData,
-                        recurring: {
-                          ...formData.recurring,
-                          enabled: e.target.checked,
-                          frequency: formData.recurring?.frequency || "weekly",
-                          interval: formData.recurring?.interval || 1,
-                        },
-                      })
-                    }
-                    className="w-5 h-5 text-blue-600 rounded"
+                        allDay: all,
+                        time: all ? "" : (formData.time || "09:00"),
+                        endTime: all ? "" : formData.endTime,
+                      });
+                    }}
+                    className="w-4 h-4 text-blue-600 rounded"
                   />
-                  <Repeat size={18} className="text-gray-600" />
-                  <span className="text-sm font-medium text-gray-700">
-                    Ismétlődő feladat
-                  </span>
-                </label>
+                  <label
+                    htmlFor="allDay"
+                    className="text-sm font-medium text-gray-700"
+                  >
+                    Egész napos esemény
+                  </label>
+                </div>
 
-                {formData.recurring?.enabled && (
-                  <div className="pl-7 space-y-3">
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">
-                        Gyakoriság
-                      </label>
-                      <select
-                        value={formData.recurring?.frequency || "weekly"}
-                        onChange={(e) =>
-                          setFormData({
-                            ...formData,
-                            recurring: {
-                              ...formData.recurring,
-                              frequency: e.target.value,
-                            },
-                          })
-                        }
-                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
-                      >
-                        <option value="daily">Napi</option>
-                        <option value="weekly">Heti</option>
-                        <option value="monthly">Havi</option>
-                        <option value="yearly">Éves</option>
-                      </select>
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">
-                        Minden ... alkalommal
-                      </label>
-                      <input
-                        type="number"
-                        min="1"
-                        value={formData.recurring?.interval || 1}
-                        onChange={(e) =>
-                          setFormData({
-                            ...formData,
-                            recurring: {
-                              ...formData.recurring,
-                              interval: parseInt(e.target.value) || 1,
-                            },
-                          })
-                        }
-                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
-                      />
-                    </div>
+                {/* Kezdő dátum + idő egymás mellett */}
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Kezdő dátum *
+                    </label>
+                    <input
+                      type="date"
+                      value={formData.dueDate || ""}
+                      onChange={(e) =>
+                        setFormData({ ...formData, dueDate: e.target.value })
+                      }
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+                    />
                   </div>
-                )}
-              </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Kezdő időpont
+                    </label>
+                    <input
+                      type="time"
+                      value={formData.time || ""}
+                      disabled={isAllDay}
+                      onChange={(e) => {
+                        const t = e.target.value;
+                        // Ha van durationMinutes, számoljuk újra az endTime-ot
+                        let endTime = formData.endTime;
+                        if (t && formData.durationMinutes) {
+                          const [h, m] = t.split(":").map(Number);
+                          const startMin = h * 60 + m;
+                          const endMin = startMin + parseInt(formData.durationMinutes, 10);
+                          const eh = Math.floor((endMin % (24 * 60)) / 60);
+                          const em = endMin % 60;
+                          endTime = `${String(eh).padStart(2, "0")}:${String(em).padStart(2, "0")}`;
+                        }
+                        setFormData({
+                          ...formData,
+                          time: t,
+                          allDay: false,
+                          endTime,
+                        });
+                      }}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg disabled:bg-gray-100"
+                    />
+                  </div>
+                </div>
 
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Kategória
-                </label>
-                <select
-                  value={formData.category || "otthon"}
-                  onChange={(e) =>
-                    setFormData({ ...formData, category: e.target.value })
-                  }
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
-                >
-                  <option value="otthon">Otthon</option>
-                  <option value="jármű">Jármű</option>
-                  <option value="egészség">Egészség</option>
-                  <option value="egyéb">Egyéb</option>
-                </select>
+                {/* Befejező dátum + idő egymás mellett, alul */}
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Befejező dátum
+                    </label>
+                    <input
+                      type="date"
+                      value={formData.endDate || ""}
+                      onChange={(e) =>
+                        setFormData({ ...formData, endDate: e.target.value })
+                      }
+                      min={formData.dueDate || ""}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Befejező időpont
+                    </label>
+                    <input
+                      type="time"
+                      value={formData.endTime || ""}
+                      disabled={isAllDay}
+                      onChange={(e) => {
+                        const et = e.target.value;
+                        // Számoljuk újra az időtartamot
+                        let durationMinutes = formData.durationMinutes;
+                        if (et && formData.time) {
+                          const [sh, sm] = formData.time.split(":").map(Number);
+                          const [eh, em] = et.split(":").map(Number);
+                          let mins = eh * 60 + em - (sh * 60 + sm);
+                          if (mins < 0) mins += 24 * 60;
+                          durationMinutes = mins;
+                        }
+                        setFormData({
+                          ...formData,
+                          endTime: et,
+                          durationMinutes,
+                        });
+                      }}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg disabled:bg-gray-100"
+                    />
+                  </div>
+                </div>
+
+                {/* Időtartam */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Időtartam
+                  </label>
+                  <div className="flex gap-2">
+                    <input
+                      type="number"
+                      min="0"
+                      step="any"
+                      value={durationParts.value}
+                      onChange={(e) => {
+                        const minutes = durationPartsToMinutes(
+                          e.target.value,
+                          durationParts.unit
+                        );
+                        // endTime automatikus számítása ha van time
+                        let endTime = formData.endTime;
+                        let endDate = formData.endDate;
+                        if (minutes > 0 && formData.time && formData.dueDate) {
+                          const [h, m] = formData.time.split(":").map(Number);
+                          const startMin = h * 60 + m;
+                          const totalEndMin = startMin + minutes;
+                          const extraDays = Math.floor(totalEndMin / (24 * 60));
+                          const eh = Math.floor((totalEndMin % (24 * 60)) / 60);
+                          const em = totalEndMin % 60;
+                          endTime = `${String(eh).padStart(2, "0")}:${String(em).padStart(2, "0")}`;
+                          if (extraDays > 0) {
+                            const d = new Date(formData.dueDate + "T00:00:00");
+                            d.setDate(d.getDate() + extraDays);
+                            endDate = d.toISOString().split("T")[0];
+                          } else {
+                            endDate = formData.dueDate;
+                          }
+                        }
+                        setFormData({
+                          ...formData,
+                          durationMinutes: minutes,
+                          endTime,
+                          endDate,
+                        });
+                      }}
+                      className="flex-1 px-3 py-2 border border-gray-300 rounded-lg"
+                      placeholder="1"
+                    />
+                    <select
+                      value={durationParts.unit}
+                      onChange={(e) => {
+                        const unit = e.target.value;
+                        const minutes = durationPartsToMinutes(
+                          durationParts.value || 1,
+                          unit
+                        );
+                        setFormData({
+                          ...formData,
+                          durationMinutes: minutes,
+                        });
+                      }}
+                      className="px-3 py-2 border border-gray-300 rounded-lg w-32"
+                    >
+                      <option value="minute">perc</option>
+                      <option value="hour">óra</option>
+                      <option value="day">nap</option>
+                    </select>
+                  </div>
+                  {!formData.time && !isAllDay && (
+                    <p className="text-xs text-gray-500 mt-1">
+                      Időpont nélkül az időtartam csak akkor érvényesül, ha
+                      kezdő időpontot is megadsz.
+                    </p>
+                  )}
+                  {!formData.endTime && !formData.endDate && formData.time && (
+                    <p className="text-xs text-gray-500 mt-1">
+                      Befejező nélkül 1 óra az alapértelmezett.
+                    </p>
+                  )}
+                </div>
+
+                {/* Helyszín */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Helyszín
+                  </label>
+                  <input
+                    type="text"
+                    value={formData.location || ""}
+                    onChange={(e) =>
+                      setFormData({ ...formData, location: e.target.value })
+                    }
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg"
+                    placeholder="pl. Rendelő, Budapest, Bartók B. út 5."
+                  />
+                </div>
+
+                {/* Családtagok */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Kit érint
+                  </label>
+                  <div className="border border-gray-300 rounded-lg p-2 space-y-2">
+                    <label className="flex items-center gap-2 cursor-pointer bg-indigo-50 px-2 py-1 rounded">
+                      <input
+                        type="checkbox"
+                        checked={!!formData.assignedToAll}
+                        onChange={(e) =>
+                          setFormData({
+                            ...formData,
+                            assignedToAll: e.target.checked,
+                            assignedMembers: e.target.checked
+                              ? []
+                              : formData.assignedMembers || [],
+                          })
+                        }
+                        className="w-4 h-4"
+                      />
+                      <Users size={16} className="text-indigo-600" />
+                      <span className="text-sm font-medium">Mindenki</span>
+                    </label>
+                    {!formData.assignedToAll && (
+                      <div className="flex flex-wrap gap-1">
+                        {(data.familyMembers || []).length === 0 ? (
+                          <p className="text-xs text-gray-500">
+                            Vegyél fel családtagokat a Család modulban.
+                          </p>
+                        ) : (
+                          (data.familyMembers || []).map((m) => {
+                            const selected = (
+                              formData.assignedMembers || []
+                            ).includes(m.id);
+                            const color = getMemberColor(m);
+                            return (
+                              <button
+                                key={m.id}
+                                onClick={() => {
+                                  const cur = formData.assignedMembers || [];
+                                  const next = selected
+                                    ? cur.filter((x) => x !== m.id)
+                                    : [...cur, m.id];
+                                  setFormData({
+                                    ...formData,
+                                    assignedMembers: next,
+                                  });
+                                }}
+                                className={`px-2 py-1 rounded text-xs flex items-center gap-1 border ${
+                                  selected
+                                    ? `${color.bg} text-white ${color.border}`
+                                    : "bg-white text-gray-700 border-gray-300"
+                                }`}
+                              >
+                                <span
+                                  className="inline-block w-2 h-2 rounded-full"
+                                  style={{ backgroundColor: color.hex }}
+                                />
+                                {m.name}
+                              </button>
+                            );
+                          })
+                        )}
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Kategória */}
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Kategória
+                    </label>
+                    <select
+                      value={formData.category || "egyéb"}
+                      onChange={(e) =>
+                        setFormData({ ...formData, category: e.target.value })
+                      }
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+                    >
+                      <option value="otthon">Otthon</option>
+                      <option value="jármű">Jármű</option>
+                      <option value="egészség">Egészség</option>
+                      <option value="munka">Munka</option>
+                      <option value="iskola">Iskola</option>
+                      <option value="szabadidő">Szabadidő</option>
+                      <option value="találkozó">Találkozó</option>
+                      <option value="emlékeztető">Emlékeztető</option>
+                      <option value="ünnep">Ünnep</option>
+                      <option value="egyéb">Egyéb</option>
+                    </select>
+                  </div>
+                </div>
+
+                {/* Ismétlődés */}
+                <div className="border-t pt-3">
+                  <label className="flex items-center gap-2 cursor-pointer mb-2">
+                    <input
+                      type="checkbox"
+                      checked={formData.recurring?.enabled || false}
+                      onChange={(e) =>
+                        setFormData({
+                          ...formData,
+                          recurring: {
+                            ...formData.recurring,
+                            enabled: e.target.checked,
+                            frequency:
+                              formData.recurring?.frequency || "weekly",
+                            interval: formData.recurring?.interval || 1,
+                          },
+                        })
+                      }
+                      className="w-4 h-4 text-blue-600 rounded"
+                    />
+                    <Repeat size={16} className="text-gray-600" />
+                    <span className="text-sm font-medium text-gray-700">
+                      Ismétlődő esemény
+                    </span>
+                  </label>
+                  {formData.recurring?.enabled && (
+                    <div className="pl-6 grid grid-cols-3 gap-2">
+                      <div>
+                        <label className="block text-xs text-gray-600 mb-1">
+                          Gyakoriság
+                        </label>
+                        <select
+                          value={formData.recurring?.frequency || "weekly"}
+                          onChange={(e) =>
+                            setFormData({
+                              ...formData,
+                              recurring: {
+                                ...formData.recurring,
+                                frequency: e.target.value,
+                              },
+                            })
+                          }
+                          className="w-full px-2 py-1 border border-gray-300 rounded text-sm"
+                        >
+                          <option value="daily">Napi</option>
+                          <option value="weekly">Heti</option>
+                          <option value="monthly">Havi</option>
+                          <option value="yearly">Éves</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block text-xs text-gray-600 mb-1">
+                          Minden ... -ban
+                        </label>
+                        <input
+                          type="number"
+                          min="1"
+                          value={formData.recurring?.interval || 1}
+                          onChange={(e) =>
+                            setFormData({
+                              ...formData,
+                              recurring: {
+                                ...formData.recurring,
+                                interval: parseInt(e.target.value) || 1,
+                              },
+                            })
+                          }
+                          className="w-full px-2 py-1 border border-gray-300 rounded text-sm"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs text-gray-600 mb-1">
+                          Ismétlés vége
+                        </label>
+                        <input
+                          type="date"
+                          value={formData.recurring?.endDate || ""}
+                          onChange={(e) =>
+                            setFormData({
+                              ...formData,
+                              recurring: {
+                                ...formData.recurring,
+                                endDate: e.target.value,
+                              },
+                            })
+                          }
+                          className="w-full px-2 py-1 border border-gray-300 rounded text-sm"
+                        />
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* Leírás */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Leírás
+                  </label>
+                  <textarea
+                    value={formData.description || ""}
+                    onChange={(e) =>
+                      setFormData({ ...formData, description: e.target.value })
+                    }
+                    rows="2"
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg"
+                    placeholder="További részletek..."
+                  />
+                </div>
               </div>
-            </div>
-            <div className="mt-6 flex gap-3">
-              <button
-                onClick={() => setShowTaskModal(false)}
-                className="flex-1 px-4 py-3 border border-gray-300 rounded-lg hover:bg-gray-50"
-              >
-                Mégse
-              </button>
-              <button
-                onClick={addTask}
-                className="flex-1 px-4 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
-              >
-                Mentés
-              </button>
+              <div className="mt-6 flex gap-3">
+                {editingItem && (
+                  <button
+                    onClick={async () => {
+                      if (
+                        window.confirm(
+                          `Biztosan törlöd a(z) "${editingItem.title}" eseményt?`
+                        )
+                      ) {
+                        const newData = {
+                          ...data,
+                          tasks: data.tasks.filter(
+                            (t) => t.id !== editingItem.id
+                          ),
+                        };
+                        setData(newData);
+                        await saveUserData(newData);
+                        setShowTaskModal(false);
+                        setEditingItem(null);
+                        setFormData({});
+                      }
+                    }}
+                    className="px-4 py-3 bg-red-600 text-white rounded-lg hover:bg-red-700"
+                  >
+                    <Trash2 size={18} />
+                  </button>
+                )}
+                <button
+                  onClick={() => {
+                    setShowTaskModal(false);
+                    setEditingItem(null);
+                    setFormData({});
+                  }}
+                  className="flex-1 px-4 py-3 border border-gray-300 rounded-lg hover:bg-gray-50"
+                >
+                  Mégse
+                </button>
+                <button
+                  onClick={addTask}
+                  className="flex-1 px-4 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+                >
+                  {editingItem ? "Módosítás" : "Létrehozás"}
+                </button>
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
       {/* Member Modal */}
       {showMemberModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50 overflow-y-auto">
@@ -22393,6 +23192,39 @@ const FamilyOrganizerApp = () => {
                       <option value="egyéb">Egyéb</option>
                     </select>
                   </div>
+                </div>
+
+                {/* Naptári szín */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Naptári szín
+                  </label>
+                  <div className="flex flex-wrap gap-2">
+                    {FAMILY_COLOR_PALETTE.map((c) => {
+                      const currentColor =
+                        formData.color || getMemberColor(formData).id;
+                      const selected = currentColor === c.id;
+                      return (
+                        <button
+                          key={c.id}
+                          onClick={() =>
+                            setFormData({ ...formData, color: c.id })
+                          }
+                          className={`w-8 h-8 rounded-full border-2 transition ${
+                            selected
+                              ? "border-gray-900 scale-110"
+                              : "border-gray-300"
+                          }`}
+                          style={{ backgroundColor: c.hex }}
+                          title={c.id}
+                        />
+                      );
+                    })}
+                  </div>
+                  <p className="text-xs text-gray-500 mt-1">
+                    Ez a szín jelöli a családtagot a naptárban és az
+                    áttekintésben.
+                  </p>
                 </div>
 
                 <div className="grid grid-cols-2 gap-4">
@@ -32866,6 +33698,37 @@ const FamilyOrganizerApp = () => {
                       className="w-full px-4 py-2 border border-gray-300 rounded-lg"
                       placeholder="pl. 2. gyermek születése 2028-ig"
                     />
+                  </div>
+
+                  {/* "Csak törlesztés" — hitel önerővé alakítva */}
+                  <div className="border-t pt-3">
+                    <label className="flex items-start gap-2 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={!!formData.excludeFromFunding}
+                        onChange={(e) =>
+                          setFormData({
+                            ...formData,
+                            excludeFromFunding: e.target.checked,
+                          })
+                        }
+                        className="w-4 h-4 mt-0.5"
+                      />
+                      <div>
+                        <span className="text-sm font-medium text-gray-700">
+                          💱 Csak törlesztési kötelezettség (a hitelösszeg
+                          már az önerőben szerepel)
+                        </span>
+                        <p className="text-xs text-gray-500 mt-1">
+                          Pipáld be, ha a hitel összegét már korábban felvetted
+                          és átalakítottad önerővé (pl. <b>Babaváró → állampapír</b>).
+                          Ilyenkor a hitelösszeg <b>nem</b> számít a finanszírozási
+                          összeghez, csak a havi törlesztő szerepel a
+                          cash-flow-ban. Ellenkező esetben dupla összeg lenne:
+                          az állampapírban és a hitelek között is.
+                        </p>
+                      </div>
+                    </label>
                   </div>
 
                   {/* Törlesztési moratórium */}
