@@ -1068,6 +1068,18 @@ const FamilyOrganizerApp = () => {
       if (user) {
         setCurrentUser(user);
         setIsLoggedIn(true);
+        // Email tárolása a user doc-on (a Firestore query-khez)
+        if (user.email) {
+          setDoc(
+            doc(db, "users", user.uid),
+            {
+              email: user.email,
+              emailLower: user.email.toLowerCase(),
+              lastLoginAt: new Date().toISOString(),
+            },
+            { merge: true }
+          ).catch((err) => console.error("Email tárolási hiba:", err));
+        }
         loadUserData(user.uid);
       } else {
         setCurrentUser(null);
@@ -1227,7 +1239,8 @@ const FamilyOrganizerApp = () => {
       return;
     }
 
-    if (!inviteEmail) {
+    const trimmedEmail = inviteEmail.trim().toLowerCase();
+    if (!trimmedEmail) {
       alert("Kérlek add meg az email címet!");
       return;
     }
@@ -1239,16 +1252,42 @@ const FamilyOrganizerApp = () => {
       return;
     }
 
+    // Saját maga meghívásának megakadályozása
+    if (trimmedEmail === currentUser.email?.toLowerCase()) {
+      alert("Nem hívhatod meg saját magadat.");
+      return;
+    }
+
+    // Már tag-e
+    const alreadyMember = familyMembers.some(
+      (m) => m.email?.toLowerCase() === trimmedEmail
+    );
+    if (alreadyMember) {
+      alert("Ez a felhasználó már tagja a családnak.");
+      return;
+    }
+
     try {
-      // Meghívás tárolása a család dokumentumban
       const familyDocRef = doc(db, "families", data.familyId);
       const familySnap = await getDoc(familyDocRef);
       const familyData = familySnap.exists() ? familySnap.data() : {};
       const existingInvitations = familyData.invitations || [];
 
+      // Már van-e függő meghívó ugyanennek az email-nek
+      const existingPending = existingInvitations.find(
+        (inv) =>
+          inv.invitedEmail?.toLowerCase() === trimmedEmail &&
+          inv.status === "pending"
+      );
+      if (existingPending) {
+        alert("Már van függő meghívó ennek az email címnek.");
+        return;
+      }
+
       const newInvitation = {
-        id: Date.now().toString(),
-        invitedEmail: inviteEmail,
+        id: Date.now().toString() + "-" + Math.random().toString(36).slice(2, 8),
+        invitedEmail: trimmedEmail,
+        familyId: data.familyId,
         invitedBy: currentUser.uid,
         invitedByEmail: currentUser.email,
         role: inviteRole,
@@ -1256,24 +1295,70 @@ const FamilyOrganizerApp = () => {
         createdAt: new Date().toISOString(),
       };
 
+      // 1) Mentés a család dokumentumba (admin követhesse)
       await setDoc(
         familyDocRef,
         { invitations: [...existingInvitations, newInvitation] },
         { merge: true }
       );
 
-      alert(`Meghívó elküldve: ${inviteEmail}`);
+      // 2) Mentés a meghívott user dokumentumába, ha létezik már fiókja
+      let foundExistingUser = false;
+      try {
+        const usersQuery = query(
+          collection(db, "users"),
+          where("emailLower", "==", trimmedEmail)
+        );
+        const usersSnap = await getDocs(usersQuery);
+        for (const userDoc of usersSnap.docs) {
+          foundExistingUser = true;
+          const userData = userDoc.data();
+          const userPending = userData.pendingInvitations || [];
+          const dup = userPending.some(
+            (inv) =>
+              inv.familyId === data.familyId && inv.status === "pending"
+          );
+          if (!dup) {
+            await setDoc(
+              userDoc.ref,
+              {
+                pendingInvitations: [...userPending, newInvitation],
+              },
+              { merge: true }
+            );
+          }
+        }
+      } catch (lookupErr) {
+        console.warn("Felhasználó keresési hiba (email):", lookupErr);
+      }
+
       setShowInviteModal(false);
       setInviteEmail("");
 
-      const subject = encodeURIComponent("Családi meghívó");
-      const body = encodeURIComponent(
-        `Szia!\n\nMeghívtalak a családi szervezőbe. A család azonosítója:\n${data.familyId}\n\nLépj be, menj a Beállítások > Család kezelése részhez, add meg az azonosítót és csatlakozz.\n`
-      );
-      window.location.href = `mailto:${inviteEmail}?subject=${subject}&body=${body}`;
+      if (foundExistingUser) {
+        alert(
+          `Meghívó elküldve: ${trimmedEmail}\n\n` +
+            `A címzettnek már van fiókja, a következő bejelentkezésekor látni fogja a meghívót.`
+        );
+      } else {
+        // Mailto fallback — ha még nincs fiókja, kapjon emailt
+        if (
+          window.confirm(
+            `Meghívó elmentve. A(z) ${trimmedEmail} címnek még nincs fiókja.\n\n` +
+              `Szeretnél emailt küldeni neki az alkalmazás bemutatkozó leírásával? (mailto)`
+          )
+        ) {
+          const subject = encodeURIComponent("Családi szervező — Meghívó");
+          const body = encodeURIComponent(
+            `Szia!\n\nMeghívtalak a családi szervező alkalmazásba. Regisztrálj ezzel az email címmel (${trimmedEmail}), és az első bejelentkezéskor el tudod fogadni a meghívót.\n\n` +
+              `Ha kérdésed van, jelezz.\n`
+          );
+          window.location.href = `mailto:${trimmedEmail}?subject=${subject}&body=${body}`;
+        }
+      }
     } catch (error) {
       console.error("Meghívási hiba:", error);
-      alert("Hiba történt a meghívás során!");
+      alert("Hiba történt a meghívás során: " + (error.message || ""));
     }
   };
 
@@ -1326,22 +1411,41 @@ const FamilyOrganizerApp = () => {
         return;
       }
 
-      // Csatlakozási kérelem mentése a user dokumentumba
+      const requestId = Date.now().toString() + "-" + Math.random().toString(36).slice(2, 8);
+      const joinRequest = {
+        id: requestId,
+        userId: currentUser.uid,
+        email: currentUser.email,
+        nickname: settings.nickname?.trim() || null,
+        requestedAt: new Date().toISOString(),
+        status: "pending",
+      };
+
+      // 1) Csatlakozási kérelem mentése a user dokumentumba (saját nyilvántartás)
       await setDoc(
         doc(db, "users", currentUser.uid),
         {
-          pendingFamilyJoin: {
-            familyId: trimmedId,
-            requestedAt: new Date().toISOString(),
-            email: currentUser.email,
-            nickname: settings.nickname?.trim() || null,
-          }
+          pendingFamilyJoin: { ...joinRequest, familyId: trimmedId },
         },
         { merge: true }
       );
 
+      // 2) Csatlakozási kérelem mentése a család doc-jába (admin lássa)
+      const existingRequests = familyData.joinRequests || [];
+      const alreadyRequested = existingRequests.some(
+        (req) =>
+          req.userId === currentUser.uid && req.status === "pending"
+      );
+      if (!alreadyRequested) {
+        await setDoc(
+          familyDocRef,
+          { joinRequests: [...existingRequests, joinRequest] },
+          { merge: true }
+        );
+      }
+
       setJoinRequestMessage(
-        "Csatlakozási kérelmed elküldve! Kérd meg a család adminját, hogy adjon hozzá az email címeddel: " + currentUser.email
+        "✓ Csatlakozási kérelmed elküldve! A család adminisztrátora hamarosan jóváhagyhatja a Beállítások → Család kezelése részben."
       );
       setJoinFamilyId("");
     } catch (error) {
@@ -1354,18 +1458,102 @@ const FamilyOrganizerApp = () => {
     }
   };
 
-  // Függő csatlakozási kérelmek - jelenleg nem használt (azonnali csatlakozás)
+  // Függő csatlakozási kérelmek lekérése (admin oldalon)
+  // A `families/{id}.joinRequests[]` mezőből olvas. Az onSnapshot már live-szinkronban
+  // hozza a family adatot, de explicit lekérés ide is kell.
   const fetchPendingJoinRequests = async () => {
-    setPendingJoinRequests([]);
+    if (!data.familyId) {
+      setPendingJoinRequests([]);
+      return;
+    }
+    try {
+      const familyDocRef = doc(db, "families", data.familyId);
+      const familySnap = await getDoc(familyDocRef);
+      if (!familySnap.exists()) {
+        setPendingJoinRequests([]);
+        return;
+      }
+      const fd = familySnap.data();
+      const pending = (fd.joinRequests || []).filter(
+        (r) => r.status === "pending"
+      );
+      setPendingJoinRequests(pending);
+    } catch (err) {
+      console.error("fetchPendingJoinRequests hiba:", err);
+      setPendingJoinRequests([]);
+    }
   };
 
-  // Függő meghívások lekérése (felhasználó számára)
-  // A meghívásokat a családok dokumentumaiban tároljuk az invitations mezőben
-  // Ez egyszerűsített megoldás - a valós alkalmazásban külön collection lenne
+  // Függő meghívók lekérése a felhasználó számára
+  // 1) Először a user doc pendingInvitations[] mezőjéből
+  // 2) Másodszor scan: family doc-okból ahol invitedEmail egyezik (catches: meghívó
+  //    az elküldés idején még nem létező accounthoz)
   const fetchPendingInvitations = async () => {
-    // Egyszerűsített implementáció - a felhasználó a családkód megadásával csatlakozik
-    // és az admin jóváhagyja a kérelmét
-    setPendingInvitations([]);
+    if (!currentUser) {
+      setPendingInvitations([]);
+      return;
+    }
+    try {
+      const userDocRef = doc(db, "users", currentUser.uid);
+      const userSnap = await getDoc(userDocRef);
+      const userData = userSnap.exists() ? userSnap.data() : {};
+      const userPending = (userData.pendingInvitations || []).filter(
+        (inv) => inv.status === "pending"
+      );
+
+      // Ha a user már családtag, csak a saját pendinget adjuk vissza
+      if (userData.familyId) {
+        setPendingInvitations(userPending);
+        return;
+      }
+
+      // Ha nincs még családja, scannelünk: lehet, hogy a meghívó az ő email-jére
+      // ment, de a fiók akkor még nem létezett
+      const lowerEmail = (currentUser.email || "").toLowerCase();
+      if (!lowerEmail) {
+        setPendingInvitations(userPending);
+        return;
+      }
+
+      const familiesSnap = await getDocs(collection(db, "families"));
+      const additional = [];
+      familiesSnap.docs.forEach((familyDoc) => {
+        const fd = familyDoc.data();
+        const invites = fd.invitations || [];
+        invites.forEach((inv) => {
+          if (
+            inv.invitedEmail?.toLowerCase() === lowerEmail &&
+            inv.status === "pending" &&
+            !userPending.some((p) => p.id === inv.id)
+          ) {
+            additional.push({
+              ...inv,
+              familyId: familyDoc.id,
+            });
+          }
+        });
+      });
+
+      const allPending = [...userPending, ...additional];
+
+      // Ha találtunk újat, írjuk vissza a user doc-ba is
+      if (additional.length > 0) {
+        try {
+          await setDoc(
+            userDocRef,
+            { pendingInvitations: allPending },
+            { merge: true }
+          );
+        } catch (err) {
+          console.error("Pending invitations szinkron hiba:", err);
+        }
+      }
+
+      setPendingInvitations(allPending);
+    } catch (err) {
+      console.error("fetchPendingInvitations hiba:", err);
+      setPendingInvitations([]);
+    }
   };
 
   // Csatlakozási kérelem jóváhagyása
@@ -1410,18 +1598,21 @@ const FamilyOrganizerApp = () => {
         { merge: true }
       );
 
-      // User familyId frissítése
+      // User familyId frissítése + pendingFamilyJoin törlése
       await setDoc(
         doc(db, "users", request.userId),
-        { familyId: data.familyId },
+        {
+          familyId: data.familyId,
+          pendingFamilyJoin: null,
+        },
         { merge: true }
       );
 
-      alert(`${request.email} sikeresen hozzáadva a családhoz!`);
+      alert(`✓ ${request.email} sikeresen hozzáadva a családhoz!`);
       fetchPendingJoinRequests();
     } catch (error) {
       console.error("Jóváhagyási hiba:", error);
-      alert("Hiba történt a jóváhagyás során.");
+      alert("Hiba történt a jóváhagyás során: " + (error.message || ""));
     }
   };
 
@@ -1465,6 +1656,44 @@ const FamilyOrganizerApp = () => {
   // Meghívás elfogadása
   const acceptInvitation = async (invitation) => {
     try {
+      if (!invitation.familyId) {
+        alert(
+          "A meghívóhoz nem tartozik család azonosító. Próbáld lekérni a meghívókat újra."
+        );
+        return;
+      }
+
+      // Már családtag-e?
+      const existingFamilyId = data.familyId;
+      if (existingFamilyId && existingFamilyId !== invitation.familyId) {
+        if (
+          !window.confirm(
+            "Már egy másik családhoz tartozol. A meghívás elfogadásával kilépsz a jelenlegi családból. Folytatod?"
+          )
+        ) {
+          return;
+        }
+        // Kilépés a régi családból (csak a tagsági listáról vesszük le)
+        try {
+          const oldFamRef = doc(db, "families", existingFamilyId);
+          const oldFamSnap = await getDoc(oldFamRef);
+          if (oldFamSnap.exists()) {
+            const oldFam = oldFamSnap.data();
+            await setDoc(
+              oldFamRef,
+              {
+                members: (oldFam.members || []).filter(
+                  (m) => m.userId !== currentUser.uid
+                ),
+              },
+              { merge: true }
+            );
+          }
+        } catch (err) {
+          console.error("Régi családból kilépési hiba:", err);
+        }
+      }
+
       const familyDocRef = doc(db, "families", invitation.familyId);
       const familySnap = await getDoc(familyDocRef);
 
@@ -1477,21 +1706,42 @@ const FamilyOrganizerApp = () => {
       const members = familyData.members || [];
       const trimmedNickname = settings.nickname?.trim();
 
-      // Új tag hozzáadása
-      const updatedMembers = [
-        ...members,
-        {
-          userId: currentUser.uid,
-          email: currentUser.email,
-          nickname: trimmedNickname || null,
-          role: invitation.role || "member",
-          joinedAt: new Date().toISOString(),
-        },
-      ];
+      // Új tag hozzáadása (ha még nincs benne)
+      const alreadyMember = members.some(
+        (m) => m.userId === currentUser.uid
+      );
+      const updatedMembers = alreadyMember
+        ? members
+        : [
+            ...members,
+            {
+              userId: currentUser.uid,
+              email: currentUser.email,
+              nickname: trimmedNickname || null,
+              role: invitation.role || "member",
+              joinedAt: new Date().toISOString(),
+            },
+          ];
+
+      // A family doc invitations[]-ban is jelöljük accepted-nek
+      const updatedFamilyInvitations = (familyData.invitations || []).map(
+        (inv) =>
+          inv.id === invitation.id
+            ? {
+                ...inv,
+                status: "accepted",
+                acceptedAt: new Date().toISOString(),
+                acceptedBy: currentUser.uid,
+              }
+            : inv
+      );
 
       await setDoc(
         familyDocRef,
-        { members: updatedMembers },
+        {
+          members: updatedMembers,
+          invitations: updatedFamilyInvitations,
+        },
         { merge: true }
       );
 
@@ -1499,9 +1749,9 @@ const FamilyOrganizerApp = () => {
       const userDocRef = doc(db, "users", currentUser.uid);
       const userSnap = await getDoc(userDocRef);
       const userData = userSnap.exists() ? userSnap.data() : {};
-      const pendingInvitations = userData.pendingInvitations || [];
+      const userPending = userData.pendingInvitations || [];
 
-      const updatedInvitations = pendingInvitations.map((inv) =>
+      const updatedUserInvitations = userPending.map((inv) =>
         inv.id === invitation.id
           ? { ...inv, status: "accepted", acceptedAt: new Date().toISOString() }
           : inv
@@ -1509,15 +1759,19 @@ const FamilyOrganizerApp = () => {
 
       await setDoc(
         userDocRef,
-        { familyId: invitation.familyId, pendingInvitations: updatedInvitations },
+        {
+          familyId: invitation.familyId,
+          pendingInvitations: updatedUserInvitations,
+          pendingFamilyJoin: null,
+        },
         { merge: true }
       );
 
-      alert("Sikeresen csatlakoztál a családhoz!");
+      alert("✓ Sikeresen csatlakoztál a családhoz!");
       fetchPendingInvitations();
     } catch (error) {
       console.error("Elfogadási hiba:", error);
-      alert("Hiba történt a meghívás elfogadása során.");
+      alert("Hiba történt a meghívás elfogadása során: " + (error.message || ""));
     }
   };
 
@@ -1781,12 +2035,16 @@ const FamilyOrganizerApp = () => {
     familyId,
     settings,
     members,
+    joinRequests,
+    invitations,
   }) => {
     const finalData = {
       ...defaultData,
       familyId: familyId || null,
       settings,
       members: members || [],
+      familyJoinRequests: joinRequests || [],
+      familyInvitations: invitations || [],
       familyShareConfig: shareConfig,
     };
 
@@ -2043,7 +2301,16 @@ const FamilyOrganizerApp = () => {
                   familyId: userData.familyId,
                   settings: userData.settings,
                   members,
+                  joinRequests: familyData.joinRequests || [],
+                  invitations: familyData.invitations || [],
                 });
+
+                // Live pending join requests és pending invitations frissítése
+                setPendingJoinRequests(
+                  (familyData.joinRequests || []).filter(
+                    (r) => r.status === "pending"
+                  )
+                );
 
                 console.log("🎨 STATE BEÁLLÍTÁSA:");
                 console.log(
@@ -9999,6 +10266,66 @@ const FamilyOrganizerApp = () => {
 
     return (
       <div className="space-y-6">
+        {/* Függő meghívók banner */}
+        {pendingInvitations.length > 0 && (
+          <div className="bg-orange-50 border-l-4 border-orange-500 p-4 rounded-r-lg">
+            <div className="flex items-start gap-3">
+              <Bell size={20} className="text-orange-600 flex-shrink-0 mt-0.5" />
+              <div className="flex-1">
+                <p className="font-semibold text-orange-900">
+                  {pendingInvitations.length} új családi meghívásod van
+                </p>
+                <p className="text-sm text-orange-700 mt-1">
+                  {pendingInvitations[0].invitedByEmail || "Valaki"} meghívott a
+                  családjába
+                  {pendingInvitations.length > 1 &&
+                    ` és még ${pendingInvitations.length - 1} másik`}
+                  . Nyisd meg a <b>Beállítások → Család kezelése</b> részt az
+                  elfogadáshoz.
+                </p>
+                <button
+                  onClick={() => setActiveModule("beallitasok")}
+                  className="mt-2 text-sm font-medium text-orange-700 hover:underline"
+                >
+                  Beállítások megnyitása →
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Admin: függő csatlakozási kérelmek banner */}
+        {(() => {
+          const isAdmin = (data.members || []).some(
+            (m) => m.userId === currentUser?.uid && m.role === "admin"
+          );
+          if (!isAdmin || pendingJoinRequests.length === 0) return null;
+          return (
+            <div className="bg-blue-50 border-l-4 border-blue-500 p-4 rounded-r-lg">
+              <div className="flex items-start gap-3">
+                <UserPlus size={20} className="text-blue-600 flex-shrink-0 mt-0.5" />
+                <div className="flex-1">
+                  <p className="font-semibold text-blue-900">
+                    {pendingJoinRequests.length} csatlakozási kérelem vár jóváhagyásra
+                  </p>
+                  <p className="text-sm text-blue-700 mt-1">
+                    {pendingJoinRequests[0].email}
+                    {pendingJoinRequests.length > 1 &&
+                      ` és még ${pendingJoinRequests.length - 1} másik`}{" "}
+                    szeretne csatlakozni a családodhoz.
+                  </p>
+                  <button
+                    onClick={() => setActiveModule("beallitasok")}
+                    className="mt-2 text-sm font-medium text-blue-700 hover:underline"
+                  >
+                    Kérelmek kezelése →
+                  </button>
+                </div>
+              </div>
+            </div>
+          );
+        })()}
+
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
           <h2 className="text-2xl font-bold text-gray-800">Áttekintés</h2>
           <button
@@ -20709,9 +21036,21 @@ const FamilyOrganizerApp = () => {
           <div>
             <p className="text-sm text-gray-600 mb-2">Család azonosító</p>
             {data.familyId ? (
-              <p className="font-mono text-sm bg-gray-100 p-2 rounded">
-                {data.familyId}
-              </p>
+              <div className="flex items-center gap-2 flex-wrap">
+                <p className="font-mono text-sm bg-gray-100 p-2 rounded flex-1 break-all">
+                  {data.familyId}
+                </p>
+                <button
+                  onClick={() => {
+                    navigator.clipboard.writeText(data.familyId);
+                    alert("Család azonosító kimásolva!");
+                  }}
+                  className="px-3 py-2 text-xs bg-blue-600 text-white rounded hover:bg-blue-700 whitespace-nowrap"
+                  title="Másolás"
+                >
+                  📋 Másol
+                </button>
+              </div>
             ) : (
               <div className="space-y-2">
                 <p className="text-sm text-gray-600">
@@ -20777,9 +21116,9 @@ const FamilyOrganizerApp = () => {
           {/* Függő meghívások a felhasználó számára */}
           {pendingInvitations.length > 0 && (
             <div className="border-t pt-4 space-y-3">
-              <p className="text-sm text-gray-600 flex items-center gap-2">
+              <p className="text-sm text-orange-700 font-semibold flex items-center gap-2">
                 <Bell size={16} className="text-orange-500" />
-                Függő meghívások ({pendingInvitations.length})
+                Új meghívásod van! ({pendingInvitations.length})
               </p>
               <div className="space-y-2">
                 {pendingInvitations.map((invite) => (
@@ -20788,23 +21127,32 @@ const FamilyOrganizerApp = () => {
                     className="p-3 bg-orange-50 border border-orange-200 rounded-lg"
                   >
                     <p className="text-sm font-medium text-gray-800">
-                      Meghívás: {invite.invitedByEmail}
+                      {invite.invitedByEmail || "Ismeretlen"} meghívott a
+                      családjába
                     </p>
-                    <p className="text-xs text-gray-600">
-                      Család: {invite.familyId?.substring(0, 8)}...
+                    <p className="text-xs text-gray-600 mt-1">
+                      Szerepkör:{" "}
+                      <b>
+                        {invite.role === "admin" ? "Adminisztrátor" : "Tag"}
+                      </b>
+                      {invite.createdAt &&
+                        ` • ${new Date(invite.createdAt).toLocaleDateString("hu-HU")}`}
+                    </p>
+                    <p className="text-[10px] text-gray-500 font-mono mt-1">
+                      Család ID: {invite.familyId}
                     </p>
                     <div className="flex gap-2 mt-2">
                       <button
                         onClick={() => acceptInvitation(invite)}
                         className="flex-1 px-3 py-1 text-sm bg-green-600 text-white rounded hover:bg-green-700"
                       >
-                        Elfogadás
+                        ✓ Elfogadás
                       </button>
                       <button
                         onClick={() => declineInvitation(invite)}
                         className="flex-1 px-3 py-1 text-sm bg-red-600 text-white rounded hover:bg-red-700"
                       >
-                        Elutasítás
+                        ✕ Elutasítás
                       </button>
                     </div>
                   </div>
@@ -20821,33 +21169,39 @@ const FamilyOrganizerApp = () => {
                 Függő csatlakozási kérelmek ({pendingJoinRequests.length})
               </p>
               <div className="space-y-2">
-                {pendingJoinRequests.map((request) => (
-                  <div
-                    key={request.id}
-                    className="p-3 bg-blue-50 border border-blue-200 rounded-lg"
-                  >
-                    <p className="text-sm font-medium text-gray-800">
-                      {request.nickname || request.email}
-                    </p>
-                    <p className="text-xs text-gray-600">
-                      {request.email} - {new Date(request.createdAt).toLocaleDateString("hu-HU")}
-                    </p>
-                    <div className="flex gap-2 mt-2">
-                      <button
-                        onClick={() => approveJoinRequest(request)}
-                        className="flex-1 px-3 py-1 text-sm bg-green-600 text-white rounded hover:bg-green-700"
-                      >
-                        Jóváhagyás
-                      </button>
-                      <button
-                        onClick={() => rejectJoinRequest(request)}
-                        className="flex-1 px-3 py-1 text-sm bg-red-600 text-white rounded hover:bg-red-700"
-                      >
-                        Elutasítás
-                      </button>
+                {pendingJoinRequests.map((request) => {
+                  const requestDate =
+                    request.requestedAt || request.createdAt;
+                  return (
+                    <div
+                      key={request.id}
+                      className="p-3 bg-blue-50 border border-blue-200 rounded-lg"
+                    >
+                      <p className="text-sm font-medium text-gray-800">
+                        {request.nickname || request.email}
+                      </p>
+                      <p className="text-xs text-gray-600">
+                        {request.email}
+                        {requestDate &&
+                          ` • ${new Date(requestDate).toLocaleDateString("hu-HU")}`}
+                      </p>
+                      <div className="flex gap-2 mt-2">
+                        <button
+                          onClick={() => approveJoinRequest(request)}
+                          className="flex-1 px-3 py-1 text-sm bg-green-600 text-white rounded hover:bg-green-700"
+                        >
+                          Jóváhagyás
+                        </button>
+                        <button
+                          onClick={() => rejectJoinRequest(request)}
+                          className="flex-1 px-3 py-1 text-sm bg-red-600 text-white rounded hover:bg-red-700"
+                        >
+                          Elutasítás
+                        </button>
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
           )}
