@@ -15891,7 +15891,11 @@ const FamilyOrganizerApp = () => {
     }
 
     const totalLoans = (project.financingPlan?.sources || [])
-      .filter((s) => FINANCING_SOURCE_TYPES[s.type]?.kind === "loan")
+      .filter(
+        (s) =>
+          FINANCING_SOURCE_TYPES[s.type]?.kind === "loan" &&
+          !s.excludeFromFunding
+      )
       .reduce((sum, s) => sum + (parseFloat(s.amount) || 0), 0);
 
     const isNew = project.type === "new";
@@ -16925,10 +16929,11 @@ const FamilyOrganizerApp = () => {
     const totalEquity = equitySources
       .filter((s) => s.status !== "suspended")
       .reduce((sum, s) => sum + (parseFloat(s.amount) || 0), 0);
-    const totalLoans = loanSources.reduce(
-      (sum, s) => sum + (parseFloat(s.amount) || 0),
-      0
-    );
+    const totalLoans = loanSources
+      .filter((s) => !s.excludeFromFunding)
+      .reduce((sum, s) => sum + (parseFloat(s.amount) || 0), 0);
+    // Csak törlesztési kötelezettségként szereplő hitelek (önerőbe transzformálódtak)
+    const paymentOnlyLoans = loanSources.filter((s) => s.excludeFromFunding);
     const totalAmount = totalEquity + totalLoans;
     const targetGap = (project.plannedBudget || 0) - totalAmount;
 
@@ -16955,15 +16960,22 @@ const FamilyOrganizerApp = () => {
     const timelineEvents = [];
     sources.forEach((s) => {
       if (s.plannedDate) {
+        const isLoan = FINANCING_SOURCE_TYPES[s.type]?.kind === "loan";
+        // Ha "csak törlesztés" hitel, az összeg ne jelenjen meg pluszként
+        // (mert nem új pénz a tervhez — már önerőben van).
+        const showAmount = !s.excludeFromFunding;
         timelineEvents.push({
           date: s.plannedDate,
-          kind: FINANCING_SOURCE_TYPES[s.type]?.kind === "loan" ? "loanIn" : "equityIn",
-          label: `${s.name} érkezik`,
+          kind: isLoan ? "loanIn" : "equityIn",
+          label: s.excludeFromFunding
+            ? `${s.name} felvétel (önerőbe transzformálva)`
+            : `${s.name} érkezik`,
           subLabel: s.type,
-          amount: parseFloat(s.amount) || 0,
+          amount: showAmount ? parseFloat(s.amount) || 0 : 0,
           monthly: parseFloat(s.monthlyPayment) || 0,
-          color: FINANCING_SOURCE_TYPES[s.type]?.kind === "loan" ? "red" : "green",
+          color: isLoan ? "red" : "green",
           status: s.status,
+          excludeFromFunding: s.excludeFromFunding,
         });
       }
       if (s.endDate) {
@@ -17844,6 +17856,11 @@ const FamilyOrganizerApp = () => {
                           {s.status === "suspended" && (
                             <span className="ml-1 px-1 bg-yellow-100 text-yellow-700 rounded">
                               Szüneteltetve
+                            </span>
+                          )}
+                          {s.excludeFromFunding && (
+                            <span className="ml-1 px-1 bg-purple-100 text-purple-800 rounded">
+                              💱 Csak törlesztés (önerőbe transzformálva)
                             </span>
                           )}
                           {s.moratoriumStartDate && s.moratoriumEndDate && (
@@ -33667,6 +33684,37 @@ const FamilyOrganizerApp = () => {
                       className="w-full px-4 py-2 border border-gray-300 rounded-lg"
                       placeholder="pl. 2. gyermek születése 2028-ig"
                     />
+                  </div>
+
+                  {/* "Csak törlesztés" — hitel önerővé alakítva */}
+                  <div className="border-t pt-3">
+                    <label className="flex items-start gap-2 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={!!formData.excludeFromFunding}
+                        onChange={(e) =>
+                          setFormData({
+                            ...formData,
+                            excludeFromFunding: e.target.checked,
+                          })
+                        }
+                        className="w-4 h-4 mt-0.5"
+                      />
+                      <div>
+                        <span className="text-sm font-medium text-gray-700">
+                          💱 Csak törlesztési kötelezettség (a hitelösszeg
+                          már az önerőben szerepel)
+                        </span>
+                        <p className="text-xs text-gray-500 mt-1">
+                          Pipáld be, ha a hitel összegét már korábban felvetted
+                          és átalakítottad önerővé (pl. <b>Babaváró → állampapír</b>).
+                          Ilyenkor a hitelösszeg <b>nem</b> számít a finanszírozási
+                          összeghez, csak a havi törlesztő szerepel a
+                          cash-flow-ban. Ellenkező esetben dupla összeg lenne:
+                          az állampapírban és a hitelek között is.
+                        </p>
+                      </div>
+                    </label>
                   </div>
 
                   {/* Törlesztési moratórium */}
