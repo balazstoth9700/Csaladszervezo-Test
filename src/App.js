@@ -650,6 +650,9 @@ const FamilyOrganizerApp = () => {
   const [searchQuery, setSearchQuery] = useState("");
   const [filterCategory, setFilterCategory] = useState("all");
   const [timeFilter, setTimeFilter] = useState("week");
+  const [showTodoModal, setShowTodoModal] = useState(false);
+  const [filterStatus, setFilterStatus] = useState("active");
+  const [filterTaskType, setFilterTaskType] = useState("all");
 
   const [showInstallPrompt, setShowInstallPrompt] = useState(false);
 
@@ -3009,6 +3012,7 @@ const FamilyOrganizerApp = () => {
 
     const newTask = {
       ...formData,
+      taskKind: "event",
       dueDate: finalDueDate,
       time: formData.allDay ? null : formData.time || null,
       endDate: formData.endDate || null,
@@ -3046,6 +3050,97 @@ const FamilyOrganizerApp = () => {
     setShowTaskModal(false);
     setFormData({});
     setEditingItem(null);
+  };
+
+  // Egyszerű teendő (todo) mentése — opcionális határidővel, prioritással
+  const saveTodo = async () => {
+    if (!formData.title) {
+      alert("A feladat megnevezése kötelező!");
+      return;
+    }
+
+    const newTodo = {
+      taskKind: "todo",
+      title: formData.title,
+      description: formData.description || "",
+      // Határidő OPCIONÁLIS
+      dueDate: formData.dueDate || null,
+      priority: formData.priority || "normal",
+      category: formData.category || "egyéb",
+      location: "",
+      time: null,
+      endDate: null,
+      endTime: null,
+      durationMinutes: null,
+      allDay: true,
+      assignedMembers: Array.isArray(formData.assignedMembers)
+        ? formData.assignedMembers
+        : [],
+      assignedToAll: !!formData.assignedToAll,
+      assignedTo: null,
+      recurring: { enabled: false },
+      id: editingItem?.id || Date.now(),
+      completed: editingItem?.completed || false,
+      lastCompletedDate: editingItem?.lastCompletedDate || null,
+      createdAt: editingItem?.createdAt || new Date().toISOString(),
+    };
+
+    let newData;
+    if (editingItem) {
+      newData = {
+        ...data,
+        tasks: data.tasks.map((t) => (t.id === editingItem.id ? newTodo : t)),
+      };
+    } else {
+      newData = {
+        ...data,
+        tasks: [...data.tasks, newTodo],
+      };
+    }
+    setData(newData);
+    await saveUserData(newData);
+    setShowTodoModal(false);
+    setFormData({});
+    setEditingItem(null);
+  };
+
+  // Megfelelő szerkesztő modal megnyitása egy feladathoz (típus szerint)
+  const openTaskForEdit = (taskOrEvent) => {
+    const orig = taskOrEvent.originalTask || taskOrEvent;
+    if (orig.taskKind === "todo") {
+      setEditingItem(orig);
+      setFormData({
+        title: orig.title || "",
+        description: orig.description || "",
+        dueDate: orig.dueDate ? orig.dueDate.split("T")[0] : "",
+        priority: orig.priority || "normal",
+        category: orig.category || "egyéb",
+        assignedMembers: Array.isArray(orig.assignedMembers)
+          ? orig.assignedMembers
+          : orig.assignedTo
+          ? [orig.assignedTo]
+          : [],
+        assignedToAll: !!orig.assignedToAll,
+      });
+      setShowTodoModal(true);
+    } else {
+      // esemény → a teljes esemény modal
+      openEventModal(orig, true);
+    }
+  };
+
+  const openNewTodoModal = () => {
+    setEditingItem(null);
+    setFormData({
+      title: "",
+      description: "",
+      dueDate: "",
+      priority: "normal",
+      category: "egyéb",
+      assignedMembers: [],
+      assignedToAll: false,
+    });
+    setShowTodoModal(true);
   };
 
   const openMemberModal = (member = null) => {
@@ -9071,13 +9166,32 @@ const FamilyOrganizerApp = () => {
     }
 
     data.tasks.forEach((task) => {
-      const taskDate = new Date(task.dueDate);
-      if (taskDate >= today && taskDate <= endDate) {
-        const members = getAssignedMembers(task);
+      const members = getAssignedMembers(task);
+      const isTodo = task.taskKind === "todo";
+      const hasDeadline = !!task.dueDate;
+      const taskDate = hasDeadline ? new Date(task.dueDate) : null;
+
+      // Megjelenítési szabály:
+      // - Határidő nélküli teendő: MINDIG látszik (amíg nincs kipipálva)
+      // - Határidős tétel: az időszakban VAGY ha már lejárt (és nem kész)
+      let shouldShow = false;
+      if (!hasDeadline) {
+        shouldShow = true; // határidő nélküli — mindig
+      } else if (taskDate >= today && taskDate <= endDate) {
+        shouldShow = true; // időszakban
+      } else if (taskDate < today && !task.completed) {
+        shouldShow = true; // lejárt és nincs kész
+      }
+
+      if (shouldShow) {
         allTasks.push({
           id: `task-${task.id}`,
           title: task.title,
-          date: taskDate,
+          date: taskDate || new Date(8640000000000000), // "végtelen jövő" ha nincs határidő
+          hasDeadline,
+          taskKind: task.taskKind || "event",
+          priority: task.priority || "normal",
+          description: task.description || "",
           time: task.time || null,
           location: task.location || "",
           category: task.category || "egyéb",
@@ -10278,9 +10392,76 @@ const FamilyOrganizerApp = () => {
   };
 
   const renderAttekintes = () => {
-    const allUpcomingTasks = getAllUpcomingTasks();
-    const activeTasks = allUpcomingTasks.filter((t) => !t.completed);
-    const completedTasks = allUpcomingTasks.filter((t) => t.completed);
+    const rawTasks = getAllUpcomingTasks();
+    const todayMidnight = new Date();
+    todayMidnight.setHours(0, 0, 0, 0);
+
+    // Egységes szűrés: keresés + kategória + felelős + típus
+    const filteredTasks = rawTasks.filter((t) => {
+      // Keresés
+      if (searchQuery.trim()) {
+        const q = searchQuery.trim().toLowerCase();
+        const hay = `${t.title || ""} ${t.description || ""} ${t.location || ""}`.toLowerCase();
+        if (!hay.includes(q)) return false;
+      }
+      // Kategória
+      if (filterCategory !== "all" && t.category !== filterCategory) {
+        return false;
+      }
+      // Felelős
+      if (filterAssignedTo) {
+        if (filterAssignedTo === "unassigned") {
+          if (t.assignedToAll || (t.assignedMembers && t.assignedMembers.length > 0))
+            return false;
+        } else {
+          const memberId = parseInt(filterAssignedTo, 10);
+          const hasMember =
+            t.assignedToAll ||
+            (t.assignedMembers || []).some((m) => m.id === memberId);
+          if (!hasMember) return false;
+        }
+      }
+      // Típus (csak a kézi feladatokra értelmezett; a származtatott tételek
+      // mindig átmennek, kivéve ha kifejezetten szűkítünk)
+      if (filterTaskType !== "all") {
+        const kind = t.taskKind || "event";
+        if (filterTaskType === "todo" && kind !== "todo") return false;
+        if (filterTaskType === "event" && kind === "todo") return false;
+      }
+      return true;
+    });
+
+    const isOverdue = (t) =>
+      t.hasDeadline !== false &&
+      t.date &&
+      t.date < todayMidnight &&
+      !t.completed &&
+      t.date.getFullYear() < 9999;
+
+    // Státusz szűrés a megjelenítendő listához
+    const statusFiltered = filteredTasks.filter((t) => {
+      if (filterStatus === "active") return !t.completed;
+      if (filterStatus === "completed") return t.completed;
+      if (filterStatus === "overdue") return isOverdue(t);
+      return true; // "all"
+    });
+
+    // Rendezés: lejárt elöl, majd határidő szerint, a határidő nélküliek a végén
+    const sortTasks = (arr) =>
+      [...arr].sort((a, b) => {
+        const aNo = a.hasDeadline === false;
+        const bNo = b.hasDeadline === false;
+        if (aNo && !bNo) return 1;
+        if (!aNo && bNo) return -1;
+        return a.date - b.date;
+      });
+
+    const activeTasks = sortTasks(statusFiltered.filter((t) => !t.completed));
+    const completedTasks = sortTasks(
+      statusFiltered.filter((t) => t.completed)
+    );
+    // A statisztika kártyákhoz a teljes (státusztól független) szűrt lista kell
+    const allUpcomingTasks = filteredTasks;
 
     const getIconComponent = (iconName) => {
       const icons = {
@@ -10369,46 +10550,124 @@ const FamilyOrganizerApp = () => {
 
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
           <h2 className="text-2xl font-bold text-gray-800">Áttekintés</h2>
-          <button
-            onClick={() => {
-              setFormData({
-                title: "",
-                dueDate: "",
-                assignedTo: "",
-                category: "otthon",
-                recurring: { enabled: false },
-              });
-              setShowTaskModal(true);
-            }}
-            className="flex items-center gap-2 bg-blue-600 text-white px-6 py-3 rounded-lg hover:bg-blue-700 shadow-md active:scale-95 transition-transform"
-          >
-            <Plus size={20} />
-            <span className="font-medium">Új feladat</span>
-          </button>
+          <div className="flex gap-2">
+            <button
+              onClick={openNewTodoModal}
+              className="flex items-center gap-2 bg-blue-600 text-white px-5 py-3 rounded-lg hover:bg-blue-700 shadow-md active:scale-95 transition-transform"
+              title="Egyszerű teendő — határidő nélkül is, amíg el nem készül"
+            >
+              <CheckSquare size={20} />
+              <span className="font-medium">Új feladat</span>
+            </button>
+            <button
+              onClick={() => {
+                setEditingItem(null);
+                setFormData({
+                  title: "",
+                  dueDate: new Date().toISOString().split("T")[0],
+                  time: "",
+                  endDate: "",
+                  endTime: "",
+                  durationMinutes: "",
+                  allDay: true,
+                  location: "",
+                  category: "egyéb",
+                  description: "",
+                  assignedMembers: [],
+                  assignedToAll: false,
+                  recurring: { enabled: false },
+                });
+                setShowTaskModal(true);
+              }}
+              className="flex items-center gap-2 bg-green-600 text-white px-5 py-3 rounded-lg hover:bg-green-700 shadow-md active:scale-95 transition-transform"
+              title="Időpontos esemény — dátummal, idővel, helyszínnel"
+            >
+              <Calendar size={20} />
+              <span className="font-medium">Új esemény</span>
+            </button>
+          </div>
         </div>
 
-        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4">
-          <div className="flex items-center gap-2 mb-3">
-            <Calendar size={20} className="text-blue-600" />
-            <h3 className="font-semibold text-gray-800">Időszak</h3>
+        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4 space-y-4">
+          {/* Időszak */}
+          <div>
+            <div className="flex items-center gap-2 mb-2">
+              <Calendar size={18} className="text-blue-600" />
+              <h3 className="font-semibold text-gray-800 text-sm">Időszak</h3>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {["today", "week", "month", "all"].map((filter) => (
+                <button
+                  key={filter}
+                  onClick={() => setTimeFilter(filter)}
+                  className={`px-3 py-1.5 rounded-lg text-sm font-medium transition ${
+                    timeFilter === filter
+                      ? "bg-blue-600 text-white"
+                      : "bg-gray-100 text-gray-700 hover:bg-gray-200"
+                  }`}
+                >
+                  {filter === "today" && "Ma"}
+                  {filter === "week" && "Következő 7 nap"}
+                  {filter === "month" && "Következő 30 nap"}
+                  {filter === "all" && "Összes"}
+                </button>
+              ))}
+            </div>
           </div>
-          <div className="flex flex-wrap gap-2">
-            {["today", "week", "month", "all"].map((filter) => (
-              <button
-                key={filter}
-                onClick={() => setTimeFilter(filter)}
-                className={`px-4 py-2 rounded-lg font-medium transition ${
-                  timeFilter === filter
-                    ? "bg-blue-600 text-white"
-                    : "bg-gray-100 text-gray-700 hover:bg-gray-200"
-                }`}
-              >
-                {filter === "today" && "Ma"}
-                {filter === "week" && "Következő 7 nap"}
-                {filter === "month" && "Következő 30 nap"}
-                {filter === "all" && "Összes"}
-              </button>
-            ))}
+
+          {/* Státusz */}
+          <div>
+            <div className="flex items-center gap-2 mb-2">
+              <CheckCircle size={18} className="text-green-600" />
+              <h3 className="font-semibold text-gray-800 text-sm">Státusz</h3>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {[
+                ["active", "Aktív"],
+                ["completed", "Befejezett"],
+                ["overdue", "Lejárt"],
+                ["all", "Mind"],
+              ].map(([val, label]) => (
+                <button
+                  key={val}
+                  onClick={() => setFilterStatus(val)}
+                  className={`px-3 py-1.5 rounded-lg text-sm font-medium transition ${
+                    filterStatus === val
+                      ? "bg-green-600 text-white"
+                      : "bg-gray-100 text-gray-700 hover:bg-gray-200"
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Típus */}
+          <div>
+            <div className="flex items-center gap-2 mb-2">
+              <Filter size={18} className="text-purple-600" />
+              <h3 className="font-semibold text-gray-800 text-sm">Típus</h3>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {[
+                ["all", "Mind"],
+                ["todo", "Csak feladatok"],
+                ["event", "Csak események"],
+              ].map(([val, label]) => (
+                <button
+                  key={val}
+                  onClick={() => setFilterTaskType(val)}
+                  className={`px-3 py-1.5 rounded-lg text-sm font-medium transition ${
+                    filterTaskType === val
+                      ? "bg-purple-600 text-white"
+                      : "bg-gray-100 text-gray-700 hover:bg-gray-200"
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
           </div>
         </div>
 
@@ -10526,20 +10785,34 @@ const FamilyOrganizerApp = () => {
               activeTasks.map((task) => {
                 const Icon = getIconComponent(task.icon);
                 const today = new Date();
+                const hasDeadline = task.hasDeadline !== false;
                 const isToday =
+                  hasDeadline &&
+                  task.date.getFullYear() < 9999 &&
                   task.date.toDateString() === today.toDateString();
-                const isPast = task.date < today;
+                const isPast =
+                  hasDeadline &&
+                  task.date.getFullYear() < 9999 &&
+                  task.date < today;
+                const isManual = task.type === "feladat";
+                const isTodo = task.taskKind === "todo";
 
                 return (
                   <div
                     key={task.id}
                     className={`p-4 hover:bg-gray-50 flex items-center gap-4 ${
                       isPast ? "bg-red-50" : ""
-                    }`}
+                    } ${isManual ? "cursor-pointer" : ""}`}
+                    onClick={
+                      isManual
+                        ? () => openTaskForEdit(task)
+                        : undefined
+                    }
                   >
                     {/* Kipipálás gomb MINDEN feladat típushoz */}
                     <button
-                      onClick={() => {
+                      onClick={(e) => {
+                        e.stopPropagation();
                         if (task.type === "feladat") {
                           toggleTask(task.originalTask.id);
                         } else if (task.type === "rezsi") {
@@ -10589,10 +10862,25 @@ const FamilyOrganizerApp = () => {
                     </button>
 
                     <div className="flex-1">
-                      <div className="flex items-center gap-2 mb-1">
+                      <div className="flex items-center gap-2 mb-1 flex-wrap">
+                        {isTodo && (
+                          <span className="text-xs px-2 py-0.5 bg-blue-100 text-blue-700 rounded font-medium">
+                            Feladat
+                          </span>
+                        )}
                         <h4 className="font-medium text-gray-800">
                           {task.title}
                         </h4>
+                        {isTodo && task.priority === "high" && (
+                          <span className="px-2 py-0.5 bg-red-100 text-red-700 text-xs rounded font-medium">
+                            ⬆ Magas
+                          </span>
+                        )}
+                        {isTodo && task.priority === "low" && (
+                          <span className="px-2 py-0.5 bg-gray-100 text-gray-600 text-xs rounded font-medium">
+                            ⬇ Alacsony
+                          </span>
+                        )}
                         {task.recurring?.enabled && (
                           <Repeat
                             size={16}
@@ -10611,11 +10899,25 @@ const FamilyOrganizerApp = () => {
                           </span>
                         )}
                       </div>
+                      {task.description && (
+                        <p className="text-sm text-gray-600 mb-1 whitespace-pre-wrap">
+                          {task.description}
+                        </p>
+                      )}
                       <div className="flex flex-wrap items-center gap-3 text-sm text-gray-600">
-                        <span className="flex items-center gap-1">
-                          <Calendar size={14} />
-                          {task.date.toLocaleDateString("hu-HU")}
-                        </span>
+                        {hasDeadline && task.date.getFullYear() < 9999 ? (
+                          <span className="flex items-center gap-1">
+                            <Calendar size={14} />
+                            {task.date.toLocaleDateString("hu-HU")}
+                          </span>
+                        ) : (
+                          isTodo && (
+                            <span className="flex items-center gap-1 text-gray-400 italic">
+                              <Calendar size={14} />
+                              Nincs határidő
+                            </span>
+                          )
+                        )}
                         {task.time && (
                           <span className="flex items-center gap-1 text-blue-600 font-semibold">
                             🕐 {task.time}
@@ -10671,7 +10973,10 @@ const FamilyOrganizerApp = () => {
                     {/* Törlés gomb csak manuális feladatoknál */}
                     {task.type === "feladat" && (
                       <button
-                        onClick={() => deleteTask(task.originalTask.id)}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          deleteTask(task.originalTask.id);
+                        }}
                         className="text-red-500 hover:text-red-700"
                       >
                         <Trash2 size={18} />
@@ -10686,36 +10991,70 @@ const FamilyOrganizerApp = () => {
 
         {completedTasks.length > 0 && (
           <div className="bg-white rounded-lg shadow-sm border border-gray-200">
-            <div className="p-4 border-b border-gray-200">
+            <div className="p-4 border-b border-gray-200 flex justify-between items-center">
               <h3 className="font-semibold text-gray-800">
                 Befejezett feladatok
               </h3>
+              <span className="text-sm text-gray-600">
+                {completedTasks.length} kész
+              </span>
             </div>
             <div className="divide-y divide-gray-200">
-              {completedTasks.map((task) => (
-                <div
-                  key={task.id}
-                  className="p-4 hover:bg-gray-50 flex items-center gap-4 opacity-60"
-                >
-                  <button
-                    onClick={() => toggleTask(task.originalTask.id)}
-                    className="text-green-600"
+              {completedTasks.map((task) => {
+                const isManual = task.type === "feladat";
+                return (
+                  <div
+                    key={task.id}
+                    className={`p-4 hover:bg-gray-50 flex items-center gap-4 opacity-70 ${
+                      isManual ? "cursor-pointer" : ""
+                    }`}
+                    onClick={
+                      isManual ? () => openTaskForEdit(task) : undefined
+                    }
                   >
-                    <CheckCircle size={24} />
-                  </button>
-                  <div className="flex-1">
-                    <h4 className="font-medium text-gray-800 line-through">
-                      {task.title}
-                    </h4>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (task.originalTask) {
+                          toggleTask(task.originalTask.id);
+                        }
+                      }}
+                      className="text-green-600 hover:text-gray-400"
+                      title="Visszaállítás aktívvá"
+                    >
+                      <CheckCircle size={24} />
+                    </button>
+                    <div className="flex-1">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        {task.taskKind === "todo" && (
+                          <span className="text-xs px-2 py-0.5 bg-blue-50 text-blue-600 rounded">
+                            Feladat
+                          </span>
+                        )}
+                        <h4 className="font-medium text-gray-800 line-through">
+                          {task.title}
+                        </h4>
+                      </div>
+                      {task.description && (
+                        <p className="text-sm text-gray-500 line-through mt-1">
+                          {task.description}
+                        </p>
+                      )}
+                    </div>
+                    {isManual && (
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          deleteTask(task.originalTask.id);
+                        }}
+                        className="text-red-500 hover:text-red-700"
+                      >
+                        <Trash2 size={18} />
+                      </button>
+                    )}
                   </div>
-                  <button
-                    onClick={() => deleteTask(task.originalTask.id)}
-                    className="text-red-500 hover:text-red-700"
-                  >
-                    <Trash2 size={18} />
-                  </button>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </div>
         )}
@@ -23938,6 +24277,230 @@ const FamilyOrganizerApp = () => {
           </div>
         );
       })()}
+      {/* Egyszerű Feladat (todo) Modal */}
+      {showTodoModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-lg shadow-xl max-w-md w-full p-6 max-h-[90vh] overflow-y-auto">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-xl font-bold text-gray-800">
+                {editingItem ? "Feladat szerkesztése" : "Új feladat"}
+              </h3>
+              <button
+                onClick={() => {
+                  setShowTodoModal(false);
+                  setEditingItem(null);
+                  setFormData({});
+                }}
+                className="text-gray-500 hover:text-gray-700"
+              >
+                <X size={24} />
+              </button>
+            </div>
+            <div className="space-y-3">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Feladat megnevezése *
+                </label>
+                <input
+                  type="text"
+                  value={formData.title || ""}
+                  onChange={(e) =>
+                    setFormData({ ...formData, title: e.target.value })
+                  }
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                  placeholder="pl. Kdobni a szemetet, felhívni a szerelőt"
+                  autoFocus
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Megjegyzés
+                </label>
+                <textarea
+                  rows="3"
+                  value={formData.description || ""}
+                  onChange={(e) =>
+                    setFormData({ ...formData, description: e.target.value })
+                  }
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                  placeholder="Részletek, ami eszedbe jut..."
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Határidő (opcionális)
+                  </label>
+                  <input
+                    type="date"
+                    value={formData.dueDate || ""}
+                    onChange={(e) =>
+                      setFormData({ ...formData, dueDate: e.target.value })
+                    }
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+                  />
+                  <p className="text-xs text-gray-500 mt-1">
+                    Ha üresen hagyod, a feladat addig látszik, amíg el nem
+                    készül.
+                  </p>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Prioritás
+                  </label>
+                  <select
+                    value={formData.priority || "normal"}
+                    onChange={(e) =>
+                      setFormData({ ...formData, priority: e.target.value })
+                    }
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+                  >
+                    <option value="low">Alacsony</option>
+                    <option value="normal">Normál</option>
+                    <option value="high">Magas</option>
+                  </select>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Kategória
+                </label>
+                <select
+                  value={formData.category || "egyéb"}
+                  onChange={(e) =>
+                    setFormData({ ...formData, category: e.target.value })
+                  }
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+                >
+                  <option value="otthon">Otthon</option>
+                  <option value="jármű">Jármű</option>
+                  <option value="egészség">Egészség</option>
+                  <option value="munka">Munka</option>
+                  <option value="iskola">Iskola</option>
+                  <option value="szabadidő">Szabadidő</option>
+                  <option value="egyéb">Egyéb</option>
+                </select>
+              </div>
+
+              {/* Kit érint */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Kit érint
+                </label>
+                <div className="border border-gray-300 rounded-lg p-2 space-y-2">
+                  <label className="flex items-center gap-2 cursor-pointer bg-indigo-50 px-2 py-1 rounded">
+                    <input
+                      type="checkbox"
+                      checked={!!formData.assignedToAll}
+                      onChange={(e) =>
+                        setFormData({
+                          ...formData,
+                          assignedToAll: e.target.checked,
+                          assignedMembers: e.target.checked
+                            ? []
+                            : formData.assignedMembers || [],
+                        })
+                      }
+                      className="w-4 h-4"
+                    />
+                    <Users size={16} className="text-indigo-600" />
+                    <span className="text-sm font-medium">Mindenki</span>
+                  </label>
+                  {!formData.assignedToAll && (
+                    <div className="flex flex-wrap gap-1">
+                      {(data.familyMembers || []).length === 0 ? (
+                        <p className="text-xs text-gray-500">
+                          Vegyél fel családtagokat a Család modulban.
+                        </p>
+                      ) : (
+                        (data.familyMembers || []).map((m) => {
+                          const selected = (
+                            formData.assignedMembers || []
+                          ).includes(m.id);
+                          const color = getMemberColor(m);
+                          return (
+                            <button
+                              key={m.id}
+                              onClick={() => {
+                                const cur = formData.assignedMembers || [];
+                                const next = selected
+                                  ? cur.filter((x) => x !== m.id)
+                                  : [...cur, m.id];
+                                setFormData({
+                                  ...formData,
+                                  assignedMembers: next,
+                                });
+                              }}
+                              className={`px-2 py-1 rounded text-xs flex items-center gap-1 border ${
+                                selected
+                                  ? `${color.bg} text-white ${color.border}`
+                                  : "bg-white text-gray-700 border-gray-300"
+                              }`}
+                            >
+                              <span
+                                className="inline-block w-2 h-2 rounded-full"
+                                style={{ backgroundColor: color.hex }}
+                              />
+                              {m.name}
+                            </button>
+                          );
+                        })
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+            <div className="mt-6 flex gap-3">
+              {editingItem && (
+                <button
+                  onClick={async () => {
+                    if (
+                      window.confirm(
+                        `Biztosan törlöd a(z) "${editingItem.title}" feladatot?`
+                      )
+                    ) {
+                      const newData = {
+                        ...data,
+                        tasks: data.tasks.filter(
+                          (t) => t.id !== editingItem.id
+                        ),
+                      };
+                      setData(newData);
+                      await saveUserData(newData);
+                      setShowTodoModal(false);
+                      setEditingItem(null);
+                      setFormData({});
+                    }
+                  }}
+                  className="px-4 py-3 bg-red-600 text-white rounded-lg hover:bg-red-700"
+                >
+                  <Trash2 size={18} />
+                </button>
+              )}
+              <button
+                onClick={() => {
+                  setShowTodoModal(false);
+                  setEditingItem(null);
+                  setFormData({});
+                }}
+                className="flex-1 px-4 py-3 border border-gray-300 rounded-lg hover:bg-gray-50"
+              >
+                Mégse
+              </button>
+              <button
+                onClick={saveTodo}
+                className="flex-1 px-4 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+              >
+                {editingItem ? "Módosítás" : "Létrehozás"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       {/* Member Modal */}
       {showMemberModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50 overflow-y-auto">
