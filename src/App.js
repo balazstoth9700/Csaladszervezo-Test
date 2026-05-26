@@ -15672,7 +15672,7 @@ const FamilyOrganizerApp = () => {
       { id: "finanszirozas", name: "Finanszírozás", icon: Wallet },
       { id: "idovonal", name: "Idővonal", icon: Calendar },
       { id: "koltsegvetes", name: "Költségvetés", icon: DollarSign },
-      { id: "szobak", name: "Szobák & Berendezés", icon: Package },
+      { id: "szobak", name: "Helyiségek, berendezés", icon: Package },
       { id: "kapcsolatok", name: "Kapcsolatok", icon: Users },
       { id: "dokumentumok", name: "Dokumentumok", icon: Upload },
     ];
@@ -16887,7 +16887,7 @@ const FamilyOrganizerApp = () => {
           <div className="bg-white border border-gray-200 rounded-lg">
             <div className="p-3 border-b border-gray-200 flex justify-between items-center">
               <h3 className="font-semibold text-gray-800 flex items-center gap-2">
-                <Package size={18} /> Berendezés és szobák összegzése
+                <Package size={18} /> Berendezés és helyiségek összegzése
               </h3>
               <div className="text-sm text-gray-600">
                 Tervezett: <b>{furniturePlanned.toLocaleString()} Ft</b> •
@@ -16901,7 +16901,7 @@ const FamilyOrganizerApp = () => {
               <table className="w-full text-sm">
                 <thead className="bg-gray-50">
                   <tr>
-                    <th className="text-left p-2">Szoba</th>
+                    <th className="text-left p-2">Helyiség</th>
                     <th className="text-right p-2">Tételek</th>
                     <th className="text-right p-2">Kész</th>
                     <th className="text-right p-2">Tervezett</th>
@@ -16943,7 +16943,7 @@ const FamilyOrganizerApp = () => {
                   {unassigned.length > 0 && (
                     <tr className="border-t bg-yellow-50">
                       <td className="p-2 font-medium italic text-gray-600">
-                        Szoba nélküli tételek
+                        Helyiség nélküli tételek
                       </td>
                       <td className="p-2 text-right">{unassigned.length}</td>
                       <td className="p-2 text-right">—</td>
@@ -16993,7 +16993,7 @@ const FamilyOrganizerApp = () => {
               </table>
             </div>
             <p className="text-xs text-gray-500 p-2">
-              A szobák és berendezés tételeket a "Szobák & Berendezés" fülön
+              A helyiségek és berendezés tételeket a "Helyiségek, berendezés" fülön
               tudod szerkeszteni.
             </p>
           </div>
@@ -17241,7 +17241,7 @@ const FamilyOrganizerApp = () => {
         )}
 
         <div className="flex justify-between items-center">
-          <h3 className="font-semibold text-gray-800">Szobák</h3>
+          <h3 className="font-semibold text-gray-800">Helyiségek</h3>
           <button
             onClick={() => {
               setEditingHazRoom(null);
@@ -17251,14 +17251,15 @@ const FamilyOrganizerApp = () => {
             className="px-3 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 text-sm flex items-center gap-1"
           >
             <Plus size={16} />
-            Új szoba
+            Új helyiség
           </button>
         </div>
 
         {rooms.length === 0 ? (
           <div className="text-center py-6 text-gray-500 border-2 border-dashed border-gray-300 rounded-lg">
-            Még nincs szoba. Hozz létre szobákat, hogy a berendezést és
-            felújítást szobánként követhesd.
+            Még nincs helyiség. Hozz létre helyiségeket (szoba, terasz, udvar,
+            garázs, stb.), hogy a berendezést és felújítást helyiségenként
+            követhesd.
           </div>
         ) : (
           <div className="grid gap-3 md:grid-cols-2">
@@ -17315,9 +17316,14 @@ const FamilyOrganizerApp = () => {
                     </div>
                   </div>
                   <div className="text-xs text-gray-600 mb-2">
-                    {roomItems.length} tétel ({completed} kész) •{" "}
-                    {totalActual.toLocaleString()} /{" "}
-                    {totalPlanned.toLocaleString()} Ft
+                    {roomItems.length} tétel ({completed} kész) • Terv:{" "}
+                    <span className="font-medium">
+                      {totalPlanned.toLocaleString()} Ft
+                    </span>{" "}
+                    • Tény:{" "}
+                    <span className="font-medium text-gray-800">
+                      {totalActual.toLocaleString()} Ft
+                    </span>
                   </div>
                   <div className="space-y-1 max-h-40 overflow-y-auto">
                     {roomItems.map((f) => (
@@ -17332,10 +17338,15 @@ const FamilyOrganizerApp = () => {
                           </div>
                         </div>
                         <div className="text-right text-xs">
-                          <div>
+                          <div className="text-gray-500">
+                            Terv:{" "}
+                            {(parseFloat(f.plannedPrice) || 0).toLocaleString()} Ft
+                          </div>
+                          <div className="font-medium text-gray-800">
+                            Tény:{" "}
                             {(parseFloat(f.actualPrice) || 0).toLocaleString()} Ft
                           </div>
-                          <div className="flex gap-1 mt-1">
+                          <div className="flex gap-1 mt-1 justify-end">
                             <button
                               onClick={() => {
                                 setEditingHazFurniture(f);
@@ -34191,13 +34202,13 @@ const FamilyOrganizerApp = () => {
         </div>
       )}
 
-      {/* Szoba modal */}
+      {/* Helyiség modal */}
       {showHazRoomModal && selectedHazvasarlasProject && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50 overflow-y-auto">
           <div className="bg-white rounded-lg shadow-xl max-w-md w-full p-6 my-8 max-h-[90vh] overflow-y-auto">
             <div className="flex justify-between items-center mb-4">
               <h3 className="text-xl font-bold text-gray-800">
-                {editingHazRoom ? "Szoba szerkesztése" : "Új szoba"}
+                {editingHazRoom ? "Helyiség szerkesztése" : "Új helyiség"}
               </h3>
               <button
                 onClick={() => setShowHazRoomModal(false)}
@@ -34209,7 +34220,7 @@ const FamilyOrganizerApp = () => {
             <div className="space-y-3">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Szoba neve *
+                  Helyiség neve *
                 </label>
                 <input
                   type="text"
@@ -34218,7 +34229,7 @@ const FamilyOrganizerApp = () => {
                     setFormData({ ...formData, name: e.target.value })
                   }
                   className="w-full px-4 py-2 border border-gray-300 rounded-lg"
-                  placeholder="pl. Nappali, Hálószoba, Konyha"
+                  placeholder="pl. Nappali, Konyha, Terasz, Garázs, Udvar"
                 />
               </div>
               <div>
@@ -34259,7 +34270,7 @@ const FamilyOrganizerApp = () => {
               <button
                 onClick={async () => {
                   if (!formData.name) {
-                    alert("Szoba neve kötelező!");
+                    alert("Helyiség neve kötelező!");
                     return;
                   }
                   await updateHazvasarlasProject(
@@ -34311,7 +34322,7 @@ const FamilyOrganizerApp = () => {
             <div className="space-y-3">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Szoba
+                  Helyiség
                 </label>
                 <select
                   value={formData.roomId || ""}
