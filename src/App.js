@@ -101,10 +101,22 @@ const firebaseConfig = {
 
 // Ellenőrizzük, hogy a Firebase app már inicializálva van-e
 import { getApps } from "firebase/app";
+import {
+  getMessaging,
+  getToken,
+  onMessage,
+  isSupported as isMessagingSupported,
+} from "firebase/messaging";
 const app =
   getApps().length === 0 ? initializeApp(firebaseConfig) : getApps()[0];
 const auth = getAuth(app);
 const db = getFirestore(app);
+
+// Web Push (FCM) VAPID kulcs — a Firebase Console → Projekt beállítások →
+// Cloud Messaging → "Web Push tanúsítványok" résznél generálható.
+// Állítsd be REACT_APP_FIREBASE_VAPID_KEY környezeti változóként a Netlify-on.
+const FIREBASE_VAPID_KEY = process.env.REACT_APP_FIREBASE_VAPID_KEY || "";
+
 
 const getDefaultData = () => ({
   homes: [],
@@ -653,6 +665,7 @@ const FamilyOrganizerApp = () => {
   const [showTodoModal, setShowTodoModal] = useState(false);
   const [filterStatus, setFilterStatus] = useState("active");
   const [filterTaskType, setFilterTaskType] = useState("all");
+  const [pushEnabled, setPushEnabled] = useState(false);
 
   const [showInstallPrompt, setShowInstallPrompt] = useState(false);
 
@@ -1145,6 +1158,59 @@ const FamilyOrganizerApp = () => {
       fetchPendingInvitations();
     }
   }, [currentUser, data.familyId, data.members]);
+
+  // Push állapot betöltése + token frissítése bejelentkezéskor
+  useEffect(() => {
+    if (!currentUser) return;
+    (async () => {
+      try {
+        const userSnap = await getDoc(doc(db, "users", currentUser.uid));
+        const ud = userSnap.exists() ? userSnap.data() : {};
+        const enabled =
+          ud.pushEnabled === true &&
+          Array.isArray(ud.fcmTokens) &&
+          ud.fcmTokens.length > 0;
+        setPushEnabled(!!enabled);
+        // Ha engedélyezve van és az engedély megvan, frissítjük a tokent csendben
+        if (
+          enabled &&
+          typeof Notification !== "undefined" &&
+          Notification.permission === "granted" &&
+          FIREBASE_VAPID_KEY
+        ) {
+          const supported = await isMessagingSupported().catch(() => false);
+          if (supported && "serviceWorker" in navigator) {
+            const swReg = await navigator.serviceWorker.register(
+              "/firebase-messaging-sw.js"
+            );
+            const messaging = getMessaging(app);
+            const token = await getToken(messaging, {
+              vapidKey: FIREBASE_VAPID_KEY,
+              serviceWorkerRegistration: swReg,
+            }).catch(() => null);
+            if (token && !ud.fcmTokens.includes(token)) {
+              await setDoc(
+                doc(db, "users", currentUser.uid),
+                { fcmTokens: [...ud.fcmTokens, token] },
+                { merge: true }
+              );
+            }
+            // Előtérbeli üzenetek
+            onMessage(messaging, (payload) => {
+              const t = payload.notification?.title || payload.data?.title;
+              const b = payload.notification?.body || payload.data?.body || "";
+              if (t && Notification.permission === "granted") {
+                new Notification(t, { body: b, icon: "/favicon.ico" });
+              }
+            });
+          }
+        }
+      } catch (e) {
+        console.warn("Push állapot betöltési hiba:", e);
+      }
+    })();
+    // eslint-disable-line
+  }, [currentUser]);
 
   const handlePasswordReset = async () => {
     if (!resetEmail) {
@@ -3047,6 +3113,16 @@ const FamilyOrganizerApp = () => {
     }
     setData(newData);
     await saveUserData(newData);
+    if (!editingItem) {
+      const whenStr = newTask.dueDate
+        ? ` (${new Date(newTask.dueDate).toLocaleDateString("hu-HU")}${newTask.time ? " " + newTask.time : ""})`
+        : "";
+      sendFamilyPush(
+        "Új esemény a naptárban",
+        `${settings.nickname || currentUser?.email || "Valaki"}: ${newTask.title}${whenStr}`,
+        "/"
+      );
+    }
     setShowTaskModal(false);
     setFormData({});
     setEditingItem(null);
@@ -3099,6 +3175,13 @@ const FamilyOrganizerApp = () => {
     }
     setData(newData);
     await saveUserData(newData);
+    if (!editingItem) {
+      sendFamilyPush(
+        "Új feladat",
+        `${settings.nickname || currentUser?.email || "Valaki"}: ${newTodo.title}`,
+        "/"
+      );
+    }
     setShowTodoModal(false);
     setFormData({});
     setEditingItem(null);
@@ -7882,6 +7965,13 @@ const FamilyOrganizerApp = () => {
 
     setData(newData);
     await saveUserData(newData);
+    if (!editingItem) {
+      sendFamilyPush(
+        "Új tétel a bevásárlólistán",
+        `${settings.nickname || currentUser?.email || "Valaki"}: ${formData.name}`,
+        "/"
+      );
+    }
     setShowShoppingItemModal(false);
     setFormData({});
     setNewStoreModalName("");
@@ -8090,6 +8180,121 @@ const FamilyOrganizerApp = () => {
 
   // Netlify Functions URL-ek
   const NETLIFY_FUNCTIONS_URL = process.env.REACT_APP_NETLIFY_URL || "";
+
+  // === PUSH ÉRTESÍTÉSEK (FCM) ===
+  // Push engedélyezése: engedélykérés, FCM token lekérése és tárolása.
+  const enablePushNotifications = async () => {
+    try {
+      const supported = await isMessagingSupported();
+      if (!supported || !("Notification" in window)) {
+        alert(
+          "Ez a böngésző nem támogatja a push értesítéseket.\n\n" +
+            "iPhone-on: add hozzá az appot a kezdőképernyőhöz (Megosztás → Főképernyőhöz adás), és onnan nyisd meg."
+        );
+        return false;
+      }
+      if (!FIREBASE_VAPID_KEY) {
+        alert(
+          "A push értesítések még nincsenek konfigurálva (hiányzik a VAPID kulcs).\n\n" +
+            "A fejlesztőnek be kell állítania a REACT_APP_FIREBASE_VAPID_KEY környezeti változót."
+        );
+        return false;
+      }
+
+      const permission = await Notification.requestPermission();
+      if (permission !== "granted") {
+        alert("Az értesítések engedélyezése nélkül nem tudunk push üzenetet küldeni.");
+        return false;
+      }
+
+      // Service worker regisztráció
+      let swReg = null;
+      if ("serviceWorker" in navigator) {
+        swReg = await navigator.serviceWorker.register(
+          "/firebase-messaging-sw.js"
+        );
+      }
+
+      const messaging = getMessaging(app);
+      const token = await getToken(messaging, {
+        vapidKey: FIREBASE_VAPID_KEY,
+        serviceWorkerRegistration: swReg || undefined,
+      });
+
+      if (!token) {
+        alert("Nem sikerült push tokent szerezni. Próbáld újra.");
+        return false;
+      }
+
+      // Token tárolása a user dokumentumban (több eszköz támogatása)
+      const userDocRef = doc(db, "users", currentUser.uid);
+      const userSnap = await getDoc(userDocRef);
+      const ud = userSnap.exists() ? userSnap.data() : {};
+      const existingTokens = Array.isArray(ud.fcmTokens) ? ud.fcmTokens : [];
+      const tokens = existingTokens.includes(token)
+        ? existingTokens
+        : [...existingTokens, token];
+
+      await setDoc(
+        userDocRef,
+        { fcmTokens: tokens, pushEnabled: true },
+        { merge: true }
+      );
+
+      setPushEnabled(true);
+      setSettings((prev) => ({ ...prev, pushEnabled: true }));
+
+      // Előtérbeli üzenetek kezelése
+      onMessage(messaging, (payload) => {
+        const t = payload.notification?.title || payload.data?.title;
+        const b = payload.notification?.body || payload.data?.body || "";
+        if (t && Notification.permission === "granted") {
+          new Notification(t, { body: b, icon: "/favicon.ico" });
+        }
+      });
+
+      alert("✓ Push értesítések bekapcsolva ezen az eszközön!");
+      return true;
+    } catch (error) {
+      console.error("Push engedélyezési hiba:", error);
+      alert("Hiba történt a push értesítések bekapcsolásakor: " + (error.message || ""));
+      return false;
+    }
+  };
+
+  const disablePushNotifications = async () => {
+    try {
+      const userDocRef = doc(db, "users", currentUser.uid);
+      await setDoc(userDocRef, { pushEnabled: false }, { merge: true });
+      setPushEnabled(false);
+      setSettings((prev) => ({ ...prev, pushEnabled: false }));
+      alert("Push értesítések kikapcsolva. (Más eszközeiden külön kell kikapcsolnod.)");
+    } catch (error) {
+      console.error("Push kikapcsolási hiba:", error);
+    }
+  };
+
+  // Push küldése a család többi tagjának
+  const sendFamilyPush = async (title, body, url = "/") => {
+    if (!data.familyId || !currentUser) return;
+    try {
+      await fetch(`${NETLIFY_FUNCTIONS_URL}/.netlify/functions/send-push`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          familyId: data.familyId,
+          excludeUserId: currentUser.uid,
+          title,
+          body,
+          url,
+        }),
+      });
+    } catch (error) {
+      // A push hibája ne blokkolja a fő műveletet
+      console.warn("Push küldési hiba:", error);
+    }
+  };
+
 
   // Fiókok betöltése
   useEffect(() => {
@@ -21991,6 +22196,55 @@ const FamilyOrganizerApp = () => {
         </div>
 
         <div className="space-y-4">
+          {/* Telefonos push értesítések */}
+          <div className="bg-indigo-50 border border-indigo-200 rounded-lg p-4">
+            <div className="flex items-start justify-between gap-3">
+              <div className="flex-1">
+                <span className="text-gray-800 font-medium flex items-center gap-2">
+                  📱 Telefonos push értesítések
+                </span>
+                <p className="text-sm text-gray-600 mt-1">
+                  Értesítést kapsz ezen az eszközön, ha egy családtag új tételt
+                  ad a bevásárlólistához, vagy új feladatot / eseményt rögzít —
+                  akkor is, ha az app nincs megnyitva.
+                </p>
+                {!data.familyId && (
+                  <p className="text-xs text-orange-600 mt-1">
+                    A push értesítések családtagok közötti üzenetekhez
+                    használhatók — előbb hozz létre vagy csatlakozz egy
+                    családhoz.
+                  </p>
+                )}
+                <p className="text-xs text-gray-500 mt-1">
+                  iPhone-on: add hozzá az appot a kezdőképernyőhöz, és onnan
+                  nyisd meg (iOS 16.4+).
+                </p>
+              </div>
+              <div>
+                {pushEnabled ? (
+                  <button
+                    onClick={disablePushNotifications}
+                    className="px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 text-sm font-medium whitespace-nowrap"
+                  >
+                    Kikapcsolás
+                  </button>
+                ) : (
+                  <button
+                    onClick={enablePushNotifications}
+                    className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 text-sm font-medium whitespace-nowrap"
+                  >
+                    Bekapcsolás
+                  </button>
+                )}
+              </div>
+            </div>
+            {pushEnabled && (
+              <p className="text-xs text-green-600 mt-2">
+                ✓ Push értesítések aktívak ezen az eszközön.
+              </p>
+            )}
+          </div>
+
           <label className="flex items-center justify-between cursor-pointer">
             <div>
               <span className="text-gray-700 font-medium">
