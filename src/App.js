@@ -7,6 +7,8 @@ import {
   signOut,
   onAuthStateChanged,
   sendPasswordResetEmail,
+  GoogleAuthProvider,
+  signInWithPopup,
 } from "firebase/auth";
 import {
   getFirestore,
@@ -115,7 +117,9 @@ const db = getFirestore(app);
 // Web Push (FCM) VAPID kulcs — a Firebase Console → Projekt beállítások →
 // Cloud Messaging → "Web Push tanúsítványok" résznél generálható.
 // Állítsd be REACT_APP_FIREBASE_VAPID_KEY környezeti változóként a Netlify-on.
-const FIREBASE_VAPID_KEY = process.env.REACT_APP_FIREBASE_VAPID_KEY || "";
+const FIREBASE_VAPID_KEY = (process.env.REACT_APP_FIREBASE_VAPID_KEY || "")
+  .trim()
+  .replace(/^["']|["']$/g, ""); // idézőjelek + whitespace eltávolítása
 
 
 const getDefaultData = () => ({
@@ -2637,6 +2641,41 @@ const FamilyOrganizerApp = () => {
     }
   };
 
+  const handleGoogleSignIn = async () => {
+    setAuthError("");
+    try {
+      const provider = new GoogleAuthProvider();
+      provider.setCustomParameters({ prompt: "select_account" });
+      await signInWithPopup(auth, provider);
+      // onAuthStateChanged kezeli a user betöltést
+    } catch (error) {
+      console.error("Google bejelentkezési hiba:", error);
+      if (error.code === "auth/popup-closed-by-user") {
+        // Felhasználó bezárta a popupot, nem hiba
+        return;
+      }
+      if (error.code === "auth/popup-blocked") {
+        setAuthError(
+          "A böngésző blokkolta a felugró ablakot. Engedélyezd a popupokat erre az oldalra."
+        );
+      } else if (error.code === "auth/operation-not-allowed") {
+        setAuthError(
+          "A Google bejelentkezés nincs engedélyezve. A fejlesztőnek be kell kapcsolnia a Firebase Console-ban (Authentication → Sign-in method → Google)."
+        );
+      } else if (
+        error.code === "auth/account-exists-with-different-credential"
+      ) {
+        setAuthError(
+          "Ezzel az email címmel már létezik fiók más bejelentkezési móddal (pl. jelszóval). Jelentkezz be úgy, majd a beállításokban kapcsolhatod a Google fiókot."
+        );
+      } else {
+        setAuthError(
+          "Google bejelentkezési hiba: " + (error.message || error.code)
+        );
+      }
+    }
+  };
+
   const handleLogout = async () => {
     try {
       await signOut(auth);
@@ -3070,12 +3109,21 @@ const FamilyOrganizerApp = () => {
   };
 
   const deleteTask = async (taskId) => {
+    const taskToDelete = data.tasks.find((t) => t.id === taskId);
     const newData = {
       ...data,
       tasks: data.tasks.filter((t) => t.id !== taskId),
     };
     setData(newData);
     await saveUserData(newData);
+    // Töröljük a Google Calendar oldalon is, ha szinkronizált
+    try {
+      if (taskToDelete && taskToDelete.googleEventMap) {
+        await pushAppEventToGoogle("delete", taskToDelete);
+      }
+    } catch (e) {
+      console.warn("Google delete sync hiba:", e);
+    }
   };
 
   const addTask = async () => {
@@ -3127,6 +3175,24 @@ const FamilyOrganizerApp = () => {
     }
     setData(newData);
     await saveUserData(newData);
+
+    // Google Calendar kétirányú szinkron
+    try {
+      if (editingItem) {
+        const results = await pushAppEventToGoogle("update", newTask, editingItem);
+        if (results && results.length > 0) {
+          await updateTaskGoogleMap(newTask.id, results);
+        }
+      } else {
+        const results = await pushAppEventToGoogle("create", newTask);
+        if (results && results.length > 0) {
+          await updateTaskGoogleMap(newTask.id, results);
+        }
+      }
+    } catch (e) {
+      console.warn("Google Calendar sync hiba:", e);
+    }
+
     if (!editingItem) {
       const whenStr = newTask.dueDate
         ? ` (${new Date(newTask.dueDate).toLocaleDateString("hu-HU")}${newTask.time ? " " + newTask.time : ""})`
@@ -8215,6 +8281,27 @@ const FamilyOrganizerApp = () => {
         return false;
       }
 
+      // VAPID kulcs gyors formátum-ellenőrzés:
+      // - csak base64url karakterek (A-Z, a-z, 0-9, -, _)
+      // - tipikusan 87 karakter (P-256 publikus kulcs, base64url, padding nélkül)
+      if (!/^[A-Za-z0-9_-]+$/.test(FIREBASE_VAPID_KEY)) {
+        alert(
+          "A VAPID kulcs érvénytelen karaktereket tartalmaz.\n\n" +
+            "Csak base64url karakterek lehetnek benne (A-Z, a-z, 0-9, _, -). " +
+            "Tipikusan 87 karakter hosszú, padding (=) nélkül.\n\n" +
+            "A Netlify env változóban ne legyenek idézőjelek vagy szóköz a kulcs körül.\n\n" +
+            `Jelenlegi hossz: ${FIREBASE_VAPID_KEY.length} karakter, első 8 karakter: "${FIREBASE_VAPID_KEY.substring(0, 8)}..."`
+        );
+        return false;
+      }
+      if (FIREBASE_VAPID_KEY.length < 80 || FIREBASE_VAPID_KEY.length > 100) {
+        const ok = window.confirm(
+          `Figyelmeztetés: a VAPID kulcs hossza (${FIREBASE_VAPID_KEY.length} karakter) szokatlan. ` +
+            `A Firebase által generált kulcs általában 87 karakter.\n\nFolytatod?`
+        );
+        if (!ok) return false;
+      }
+
       const permission = await Notification.requestPermission();
       if (permission !== "granted") {
         alert("Az értesítések engedélyezése nélkül nem tudunk push üzenetet küldeni.");
@@ -8271,7 +8358,21 @@ const FamilyOrganizerApp = () => {
       return true;
     } catch (error) {
       console.error("Push engedélyezési hiba:", error);
-      alert("Hiba történt a push értesítések bekapcsolásakor: " + (error.message || ""));
+      const msg = String(error.message || "");
+      if (msg.includes("P-256") || msg.includes("applicationServerKey")) {
+        alert(
+          "A VAPID kulcs érvénytelen — a böngésző nem fogadta el publikus P-256 kulcsként.\n\n" +
+            "Ellenőrizd a Netlify-on a REACT_APP_FIREBASE_VAPID_KEY változót:\n" +
+            "• ne legyen körülötte idézőjel\n" +
+            "• ne legyen szóköz vagy újsor a végén\n" +
+            "• a Firebase Console-ról másold újra: Projekt beállítások → Cloud Messaging → Web Push tanúsítványok → Kulcspár → másold a Public Key-t\n" +
+            "• majd új deploy a Netlify-on (Deploys → Trigger deploy)\n\n" +
+            `Hossz most: ${FIREBASE_VAPID_KEY.length} karakter (várt: ~87)\n` +
+            `Eredeti hiba: ${msg}`
+        );
+      } else {
+        alert("Hiba történt a push értesítések bekapcsolásakor: " + msg);
+      }
       return false;
     }
   };
@@ -8307,6 +8408,82 @@ const FamilyOrganizerApp = () => {
       // A push hibája ne blokkolja a fő műveletet
       console.warn("Push küldési hiba:", error);
     }
+  };
+
+  // === GOOGLE CALENDAR KÉT-IRÁNYÚ SZINKRON ===
+  // Esemény mentése / módosítása / törlése a Google Calendar-on. A
+  // szinkronizációhoz az aktív Google Calendar fiókok közül a kétirányúra
+  // beállítottakat használjuk.
+  const getActiveCalendarTargets = () => {
+    return (googleCalendarAccounts || []).filter(
+      (acc) =>
+        acc.connected &&
+        acc.syncEnabled &&
+        (acc.service === "calendar" || !acc.service) &&
+        acc.writeEnabled !== false // alapból true, kapcsolható
+    );
+  };
+
+  const pushAppEventToGoogle = async (action, task, prevTask = null) => {
+    if (!currentUser) return null;
+    const targets = getActiveCalendarTargets();
+    if (targets.length === 0) return null;
+
+    // Csak ha az esemény (taskKind=event vagy nincs kind a régiekhez) — todo
+    // határidő nélkül nem megy Google-be, mert ott nincs date-less esemény
+    if (task && task.taskKind === "todo" && !task.dueDate) return null;
+    if (task && !task.dueDate && action !== "delete") return null;
+
+    const results = [];
+    for (const acc of targets) {
+      try {
+        const body = {
+          userId: currentUser.uid,
+          email: acc.email,
+          action,
+          appEvent: task,
+          googleEventId:
+            action === "create"
+              ? null
+              : task?.googleEventMap?.[acc.email] ||
+                prevTask?.googleEventMap?.[acc.email] ||
+                null,
+        };
+        const res = await fetch(
+          `${NETLIFY_FUNCTIONS_URL}/.netlify/functions/push-google-calendar-event`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(body),
+          }
+        );
+        const json = await res.json();
+        if (!res.ok) {
+          console.warn("Google sync hiba:", acc.email, json.error);
+          continue;
+        }
+        results.push({ email: acc.email, googleEventId: json.googleEventId });
+      } catch (e) {
+        console.warn("Google sync hiba:", acc.email, e.message);
+      }
+    }
+    return results;
+  };
+
+  // Hozzáadja / frissíti / törli a googleEventMap mezőt az adott feladaton
+  const updateTaskGoogleMap = async (taskId, results) => {
+    if (!results || results.length === 0) return;
+    const newData = { ...data };
+    newData.tasks = (newData.tasks || []).map((t) => {
+      if (t.id !== taskId) return t;
+      const map = { ...(t.googleEventMap || {}) };
+      results.forEach((r) => {
+        if (r.googleEventId) map[r.email] = r.googleEventId;
+      });
+      return { ...t, googleEventMap: map };
+    });
+    setData(newData);
+    await saveUserData(newData);
   };
 
 
@@ -22459,6 +22636,29 @@ const FamilyOrganizerApp = () => {
                           {new Date(account.lastSync).toLocaleString("hu-HU")}
                         </p>
                       )}
+                      {account.service === "calendar" && account.syncEnabled && (
+                        <label className="flex items-center gap-2 mt-2 cursor-pointer text-sm text-gray-700">
+                          <input
+                            type="checkbox"
+                            checked={account.writeEnabled !== false}
+                            onChange={async (e) => {
+                              const updated = googleCalendarAccounts.map((a) =>
+                                a.email === account.email
+                                  ? { ...a, writeEnabled: e.target.checked }
+                                  : a
+                              );
+                              setGoogleCalendarAccounts(updated);
+                              await updateSettings({
+                                ...settings,
+                                googleCalendarAccounts: updated,
+                              });
+                            }}
+                            className="w-4 h-4 text-blue-600 rounded"
+                          />
+                          ↔ Visszaírás Google Calendarba (az appban létrehozott
+                          események megjelennek Google oldalon)
+                        </label>
+                      )}
                     </div>
                     <div className="flex gap-2">
                       <button
@@ -23613,6 +23813,39 @@ const FamilyOrganizerApp = () => {
                   className="w-full bg-blue-600 text-white py-3 rounded-lg font-medium hover:bg-blue-700 transition"
                 >
                   {isRegister ? "Regisztráció" : "Bejelentkezés"}
+                </button>
+
+                <div className="flex items-center gap-3 my-4">
+                  <div className="flex-1 h-px bg-gray-200" />
+                  <span className="text-xs text-gray-500 uppercase tracking-wide">
+                    vagy
+                  </span>
+                  <div className="flex-1 h-px bg-gray-200" />
+                </div>
+
+                <button
+                  onClick={handleGoogleSignIn}
+                  className="w-full bg-white border border-gray-300 text-gray-700 py-3 rounded-lg font-medium hover:bg-gray-50 transition flex items-center justify-center gap-3"
+                >
+                  <svg width="20" height="20" viewBox="0 0 48 48">
+                    <path
+                      fill="#FFC107"
+                      d="M43.611 20.083H42V20H24v8h11.303c-1.649 4.657-6.08 8-11.303 8-6.627 0-12-5.373-12-12s5.373-12 12-12c3.059 0 5.842 1.154 7.961 3.039l5.657-5.657C34.046 6.053 29.268 4 24 4 12.955 4 4 12.955 4 24s8.955 20 20 20 20-8.955 20-20c0-1.341-.138-2.65-.389-3.917z"
+                    />
+                    <path
+                      fill="#FF3D00"
+                      d="M6.306 14.691l6.571 4.819C14.655 15.108 18.961 12 24 12c3.059 0 5.842 1.154 7.961 3.039l5.657-5.657C34.046 6.053 29.268 4 24 4 16.318 4 9.656 8.337 6.306 14.691z"
+                    />
+                    <path
+                      fill="#4CAF50"
+                      d="M24 44c5.166 0 9.86-1.977 13.409-5.192l-6.19-5.238A11.91 11.91 0 0124 36c-5.202 0-9.619-3.317-11.283-7.946l-6.522 5.025C9.505 39.556 16.227 44 24 44z"
+                    />
+                    <path
+                      fill="#1976D2"
+                      d="M43.611 20.083H42V20H24v8h11.303a12.04 12.04 0 01-4.087 5.571l.003-.002 6.19 5.238C36.971 39.205 44 34 44 24c0-1.341-.138-2.65-.389-3.917z"
+                    />
+                  </svg>
+                  Bejelentkezés Google fiókkal
                 </button>
               </div>
 

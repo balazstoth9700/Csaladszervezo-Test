@@ -1,12 +1,19 @@
 const { google } = require("googleapis");
 const admin = require("firebase-admin");
 
+function getFirebasePrivateKey() {
+  const raw = process.env.FIREBASE_PRIVATE_KEY || "";
+  if (!raw) return "";
+  if (raw.includes("BEGIN PRIVATE KEY")) return raw.replace(/\\n/g, "\n");
+  return `-----BEGIN PRIVATE KEY-----\n${raw.replace(/\s/g, "")}\n-----END PRIVATE KEY-----\n`;
+}
+
 if (!admin.apps.length) {
   admin.initializeApp({
     credential: admin.credential.cert({
       projectId: process.env.FIREBASE_PROJECT_ID,
       clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
-      privateKey: process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, "\n"),
+      privateKey: getFirebasePrivateKey(),
     }),
   });
 }
