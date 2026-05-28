@@ -1,12 +1,25 @@
 const admin = require("firebase-admin");
 
-// FIREBASE_PRIVATE_KEY támogat PEM formátumot és rövidített base64-only formátumot
-// (csak a kulcs tartalma, fejlécek/újsorok nélkül — ~150 byte spórolás).
+// FIREBASE_PRIVATE_KEY robusztus parser — kezel:
+//  - eredeti PEM-et tényleges újsorokkal
+//  - PEM-et \\n escape-elt újsorokkal (Netlify alapból így tárolja)
+//  - rövidített base64-only formátumot (csak a kulcs tartalma, fejléc nélkül)
+//  - whitespace-szel teli vegyes formátumokat
+// Mindegyiket szabványos PEM formátumra alakítja.
 function getFirebasePrivateKey() {
-  const raw = process.env.FIREBASE_PRIVATE_KEY || "";
+  const raw = (process.env.FIREBASE_PRIVATE_KEY || "").trim();
   if (!raw) return "";
-  if (raw.includes("BEGIN PRIVATE KEY")) return raw.replace(/\\n/g, "\n");
-  return `-----BEGIN PRIVATE KEY-----\n${raw.replace(/\s/g, "")}\n-----END PRIVATE KEY-----\n`;
+  const cleaned = raw
+    .replace(/-----BEGIN PRIVATE KEY-----/g, "")
+    .replace(/-----END PRIVATE KEY-----/g, "")
+    .replace(/\\n/g, "")
+    .replace(/\s/g, "");
+  if (!cleaned) return "";
+  const lines = [];
+  for (let i = 0; i < cleaned.length; i += 64) {
+    lines.push(cleaned.substring(i, i + 64));
+  }
+  return `-----BEGIN PRIVATE KEY-----\n${lines.join("\n")}\n-----END PRIVATE KEY-----\n`;
 }
 
 if (!admin.apps.length) {

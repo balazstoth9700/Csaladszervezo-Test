@@ -1,10 +1,19 @@
 const admin = require("firebase-admin");
 
 function getFirebasePrivateKey() {
-  const raw = process.env.FIREBASE_PRIVATE_KEY || "";
+  const raw = (process.env.FIREBASE_PRIVATE_KEY || "").trim();
   if (!raw) return "";
-  if (raw.includes("BEGIN PRIVATE KEY")) return raw.replace(/\\n/g, "\n");
-  return `-----BEGIN PRIVATE KEY-----\n${raw.replace(/\s/g, "")}\n-----END PRIVATE KEY-----\n`;
+  const cleaned = raw
+    .replace(/-----BEGIN PRIVATE KEY-----/g, "")
+    .replace(/-----END PRIVATE KEY-----/g, "")
+    .replace(/\\n/g, "")
+    .replace(/\s/g, "");
+  if (!cleaned) return "";
+  const lines = [];
+  for (let i = 0; i < cleaned.length; i += 64) {
+    lines.push(cleaned.substring(i, i + 64));
+  }
+  return `-----BEGIN PRIVATE KEY-----\n${lines.join("\n")}\n-----END PRIVATE KEY-----\n`;
 }
 
 if (!admin.apps.length) {
