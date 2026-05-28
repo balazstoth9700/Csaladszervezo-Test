@@ -115,7 +115,9 @@ const db = getFirestore(app);
 // Web Push (FCM) VAPID kulcs — a Firebase Console → Projekt beállítások →
 // Cloud Messaging → "Web Push tanúsítványok" résznél generálható.
 // Állítsd be REACT_APP_FIREBASE_VAPID_KEY környezeti változóként a Netlify-on.
-const FIREBASE_VAPID_KEY = process.env.REACT_APP_FIREBASE_VAPID_KEY || "";
+const FIREBASE_VAPID_KEY = (process.env.REACT_APP_FIREBASE_VAPID_KEY || "")
+  .trim()
+  .replace(/^["']|["']$/g, ""); // idézőjelek + whitespace eltávolítása
 
 
 const getDefaultData = () => ({
@@ -8201,6 +8203,27 @@ const FamilyOrganizerApp = () => {
         return false;
       }
 
+      // VAPID kulcs gyors formátum-ellenőrzés:
+      // - csak base64url karakterek (A-Z, a-z, 0-9, -, _)
+      // - tipikusan 87 karakter (P-256 publikus kulcs, base64url, padding nélkül)
+      if (!/^[A-Za-z0-9_-]+$/.test(FIREBASE_VAPID_KEY)) {
+        alert(
+          "A VAPID kulcs érvénytelen karaktereket tartalmaz.\n\n" +
+            "Csak base64url karakterek lehetnek benne (A-Z, a-z, 0-9, _, -). " +
+            "Tipikusan 87 karakter hosszú, padding (=) nélkül.\n\n" +
+            "A Netlify env változóban ne legyenek idézőjelek vagy szóköz a kulcs körül.\n\n" +
+            `Jelenlegi hossz: ${FIREBASE_VAPID_KEY.length} karakter, első 8 karakter: "${FIREBASE_VAPID_KEY.substring(0, 8)}..."`
+        );
+        return false;
+      }
+      if (FIREBASE_VAPID_KEY.length < 80 || FIREBASE_VAPID_KEY.length > 100) {
+        const ok = window.confirm(
+          `Figyelmeztetés: a VAPID kulcs hossza (${FIREBASE_VAPID_KEY.length} karakter) szokatlan. ` +
+            `A Firebase által generált kulcs általában 87 karakter.\n\nFolytatod?`
+        );
+        if (!ok) return false;
+      }
+
       const permission = await Notification.requestPermission();
       if (permission !== "granted") {
         alert("Az értesítések engedélyezése nélkül nem tudunk push üzenetet küldeni.");
@@ -8257,7 +8280,21 @@ const FamilyOrganizerApp = () => {
       return true;
     } catch (error) {
       console.error("Push engedélyezési hiba:", error);
-      alert("Hiba történt a push értesítések bekapcsolásakor: " + (error.message || ""));
+      const msg = String(error.message || "");
+      if (msg.includes("P-256") || msg.includes("applicationServerKey")) {
+        alert(
+          "A VAPID kulcs érvénytelen — a böngésző nem fogadta el publikus P-256 kulcsként.\n\n" +
+            "Ellenőrizd a Netlify-on a REACT_APP_FIREBASE_VAPID_KEY változót:\n" +
+            "• ne legyen körülötte idézőjel\n" +
+            "• ne legyen szóköz vagy újsor a végén\n" +
+            "• a Firebase Console-ról másold újra: Projekt beállítások → Cloud Messaging → Web Push tanúsítványok → Kulcspár → másold a Public Key-t\n" +
+            "• majd új deploy a Netlify-on (Deploys → Trigger deploy)\n\n" +
+            `Hossz most: ${FIREBASE_VAPID_KEY.length} karakter (várt: ~87)\n` +
+            `Eredeti hiba: ${msg}`
+        );
+      } else {
+        alert("Hiba történt a push értesítések bekapcsolásakor: " + msg);
+      }
       return false;
     }
   };
